@@ -40,6 +40,40 @@ _gos_validate_version() {
   fi
 }
 
+# Guard against catastrophic rm -rf on dangerous paths.
+_gos_validate_install_dir() {
+  local dir="$1"
+  # Reject empty
+  if [ -z "$dir" ]; then
+    echo "Error: GOS_INSTALL_DIR is empty." >&2
+    return 1
+  fi
+  # Reject known system-critical roots
+  case "$dir" in
+    /|/usr|/etc|/home|/var|/bin|/sbin|/lib|/opt|/tmp|/root|/sys|/proc|/dev)
+      echo "Error: GOS_INSTALL_DIR='${dir}' is a system-critical path. Refusing." >&2
+      return 1
+      ;;
+  esac
+  # Require at least 2 path components (e.g. /usr/local/go, not /go)
+  local depth
+  depth=$(echo "$dir" | tr -cd '/' | wc -c | tr -d ' ')
+  if [ "$depth" -lt 2 ]; then
+    echo "Error: GOS_INSTALL_DIR='${dir}' is too shallow. Use a path like /usr/local/go." >&2
+    return 1
+  fi
+  # Require basename to contain "go" to prevent accidental misconfiguration
+  local base
+  base=$(basename "$dir")
+  case "$base" in
+    *go*) ;;
+    *)
+      echo "Error: GOS_INSTALL_DIR basename '${base}' does not contain 'go'. Refusing." >&2
+      return 1
+      ;;
+  esac
+}
+
 # Download a URL to a file. Supports curl and wget.
 _gos_download() {
   local url="$1" output="$2"
@@ -333,6 +367,8 @@ EOF
 # ─── Entrypoint ───────────────────────────────────────────────────────────────
 
 main() {
+  _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+
   local cmd="${1:-help}"
   shift || true
 
