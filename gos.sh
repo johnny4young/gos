@@ -179,11 +179,10 @@ _gos_remove_old() {
     return 0
   fi
 
-  if [ "$(_gos_os)" = "windows" ]; then
-    cmd.exe /c "rmdir /s /q $(cygpath -w "$GOS_INSTALL_DIR")" 2>/dev/null || rm -rf "$GOS_INSTALL_DIR"
-  else
-    _gos_sudo rm -rf "$GOS_INSTALL_DIR"
-  fi
+  # Use rm -rf on all platforms. On Windows this script runs inside
+  # Git Bash/MSYS2/Cygwin where rm -rf works natively, avoiding the
+  # command injection risk of passing paths through cmd.exe.
+  _gos_sudo rm -rf "$GOS_INSTALL_DIR"
 }
 
 _gos_install_version() {
