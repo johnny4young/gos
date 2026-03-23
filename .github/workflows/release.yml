@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  smoke-test:
+    name: Smoke Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make script executable
+        run: chmod +x gos.sh
+
+      - name: Run version check
+        run: ./gos.sh version
+
+      - name: Run help check
+        run: ./gos.sh help
+
+  release:
+    name: Create Release
+    needs: smoke-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: chmod +x gos.sh install.sh
+
+      - name: Generate SHA256 checksums
+        run: |
+          sha256sum gos.sh > checksums.txt
+          sha256sum install.sh >> checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            gos.sh
+            install.sh
+            checksums.txt
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

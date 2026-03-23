@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.singleton.1.6.0.schema.json
+PackageIdentifier: johnny4young.gos
+PackageVersion: 1.0.0
+PackageName: gos
+Publisher: johnny4young
+License: MIT
+LicenseUrl: https://github.com/johnny4young/gos/blob/main/LICENSE
+ShortDescription: Install and switch Go versions in seconds. One script. Zero dependencies.
+Description: |-
+  gos (Go Switch) is a simple, cross-platform Bash script that installs and switches
+  Go versions. It auto-detects your OS and CPU architecture, downloads the official
+  binary from go.dev, and puts it in place. No runtimes, no plugins, no config files.
+Tags:
+  - go
+  - golang
+  - version-manager
+  - developer-tools
+PackageUrl: https://github.com/johnny4young/gos
+Installers:
+  - Architecture: neutral
+    InstallerType: zip
+    InstallerUrl: https://github.com/johnny4young/gos/archive/refs/tags/v1.0.0.zip
+    InstallerSha256: FILL_AFTER_RELEASE
+ManifestType: singleton
+ManifestVersion: 1.6.0

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.chocolatey.org/2010/07/nuspec">
+  <metadata>
+    <id>gos</id>
+    <version>1.0.0</version>
+    <title>gos - Go Switch</title>
+    <authors>johnny4young</authors>
+    <owners>johnny4young</owners>
+    <projectUrl>https://github.com/johnny4young/gos</projectUrl>
+    <licenseUrl>https://github.com/johnny4young/gos/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Install and switch Go versions in seconds. One script. Zero dependencies. Works on macOS, Linux, and Windows (via Git Bash or WSL).</description>
+    <summary>A simple Go version manager</summary>
+    <tags>go golang version-manager developer-tools</tags>
+    <releaseNotes>https://github.com/johnny4young/gos/blob/main/CHANGELOG.md</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
