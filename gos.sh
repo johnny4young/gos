@@ -29,8 +29,34 @@ _gos_ext() {
   [ "$(_gos_os)" = "windows" ] && echo "zip" || echo "tar.gz"
 }
 
+# Download a URL to a file. Supports curl and wget.
+_gos_download() {
+  local url="$1" output="$2"
+  if command -v curl &>/dev/null; then
+    curl -fsSL -o "$output" "$url"
+  elif command -v wget &>/dev/null; then
+    wget -qO "$output" "$url"
+  else
+    echo "Error: neither curl nor wget found. Install one and try again."
+    return 1
+  fi
+}
+
+# Download a URL to stdout. Supports curl and wget.
+_gos_download_stdout() {
+  local url="$1"
+  if command -v curl &>/dev/null; then
+    curl -fsSL "$url"
+  elif command -v wget &>/dev/null; then
+    wget -qO- "$url"
+  else
+    echo "Error: neither curl nor wget found. Install one and try again." >&2
+    return 1
+  fi
+}
+
 _gos_fetch_latest() {
-  curl -s 'https://go.dev/dl/?mode=json' \
+  _gos_download_stdout 'https://go.dev/dl/?mode=json' \
     | grep -o '"version": "go[0-9.]*"' \
     | head -1 \
     | grep -o '[0-9][0-9.]*'
@@ -102,7 +128,7 @@ _gos_install_version() {
   tmp_file="/tmp/${pkg}"
 
   echo "⬇️  Downloading ${pkg}..."
-  curl -L -o "$tmp_file" "$url" || {
+  _gos_download "$url" "$tmp_file" || {
     echo "❌ Download failed. Version '${version}' may not exist."
     rm -f "$tmp_file"
     return 1
@@ -191,7 +217,7 @@ cmd_current() {
 
 cmd_list() {
   echo "🔍 Fetching available Go versions..."
-  curl -s 'https://go.dev/dl/?mode=json&include=all' \
+  _gos_download_stdout 'https://go.dev/dl/?mode=json&include=all' \
     | grep -o '"version": "go[0-9.]*"' \
     | grep -o 'go[0-9][0-9.]*' \
     | sort -t. -k1,1V -k2,2n -k3,3n \
