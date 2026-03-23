@@ -220,8 +220,10 @@ cmd_list() {
   _gos_download_stdout 'https://go.dev/dl/?mode=json&include=all' \
     | grep -o '"version": "go[0-9.]*"' \
     | grep -o 'go[0-9][0-9.]*' \
-    | sort -t. -k1,1V -k2,2n -k3,3n \
-    | uniq
+    | sed 's/^go//' \
+    | sort -t. -k1,1n -k2,2n -k3,3n \
+    | uniq \
+    | sed 's/^/go/'
 }
 
 cmd_version() {
