@@ -62,6 +62,29 @@ _gos_fetch_latest() {
     | grep -o '[0-9][0-9.]*'
 }
 
+# Compute SHA256 checksum (cross-platform: Linux has sha256sum, macOS has shasum)
+_gos_sha256() {
+  local file="$1"
+  if command -v sha256sum &>/dev/null; then
+    sha256sum "$file" | cut -d' ' -f1
+  elif command -v shasum &>/dev/null; then
+    shasum -a 256 "$file" | cut -d' ' -f1
+  else
+    echo ""
+  fi
+}
+
+# Fetch expected SHA256 for a package filename from Go API (requires jq)
+_gos_fetch_checksum() {
+  local pkg="$1"
+  if ! command -v jq &>/dev/null; then
+    echo ""
+    return 0
+  fi
+  _gos_download_stdout 'https://go.dev/dl/?mode=json' \
+    | jq -r --arg pkg "$pkg" '.[].files[] | select(.filename == $pkg) | .sha256'
+}
+
 _gos_current() {
   if command -v go &>/dev/null; then
     go version | grep -o 'go[0-9][0-9.]*' | head -1 | sed 's/go//'
@@ -133,6 +156,20 @@ _gos_install_version() {
     rm -f "$tmp_file"
     return 1
   }
+
+  # Verify checksum if tools are available
+  local expected_sha actual_sha
+  expected_sha=$(_gos_fetch_checksum "$pkg")
+  if [ -n "$expected_sha" ]; then
+    actual_sha=$(_gos_sha256 "$tmp_file")
+    if [ -n "$actual_sha" ] && [ "$actual_sha" != "$expected_sha" ]; then
+      echo "❌ Checksum mismatch! Expected ${expected_sha}, got ${actual_sha}."
+      echo "The download may be corrupted. Aborting."
+      rm -f "$tmp_file"
+      return 1
+    fi
+    echo "✅ Checksum verified."
+  fi
 
   echo "🗑️  Removing old Go installation..."
   _gos_remove_old
