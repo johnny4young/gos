@@ -44,16 +44,43 @@ _gos_current() {
   fi
 }
 
-_gos_remove_old() {
-  local os
-  os=$(_gos_os)
+# Determine if sudo is needed for GOS_INSTALL_DIR
+_gos_needs_sudo() {
+  # Never use sudo on Windows
+  if [ "$(_gos_os)" = "windows" ]; then
+    return 1
+  fi
+  # If install dir exists and is writable, no sudo
+  if [ -d "$GOS_INSTALL_DIR" ] && [ -w "$GOS_INSTALL_DIR" ]; then
+    return 1
+  fi
+  # If parent dir is writable, no sudo
+  local parent
+  parent=$(dirname "$GOS_INSTALL_DIR")
+  if [ -w "$parent" ]; then
+    return 1
+  fi
+  return 0
+}
 
-  if [ "$os" = "windows" ]; then
-    if [ -d "$GOS_INSTALL_DIR" ]; then
-      cmd.exe /c "rmdir /s /q $(cygpath -w "$GOS_INSTALL_DIR")" 2>/dev/null || rm -rf "$GOS_INSTALL_DIR"
-    fi
+# Run a command with sudo only if needed
+_gos_sudo() {
+  if _gos_needs_sudo; then
+    sudo "$@"
   else
-    sudo rm -rf "$GOS_INSTALL_DIR"
+    "$@"
+  fi
+}
+
+_gos_remove_old() {
+  if [ ! -d "$GOS_INSTALL_DIR" ]; then
+    return 0
+  fi
+
+  if [ "$(_gos_os)" = "windows" ]; then
+    cmd.exe /c "rmdir /s /q $(cygpath -w "$GOS_INSTALL_DIR")" 2>/dev/null || rm -rf "$GOS_INSTALL_DIR"
+  else
+    _gos_sudo rm -rf "$GOS_INSTALL_DIR"
   fi
 }
 
@@ -101,7 +128,7 @@ _gos_install_version() {
       return 1
     fi
   else
-    sudo tar -C "$install_parent" -xzf "$tmp_file"
+    _gos_sudo tar -C "$install_parent" -xzf "$tmp_file"
   fi
 
   rm -f "$tmp_file"
