@@ -75,6 +75,8 @@ _gos_validate_install_dir() {
 }
 
 # Download a URL to a file. Supports curl and wget.
+# Security: HTTPS integrity relies on the system CA certificate store.
+# For hardened environments, set SSL_CERT_FILE or --cacert as needed.
 _gos_download() {
   local url="$1" output="$2"
   if command -v curl &>/dev/null; then
