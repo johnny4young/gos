@@ -188,7 +188,7 @@ _gos_remove_old() {
 
 _gos_install_version() {
   local version=$1
-  local os arch ext pkg url tmp_file
+  local os arch ext pkg url tmp_dir tmp_file
 
   _gos_validate_version "$version" || return 1
 
@@ -203,12 +203,15 @@ _gos_install_version() {
 
   pkg="go${version}.${os}-${arch}.${ext}"
   url="https://go.dev/dl/${pkg}"
-  tmp_file="${TMPDIR:-/tmp}/${pkg}"
+
+  # Use a unique temp directory to prevent symlink/TOCTOU attacks
+  tmp_dir=$(mktemp -d) || { echo "Error: failed to create temp directory." >&2; return 1; }
+  tmp_file="${tmp_dir}/${pkg}"
 
   echo "Downloading ${pkg}..."
   _gos_download "$url" "$tmp_file" || {
     echo "Error: download failed. Version '${version}' may not exist."
-    rm -f "$tmp_file"
+    rm -rf "$tmp_dir"
     return 1
   }
 
@@ -220,7 +223,7 @@ _gos_install_version() {
     if [ -n "$actual_sha" ] && [ "$actual_sha" != "$expected_sha" ]; then
       echo "Error: checksum mismatch! Expected ${expected_sha}, got ${actual_sha}."
       echo "The download may be corrupted. Aborting."
-      rm -f "$tmp_file"
+      rm -rf "$tmp_dir"
       return 1
     fi
     echo "Checksum verified."
@@ -245,13 +248,14 @@ _gos_install_version() {
       tar -xf "$tmp_file" -C "$install_parent"
     else
       echo "Error: no extraction tool found (unzip, powershell, or tar)."
+      rm -rf "$tmp_dir"
       return 1
     fi
   else
     _gos_sudo tar -C "$install_parent" -xzf "$tmp_file"
   fi
 
-  rm -f "$tmp_file"
+  rm -rf "$tmp_dir"
   echo "Done! $(go version)"
 }
 
