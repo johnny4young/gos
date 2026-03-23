@@ -236,27 +236,32 @@ _gos_install_version() {
   _gos_remove_old
 
   echo "Extracting..."
-  local install_parent
+  local install_parent extract_ok=true
   install_parent=$(dirname "$GOS_INSTALL_DIR")
   if [ "$ext" = "zip" ]; then
     if command -v unzip &>/dev/null; then
-      unzip -q "$tmp_file" -d "$install_parent"
+      unzip -q "$tmp_file" -d "$install_parent" || extract_ok=false
     elif command -v powershell.exe &>/dev/null; then
       powershell.exe -Command \
-        "Expand-Archive -Path '$(cygpath -w "$tmp_file")' -DestinationPath '$(cygpath -w "$install_parent")' -Force"
+        "Expand-Archive -Path '$(cygpath -w "$tmp_file")' -DestinationPath '$(cygpath -w "$install_parent")' -Force" || extract_ok=false
     elif command -v tar &>/dev/null; then
       # Windows 10+ ships with tar that can handle zip
-      tar -xf "$tmp_file" -C "$install_parent"
+      tar -xf "$tmp_file" -C "$install_parent" || extract_ok=false
     else
       echo "Error: no extraction tool found (unzip, powershell, or tar)."
       rm -rf "$tmp_dir"
       return 1
     fi
   else
-    _gos_sudo tar -C "$install_parent" -xzf "$tmp_file"
+    _gos_sudo tar -C "$install_parent" -xzf "$tmp_file" || extract_ok=false
   fi
 
   rm -rf "$tmp_dir"
+
+  if [ "$extract_ok" = false ]; then
+    echo "Error: extraction failed."
+    return 1
+  fi
   echo "Done! $(go version)"
 }
 
