@@ -149,17 +149,17 @@ _gos_install_version() {
   ext=$(_gos_ext)
 
   if [ "$os" = "unsupported" ] || [ "$arch" = "unsupported" ]; then
-    echo "❌ Unsupported OS or architecture: $os/$arch"
+    echo "Error: unsupported OS or architecture: $os/$arch"
     return 1
   fi
 
   pkg="go${version}.${os}-${arch}.${ext}"
   url="https://go.dev/dl/${pkg}"
-  tmp_file="/tmp/${pkg}"
+  tmp_file="${TMPDIR:-/tmp}/${pkg}"
 
-  echo "⬇️  Downloading ${pkg}..."
+  echo "Downloading ${pkg}..."
   _gos_download "$url" "$tmp_file" || {
-    echo "❌ Download failed. Version '${version}' may not exist."
+    echo "Error: download failed. Version '${version}' may not exist."
     rm -f "$tmp_file"
     return 1
   }
@@ -170,18 +170,18 @@ _gos_install_version() {
   if [ -n "$expected_sha" ]; then
     actual_sha=$(_gos_sha256 "$tmp_file")
     if [ -n "$actual_sha" ] && [ "$actual_sha" != "$expected_sha" ]; then
-      echo "❌ Checksum mismatch! Expected ${expected_sha}, got ${actual_sha}."
+      echo "Error: checksum mismatch! Expected ${expected_sha}, got ${actual_sha}."
       echo "The download may be corrupted. Aborting."
       rm -f "$tmp_file"
       return 1
     fi
-    echo "✅ Checksum verified."
+    echo "Checksum verified."
   fi
 
-  echo "🗑️  Removing old Go installation..."
+  echo "Removing old Go installation..."
   _gos_remove_old
 
-  echo "📦 Extracting..."
+  echo "Extracting..."
   local install_parent
   install_parent=$(dirname "$GOS_INSTALL_DIR")
   if [ "$ext" = "zip" ]; then
@@ -194,7 +194,7 @@ _gos_install_version() {
       # Windows 10+ ships with tar that can handle zip
       tar -xf "$tmp_file" -C "$install_parent"
     else
-      echo "❌ No extraction tool found (unzip, powershell, or tar)."
+      echo "Error: no extraction tool found (unzip, powershell, or tar)."
       return 1
     fi
   else
@@ -202,30 +202,30 @@ _gos_install_version() {
   fi
 
   rm -f "$tmp_file"
-  echo "✅ Done! $(go version)"
+  echo "Done! $(go version)"
 }
 
 # ─── Commands ─────────────────────────────────────────────────────────────────
 
 cmd_latest() {
-  echo "🔍 Fetching latest stable Go version..."
+  echo "Fetching latest stable Go version..."
   local latest current
 
   latest=$(_gos_fetch_latest)
   if [ -z "$latest" ]; then
-    echo "❌ Could not fetch latest version. Check your internet connection."
+    echo "Error: could not fetch latest version. Check your internet connection."
     return 1
   fi
 
   current=$(_gos_current)
-  echo "📌 Latest: go${latest}"
+  echo "Latest: go${latest}"
 
   if [ "$current" = "$latest" ]; then
-    echo "✅ Already on Go ${latest}, nothing to do."
+    echo "Already on Go ${latest}, nothing to do."
     return 0
   fi
 
-  echo "🔄 Current: go${current} → go${latest}"
+  echo "Current: go${current} -> go${latest}"
   _gos_install_version "$latest"
 }
 
@@ -236,13 +236,13 @@ cmd_install() {
     return 1
   fi
 
-  # Strip leading 'go' prefix if provided e.g. go1.26.1 → 1.26.1
+  # Strip leading 'go' prefix if provided e.g. go1.26.1 -> 1.26.1
   version="${version#go}"
 
   local current
   current=$(_gos_current)
   if [ "$current" = "$version" ]; then
-    echo "✅ Already on Go ${version}, nothing to do."
+    echo "Already on Go ${version}, nothing to do."
     return 0
   fi
 
@@ -253,14 +253,14 @@ cmd_current() {
   local current
   current=$(_gos_current)
   if [ "$current" = "none" ]; then
-    echo "⚠️  No Go installation found."
+    echo "No Go installation found."
   else
     echo "go${current}"
   fi
 }
 
 cmd_list() {
-  echo "🔍 Fetching available Go versions..."
+  echo "Fetching available Go versions..."
   local json
   json=$(_gos_download_stdout 'https://go.dev/dl/?mode=json&include=all')
 
@@ -326,7 +326,7 @@ main() {
     version) cmd_version ;;
     help|--help|-h) cmd_help ;;
     *)
-      echo "❌ Unknown command: $cmd"
+      echo "Error: unknown command: $cmd"
       cmd_help
       return 1
       ;;
