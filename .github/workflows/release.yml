@@ -4,19 +4,56 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 1.1.0)'
+        required: true
 
 permissions:
   contents: write
 
 jobs:
+  version-bump:
+    name: Version Bump
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update version in gos.sh
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          sed -i "s/^GOS_VERSION=.*/GOS_VERSION=\"${VERSION}\"/" gos.sh
+
+      - name: Commit and tag
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          git add gos.sh
+          git commit -m "release: v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin main --tags
+
   smoke-test:
     name: Smoke Test
+    needs: [version-bump]
+    if: always() && (needs.version-bump.result == 'success' || needs.version-bump.result == 'skipped')
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # On workflow_dispatch, fetch the newly pushed tag to get updated code
+          ref: ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref }}
 
       - name: Make script executable
         run: chmod +x gos.sh
@@ -29,10 +66,13 @@ jobs:
 
   release:
     name: Create Release
-    needs: smoke-test
+    needs: [version-bump, smoke-test]
+    if: always() && (needs.version-bump.result == 'success' || needs.version-bump.result == 'skipped') && needs.smoke-test.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref }}
 
       - name: Make scripts executable
         run: chmod +x gos.sh install.sh
@@ -45,6 +85,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref_name }}
           files: |
             gos.sh
             install.sh
