@@ -29,6 +29,17 @@ _gos_ext() {
   [ "$(_gos_os)" = "windows" ] && echo "zip" || echo "tar.gz"
 }
 
+# Validate version string to prevent path traversal and URL injection.
+# Accepts: 1.22, 1.22.0, 1.23rc1, 1.23beta2
+_gos_validate_version() {
+  local version="$1"
+  if ! echo "$version" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$'; then
+    echo "Error: invalid version format '${version}'." >&2
+    echo "Expected format: X.Y[.Z][rcN|betaN]  e.g. 1.22.0, 1.23rc1" >&2
+    return 1
+  fi
+}
+
 # Download a URL to a file. Supports curl and wget.
 _gos_download() {
   local url="$1" output="$2"
@@ -144,6 +155,8 @@ _gos_install_version() {
   local version=$1
   local os arch ext pkg url tmp_file
 
+  _gos_validate_version "$version" || return 1
+
   os=$(_gos_os)
   arch=$(_gos_arch)
   ext=$(_gos_ext)
@@ -238,6 +251,8 @@ cmd_install() {
 
   # Strip leading 'go' prefix if provided e.g. go1.26.1 -> 1.26.1
   version="${version#go}"
+
+  _gos_validate_version "$version" || return 1
 
   local current
   current=$(_gos_current)
