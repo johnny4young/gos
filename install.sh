@@ -23,18 +23,22 @@ _sha256() {
   fi
 }
 
+# Use a unique temp directory to prevent symlink/TOCTOU attacks
+tmp_dir=$(mktemp -d) || { echo "Error: failed to create temp directory." >&2; exit 1; }
+tmp_file="${tmp_dir}/gos"
+
 echo "Downloading gos..."
-curl -fsSL "$GOS_SCRIPT_URL" -o /tmp/gos
+curl -fsSL "$GOS_SCRIPT_URL" -o "$tmp_file"
 
 # Verify integrity if a checksum is configured and tools are available
 if [ "$GOS_EXPECTED_SHA256" != "UPDATE_ON_RELEASE" ]; then
-  actual_sha=$(_sha256 /tmp/gos)
+  actual_sha=$(_sha256 "$tmp_file")
   if [ -n "$actual_sha" ]; then
     if [ "$actual_sha" != "$GOS_EXPECTED_SHA256" ]; then
       echo "Error: checksum mismatch! Download may be corrupted or tampered with." >&2
       echo "  Expected: ${GOS_EXPECTED_SHA256}" >&2
       echo "  Got:      ${actual_sha}" >&2
-      rm -f /tmp/gos
+      rm -rf "$tmp_dir"
       exit 1
     fi
     echo "Checksum verified."
@@ -54,7 +58,8 @@ _maybe_sudo() {
   fi
 }
 
-_maybe_sudo mv /tmp/gos "$GOS_BIN_DIR/gos"
+_maybe_sudo mv "$tmp_file" "$GOS_BIN_DIR/gos"
 _maybe_sudo chmod +x "$GOS_BIN_DIR/gos"
+rm -rf "$tmp_dir"
 echo "gos installed to ${GOS_BIN_DIR}/gos"
 echo "Run 'gos help' to get started."
