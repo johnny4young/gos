@@ -45,7 +45,16 @@ else
   echo "Warning: no release checksum configured, skipping integrity check." >&2
 fi
 
-sudo mv /tmp/gos "$GOS_BIN_DIR/gos"
-sudo chmod +x "$GOS_BIN_DIR/gos"
+# Only use sudo if the target directory is not writable
+_maybe_sudo() {
+  if [ -w "$GOS_BIN_DIR" ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+_maybe_sudo mv /tmp/gos "$GOS_BIN_DIR/gos"
+_maybe_sudo chmod +x "$GOS_BIN_DIR/gos"
 echo "gos installed to ${GOS_BIN_DIR}/gos"
 echo "Run 'gos help' to get started."
