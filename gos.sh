@@ -96,6 +96,7 @@ _gos_sha256() {
 _gos_fetch_checksum() {
   local pkg="$1"
   if ! command -v jq &>/dev/null; then
+    echo "Warning: jq not found, cannot fetch checksum for verification." >&2
     echo ""
     return 0
   fi
@@ -189,6 +190,8 @@ _gos_install_version() {
       return 1
     fi
     echo "Checksum verified."
+  else
+    echo "Warning: skipping integrity verification (install jq for checksum support)." >&2
   fi
 
   echo "Removing old Go installation..."
