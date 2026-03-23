@@ -56,10 +56,17 @@ _gos_download_stdout() {
 }
 
 _gos_fetch_latest() {
-  _gos_download_stdout 'https://go.dev/dl/?mode=json' \
-    | grep -o '"version": "go[0-9.]*"' \
-    | head -1 \
-    | grep -o '[0-9][0-9.]*'
+  local json
+  json=$(_gos_download_stdout 'https://go.dev/dl/?mode=json')
+
+  if command -v jq &>/dev/null; then
+    echo "$json" | jq -r '.[0].version' | sed 's/^go//'
+  else
+    echo "$json" \
+      | grep -o '"version": *"go[0-9.]*"' \
+      | head -1 \
+      | grep -o '[0-9][0-9.]*'
+  fi
 }
 
 # Compute SHA256 checksum (cross-platform: Linux has sha256sum, macOS has shasum)
@@ -254,13 +261,25 @@ cmd_current() {
 
 cmd_list() {
   echo "🔍 Fetching available Go versions..."
-  _gos_download_stdout 'https://go.dev/dl/?mode=json&include=all' \
-    | grep -o '"version": "go[0-9.]*"' \
-    | grep -o 'go[0-9][0-9.]*' \
-    | sed 's/^go//' \
-    | sort -t. -k1,1n -k2,2n -k3,3n \
-    | uniq \
-    | sed 's/^/go/'
+  local json
+  json=$(_gos_download_stdout 'https://go.dev/dl/?mode=json&include=all')
+
+  if command -v jq &>/dev/null; then
+    echo "$json" \
+      | jq -r '.[].version' \
+      | sed 's/^go//' \
+      | sort -t. -k1,1n -k2,2n -k3,3n \
+      | uniq \
+      | sed 's/^/go/'
+  else
+    echo "$json" \
+      | grep -o '"version": *"go[0-9.]*"' \
+      | grep -o 'go[0-9][0-9.]*' \
+      | sed 's/^go//' \
+      | sort -t. -k1,1n -k2,2n -k3,3n \
+      | uniq \
+      | sed 's/^/go/'
+  fi
 }
 
 cmd_version() {
