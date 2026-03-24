@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GOS_VERSION="1.3.0"
+GOS_VERSION="1.4.0"
 GOS_INSTALL_DIR="${GOS_INSTALL_DIR:-/usr/local/go}"
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
