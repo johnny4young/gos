@@ -93,3 +93,44 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-formula:
+    name: Update Homebrew Formula
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update Formula/gos.rb with new version and SHA256
+        run: |
+          TAG="${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref_name }}"
+          VERSION="${TAG#v}"
+          ARCHIVE_URL="https://github.com/johnny4young/gos/archive/refs/tags/${TAG}.tar.gz"
+
+          # Download the release archive and compute SHA256
+          curl -fsSL "$ARCHIVE_URL" -o /tmp/gos-release.tar.gz
+          SHA=$(sha256sum /tmp/gos-release.tar.gz | cut -d' ' -f1)
+          rm /tmp/gos-release.tar.gz
+
+          # Update formula
+          sed -i "s|url \".*\"|url \"${ARCHIVE_URL}\"|" Formula/gos.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/gos.rb
+          sed -i "s|version \".*\"|version \"${VERSION}\"|" Formula/gos.rb
+
+          echo "Updated Formula/gos.rb: version=${VERSION} sha256=${SHA}"
+
+      - name: Commit and push formula update
+        run: |
+          git add Formula/gos.rb
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          TAG="${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref_name }}"
+          git commit -m "chore: update Homebrew formula for ${TAG}"
+          git push origin main

@@ -85,9 +85,10 @@ Done. That's the whole setup.
 | Requirement | Notes |
 |---|---|
 | `bash` | Pre-installed on macOS and Linux. Use [Git Bash](https://gitforwindows.org/) on Windows. |
-| `curl` | Pre-installed on most systems. |
+| `curl` or `wget` | `curl` is pre-installed on most systems. `wget` is used as fallback. |
 | `tar` / `unzip` | `tar` for macOS/Linux, `unzip` for Windows. |
 | `sudo` | Required for the default install path (`/usr/local/go`). Not needed if you override `GOS_INSTALL_DIR`. |
+| `jq` (optional) | Enables SHA256 checksum verification after download. Strongly recommended. |
 
 > **Windows users:** gos runs inside Git Bash or WSL. Native `cmd.exe` and PowerShell are not directly supported.
 
@@ -114,11 +115,15 @@ GOS_BIN_DIR="$HOME/.local/bin" curl -fsSL https://raw.githubusercontent.com/john
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew tap johnny4young/gos
+brew tap johnny4young/gos https://github.com/johnny4young/gos
 brew install gos
 ```
 
+> The formula lives in this repo under `Formula/gos.rb` — no separate tap repo needed. It's updated automatically on each release.
+
 ### Winget (Windows)
+
+> **Coming soon** — manifest must be submitted to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs).
 
 ```powershell
 winget install johnny4young.gos
@@ -127,6 +132,8 @@ winget install johnny4young.gos
 > After installing, run `gos` commands inside **Git Bash** or **WSL**.
 
 ### Chocolatey (Windows)
+
+> **Coming soon** — package must be submitted to [community.chocolatey.org](https://community.chocolatey.org/).
 
 ```powershell
 choco install gos
@@ -195,23 +202,27 @@ exec fish          # for Fish
 
 ```bash
 $ gos latest
-🔍 Fetching latest stable Go version...
-📌 Latest: go1.24.1
-🔄 Current: go1.22.0 → go1.24.1
-⬇️  Downloading go1.24.1.darwin-arm64.tar.gz...
-📦 Extracting...
-✅ Done! go version go1.24.1 darwin/arm64
+Fetching latest stable Go version...
+Latest: go1.24.1
+Current: go1.22.0 -> go1.24.1
+Downloading go1.24.1.darwin-arm64.tar.gz...
+Checksum verified.
+Removing old Go installation...
+Extracting...
+Done! go version go1.24.1 darwin/arm64
 
 $ gos install 1.21.6
-🔄 Current: go1.24.1 → Installing go1.21.6
-⬇️  Downloading go1.21.6.linux-amd64.tar.gz...
-📦 Extracting...
-✅ Done! go version go1.21.6 linux/amd64
+Downloading go1.21.6.linux-amd64.tar.gz...
+Checksum verified.
+Removing old Go installation...
+Extracting...
+Done! go version go1.21.6 linux/amd64
 
 $ gos current
 go1.24.1
 
 $ gos list
+Fetching available Go versions...
 go1.24.1
 go1.24.0
 go1.23.5
@@ -233,9 +244,9 @@ To manually enable them, see the [Manual Shell Configuration](#manual-shell-conf
 
 | Variable | Default | Description |
 |---|---|---|
-| `GOS_INSTALL_DIR` | `/usr/local/go` | Where Go gets installed. Override to install without `sudo`. |
+| `GOS_INSTALL_DIR` | `/usr/local/go` | Where Go gets installed. Override to install without `sudo`. Path basename must contain "go". |
 
-Example — install Go in your home directory:
+Example — install Go in your home directory (no sudo needed):
 
 ```bash
 export GOS_INSTALL_DIR="$HOME/.go"
@@ -244,6 +255,8 @@ gos latest
 
 Add the export to your shell profile to make it permanent.
 
+> **Note:** For safety, `GOS_INSTALL_DIR` must have at least 2 path components and the basename must contain "go" (e.g. `mygo`, `golang`, `.go` all work). System-critical paths like `/usr` or `/etc` are rejected.
+
 ---
 
 ## How It Works
@@ -251,9 +264,10 @@ Add the export to your shell profile to make it permanent.
 1. Queries the [official Go downloads API](https://go.dev/dl/?mode=json) for available versions
 2. Detects your OS via `uname -s` and architecture via `uname -m`
 3. Downloads the matching archive from `https://go.dev/dl/`
-4. Removes the previous Go installation at `$GOS_INSTALL_DIR`
-5. Extracts the new version in place
-6. Verifies with `go version`
+4. Verifies SHA256 checksum against the Go API (requires `jq`)
+5. Removes the previous Go installation at `$GOS_INSTALL_DIR`
+6. Extracts the new version in place
+7. Confirms with `go version`
 
 No symlinks, no shims, no magic. Just a clean install of the official Go binary.
 
@@ -271,7 +285,7 @@ sudo rm /usr/local/bin/gos
 
 ```bash
 brew uninstall gos
-brew untap johnny4young/gos
+brew untap johnny4young/gos https://github.com/johnny4young/gos
 ```
 
 **If installed via Winget:**
