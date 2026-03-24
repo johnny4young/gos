@@ -128,16 +128,29 @@ _gos_sha256() {
   fi
 }
 
-# Fetch expected SHA256 for a package filename from Go API (requires jq)
+# Fetch expected SHA256 for a package filename from the Go API.
+# Uses jq if available, falls back to python3 (always present on macOS).
 _gos_fetch_checksum() {
   local pkg="$1"
-  if ! command -v jq &>/dev/null; then
-    echo "Warning: jq not found, cannot fetch checksum for verification." >&2
+  local json
+  json=$(_gos_download_stdout 'https://go.dev/dl/?mode=json')
+
+  if command -v jq &>/dev/null; then
+    echo "$json" | jq -r --arg pkg "$pkg" '.[].files[] | select(.filename == $pkg) | .sha256'
+  elif command -v python3 &>/dev/null; then
+    echo "$json" | python3 -c "
+import json, sys
+pkg = sys.argv[1]
+data = json.load(sys.stdin)
+for v in data:
+    for f in v.get('files', []):
+        if f.get('filename') == pkg:
+            print(f.get('sha256', ''))
+            sys.exit(0)
+" "$pkg"
+  else
     echo ""
-    return 0
   fi
-  _gos_download_stdout 'https://go.dev/dl/?mode=json' \
-    | jq -r --arg pkg "$pkg" '.[].files[] | select(.filename == $pkg) | .sha256'
 }
 
 _gos_current() {
@@ -229,7 +242,7 @@ _gos_install_version() {
     fi
     echo "Checksum verified."
   else
-    echo "Warning: skipping integrity verification (install jq for checksum support)." >&2
+    echo "Warning: skipping integrity verification (install jq or python3 for checksum support)." >&2
   fi
 
   echo "Removing old Go installation..."
