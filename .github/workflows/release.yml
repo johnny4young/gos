@@ -41,10 +41,67 @@ jobs:
           VERSION="${{ github.event.inputs.version }}"
           sed -i "s/^GOS_VERSION=.*/GOS_VERSION=\"${VERSION}\"/" gos.sh
 
+      - name: Update CHANGELOG.md
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          DATE=$(date +%Y-%m-%d)
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          # Collect commits since last tag (or all commits)
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS=$(git log "${PREV_TAG}..HEAD" --pretty=format:"%s" --no-merges | grep -v "^release:" | grep -v "^chore: update Homebrew" || true)
+          else
+            COMMITS=$(git log --pretty=format:"%s" --no-merges | grep -v "^release:" || true)
+          fi
+
+          # Categorize commits by conventional commit prefix
+          ADDED=""
+          FIXED=""
+          SECURITY=""
+          CHANGED=""
+
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            # Strip prefix and categorize
+            case "$line" in
+              feat:*)     ADDED="${ADDED}\n- ${line#feat: }" ;;
+              feat\(*)    ADDED="${ADDED}\n- ${line#feat*): }" ;;
+              fix:*)      FIXED="${FIXED}\n- ${line#fix: }" ;;
+              fix\(*)     FIXED="${FIXED}\n- ${line#fix*): }" ;;
+              security:*) SECURITY="${SECURITY}\n- ${line#security: }" ;;
+              docs:*)     CHANGED="${CHANGED}\n- ${line#docs: }" ;;
+              ci:*)       CHANGED="${CHANGED}\n- ${line#ci: }" ;;
+              chore:*)    CHANGED="${CHANGED}\n- ${line#chore: }" ;;
+              build:*)    CHANGED="${CHANGED}\n- ${line#build: }" ;;
+              refactor:*) CHANGED="${CHANGED}\n- ${line#refactor: }" ;;
+              perf:*)     CHANGED="${CHANGED}\n- ${line#perf: }" ;;
+              *)          CHANGED="${CHANGED}\n- ${line}" ;;
+            esac
+          done <<< "$COMMITS"
+
+          # Build the new changelog entry
+          ENTRY="## [${VERSION}] - ${DATE}"
+          [ -n "$ADDED" ]    && ENTRY="${ENTRY}\n\n### Added\n${ADDED}"
+          [ -n "$FIXED" ]    && ENTRY="${ENTRY}\n\n### Fixed\n${FIXED}"
+          [ -n "$CHANGED" ]  && ENTRY="${ENTRY}\n\n### Changed\n${CHANGED}"
+          [ -n "$SECURITY" ] && ENTRY="${ENTRY}\n\n### Security\n${SECURITY}"
+
+          # Insert after header (line 5) in CHANGELOG.md
+          HEADER=$(head -5 CHANGELOG.md)
+          REST=$(tail -n +6 CHANGELOG.md)
+          printf '%s\n\n%b\n%s\n' "$HEADER" "$ENTRY" "$REST" > CHANGELOG.md
+
+          # Append release link
+          if [ -n "$PREV_TAG" ]; then
+            echo "[${VERSION}]: https://github.com/johnny4young/gos/compare/${PREV_TAG}...v${VERSION}" >> CHANGELOG.md
+          else
+            echo "[${VERSION}]: https://github.com/johnny4young/gos/releases/tag/v${VERSION}" >> CHANGELOG.md
+          fi
+
       - name: Commit and tag
         run: |
           VERSION="${{ github.event.inputs.version }}"
-          git add gos.sh
+          git add gos.sh CHANGELOG.md
           git commit -m "release: v${VERSION}"
           git tag "v${VERSION}"
           git push origin main --tags
