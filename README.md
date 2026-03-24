@@ -88,7 +88,7 @@ Done. That's the whole setup.
 | `curl` or `wget` | `curl` is pre-installed on most systems. `wget` is used as fallback. |
 | `tar` / `unzip` | `tar` for macOS/Linux, `unzip` for Windows. |
 | `sudo` | Required for the default install path (`/usr/local/go`). Not needed if you override `GOS_INSTALL_DIR`. |
-| `jq` (optional) | Enables SHA256 checksum verification after download. Strongly recommended. |
+| `jq` or `python3` (optional) | Enables SHA256 checksum verification after download. `python3` is pre-installed on macOS. |
 
 > **Windows users:** gos runs inside Git Bash or WSL. Native `cmd.exe` and PowerShell are not directly supported.
 
@@ -115,11 +115,17 @@ GOS_BIN_DIR="$HOME/.local/bin" curl -fsSL https://raw.githubusercontent.com/john
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew tap johnny4young/gos https://github.com/johnny4young/gos
+brew tap johnny4young/gos
 brew install gos
 ```
 
-> The formula lives in this repo under `Formula/gos.rb` — no separate tap repo needed. It's updated automatically on each release.
+To upgrade when a new version is released:
+
+```bash
+brew upgrade gos
+```
+
+> The formula lives in [johnny4young/homebrew-gos](https://github.com/johnny4young/homebrew-gos) and is updated automatically on each release.
 
 ### Winget (Windows)
 
@@ -264,7 +270,7 @@ Add the export to your shell profile to make it permanent.
 1. Queries the [official Go downloads API](https://go.dev/dl/?mode=json) for available versions
 2. Detects your OS via `uname -s` and architecture via `uname -m`
 3. Downloads the matching archive from `https://go.dev/dl/`
-4. Verifies SHA256 checksum against the Go API (requires `jq`)
+4. Verifies SHA256 checksum against the Go API (uses `jq` or `python3`)
 5. Removes the previous Go installation at `$GOS_INSTALL_DIR`
 6. Extracts the new version in place
 7. Confirms with `go version`
@@ -285,7 +291,7 @@ sudo rm /usr/local/bin/gos
 
 ```bash
 brew uninstall gos
-brew untap johnny4young/gos https://github.com/johnny4young/gos
+brew untap johnny4young/gos
 ```
 
 **If installed via Winget:**
