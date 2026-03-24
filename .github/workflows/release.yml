@@ -165,10 +165,11 @@ jobs:
     needs: [release]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout homebrew-gos tap
+        uses: actions/checkout@v5
         with:
-          ref: main
-          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: johnny4young/homebrew-gos
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Configure git user
         run: |
@@ -186,17 +187,17 @@ jobs:
           SHA=$(sha256sum /tmp/gos-release.tar.gz | cut -d' ' -f1)
           rm /tmp/gos-release.tar.gz
 
-          # Update formula
+          # Update formula in the tap repo
           sed -i "s|url \".*\"|url \"${ARCHIVE_URL}\"|" Formula/gos.rb
           sed -i "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/gos.rb
           sed -i "s|version \".*\"|version \"${VERSION}\"|" Formula/gos.rb
 
           echo "Updated Formula/gos.rb: version=${VERSION} sha256=${SHA}"
 
-      - name: Commit and push formula update
+      - name: Commit and push to homebrew-gos
         run: |
           git add Formula/gos.rb
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           TAG="${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref_name }}"
-          git commit -m "chore: update Homebrew formula for ${TAG}"
+          git commit -m "chore: update formula for ${TAG}"
           git push origin main
