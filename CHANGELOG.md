@@ -4,13 +4,46 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [1.2.0] - 2026-03-24
+## [Unreleased]
 
 ### Changed
 
-- auto-generate CHANGELOG.md from conventional commits on release
+- Auto-generate CHANGELOG.md from conventional commits on release
+- Upgrade actions/checkout from v4 to v5 for Node.js 24
+- Validate version input format in workflow_dispatch
+- Update Homebrew formula for v1.1.0
 
-## [1.0.0] - 2026-03-23
+## [1.1.0] - 2025-03-10
+
+### Added
+
+- Enable release automation via GitHub Actions `workflow_dispatch`
+- Add Homebrew tap support and auto-update formula on release
+- Verify SHA256 checksum after download
+
+### Fixed
+
+- Clean up temp directory on extraction failure
+- Use `$TMPDIR` for temp files, replace emoji with plain text
+- Use jq for JSON parsing when available, relax grep pattern
+- Replace `sort -V` with numeric sort for portability
+- Add wget fallback for systems without curl
+- Use sudo only when needed, never on Windows
+- Add zip extraction fallbacks for Windows Git Bash
+
+### Security
+
+- Validate version input to prevent path traversal
+- Add SHA256 integrity check to install.sh
+- Warn user when checksum verification is skipped
+- Validate `GOS_INSTALL_DIR` before `rm -rf`
+- Use `mktemp` for unique temp directory to prevent TOCTOU attacks
+- Only use sudo in install.sh when target dir is not writable
+- Use `mktemp` in install.sh instead of hardcoded `/tmp`
+- Remove `cmd.exe` call to prevent command injection on Windows
+- Document HTTPS/CA trust model in download functions
+
+## [1.0.0] - 2025-01-15
 
 ### Added
 
@@ -23,11 +56,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Cross-platform support: macOS, Linux, Windows (Git Bash / WSL)
 - Auto-detection of OS and CPU architecture
 - `GOS_INSTALL_DIR` environment variable for custom install paths
-- Shell completions for Bash, Zsh, and Fish
 - One-liner installer via `curl | bash`
 - Homebrew formula
-- Winget manifest
-- Chocolatey package
 
+[Unreleased]: https://github.com/johnny4young/gos/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/johnny4young/gos/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/johnny4young/gos/releases/tag/v1.0.0
-[1.2.0]: https://github.com/johnny4young/gos/releases/tag/v1.2.0
