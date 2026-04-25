@@ -104,7 +104,9 @@ jobs:
           git add gos.sh CHANGELOG.md
           git commit -m "release: v${VERSION}"
           git tag "v${VERSION}"
-          git push origin main --tags
+          # Push only the new tag (avoid leaking unrelated local tags).
+          git push origin main
+          git push origin "v${VERSION}"
 
   smoke-test:
     name: Smoke Test
@@ -141,6 +143,14 @@ jobs:
 
       - name: Make scripts executable
         run: chmod +x gos.sh install.sh
+
+      - name: Patch install.sh with release tag and gos.sh SHA256
+        run: |
+          TAG="${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref_name }}"
+          GOS_SHA=$(sha256sum gos.sh | cut -d' ' -f1)
+          sed -i "s|^GOS_RELEASE_TAG=.*|GOS_RELEASE_TAG=\"${TAG}\"|" install.sh
+          sed -i "s|^GOS_EXPECTED_SHA256=.*|GOS_EXPECTED_SHA256=\"${GOS_SHA}\"|" install.sh
+          echo "Patched install.sh with TAG=${TAG} and SHA256=${GOS_SHA}"
 
       - name: Generate SHA256 checksums
         run: |
