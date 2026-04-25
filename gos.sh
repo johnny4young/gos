@@ -77,12 +77,13 @@ _gos_validate_install_dir() {
 # Download a URL to a file. Supports curl and wget.
 # Security: HTTPS integrity relies on the system CA certificate store.
 # For hardened environments, set SSL_CERT_FILE or --cacert as needed.
+# --proto '=https' / --https-only disallow any HTTP fallback even via redirect.
 _gos_download() {
   local url="$1" output="$2"
   if command -v curl &>/dev/null; then
-    curl -fsSL -o "$output" "$url"
+    curl --proto '=https' --tlsv1.2 -fsSL -o "$output" "$url"
   elif command -v wget &>/dev/null; then
-    wget -qO "$output" "$url"
+    wget --https-only -qO "$output" "$url"
   else
     echo "Error: neither curl nor wget found. Install one and try again."
     return 1
@@ -93,9 +94,9 @@ _gos_download() {
 _gos_download_stdout() {
   local url="$1"
   if command -v curl &>/dev/null; then
-    curl -fsSL "$url"
+    curl --proto '=https' --tlsv1.2 -fsSL "$url"
   elif command -v wget &>/dev/null; then
-    wget -qO- "$url"
+    wget --https-only -qO- "$url"
   else
     echo "Error: neither curl nor wget found. Install one and try again." >&2
     return 1
@@ -275,7 +276,16 @@ _gos_install_version() {
     echo "Error: extraction failed."
     return 1
   fi
-  echo "Done! $(go version)"
+
+  local go_bin="${GOS_INSTALL_DIR}/bin/go"
+  if [ -x "$go_bin" ]; then
+    echo "Done! $("$go_bin" version)"
+  elif command -v go &>/dev/null; then
+    echo "Done! $(go version)"
+  else
+    echo "Done! Installed at ${GOS_INSTALL_DIR}."
+    echo "Add ${GOS_INSTALL_DIR}/bin to your PATH to use 'go'."
+  fi
 }
 
 # ─── Commands ─────────────────────────────────────────────────────────────────

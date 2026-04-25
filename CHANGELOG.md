@@ -18,13 +18,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
-### Changed
-
-- Auto-generate CHANGELOG.md from conventional commits on release
-- Upgrade actions/checkout from v4 to v5 for Node.js 24
-- Validate version input format in workflow_dispatch
-- Update Homebrew formula for v1.1.0
-
 ## [1.1.0] - 2025-03-10
 
 ### Added
@@ -71,8 +64,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - One-liner installer via `curl | bash`
 - Homebrew formula
 
-[Unreleased]: https://github.com/johnny4young/gos/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/johnny4young/gos/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/johnny4young/gos/releases/tag/v1.4.0
+[1.3.0]: https://github.com/johnny4young/gos/releases/tag/v1.3.0
 [1.1.0]: https://github.com/johnny4young/gos/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/johnny4young/gos/releases/tag/v1.0.0
-[1.3.0]: https://github.com/johnny4young/gos/releases/tag/v1.3.0
-[1.4.0]: https://github.com/johnny4young/gos/releases/tag/v1.4.0
