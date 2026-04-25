@@ -155,10 +155,7 @@ for v in data:
 }
 
 _gos_current() {
-  local go_bin="${GOS_INSTALL_DIR}/bin/go"
-  if [ -x "$go_bin" ]; then
-    "$go_bin" version | grep -o 'go[0-9][0-9.]*' | head -1 | sed 's/go//'
-  elif command -v go &>/dev/null; then
+  if command -v go &>/dev/null; then
     go version | grep -o 'go[0-9][0-9.]*' | head -1 | sed 's/go//'
   else
     echo "none"
