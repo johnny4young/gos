@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] - 2026-04-26
+
+### Changed
+
+- Merge pull request #1 from johnny4young/claude/security-code-cleanup-SWsa3
+
 ## [1.4.0] - 2026-03-24
 
 ### Changed
@@ -69,3 +75,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 [1.3.0]: https://github.com/johnny4young/gos/releases/tag/v1.3.0
 [1.1.0]: https://github.com/johnny4young/gos/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/johnny4young/gos/releases/tag/v1.0.0
+[1.4.1]: https://github.com/johnny4young/gos/releases/tag/v1.4.1
