@@ -72,7 +72,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - One-liner installer via `curl | bash`
 - Homebrew formula
 
-[Unreleased]: https://github.com/johnny4young/gos/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/johnny4young/gos/compare/v1.4.2...HEAD
 [1.4.0]: https://github.com/johnny4young/gos/releases/tag/v1.4.0
 [1.3.0]: https://github.com/johnny4young/gos/releases/tag/v1.3.0
 [1.1.0]: https://github.com/johnny4young/gos/compare/v1.0.0...v1.1.0
