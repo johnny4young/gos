@@ -58,7 +58,7 @@ Works on **macOS**, **Linux**, and **Windows** (via Git Bash or WSL). Auto-detec
 
 ```bash
 # Install gos
-curl -fsSL https://raw.githubusercontent.com/johnny4young/gos/main/install.sh | bash
+curl -fsSL https://github.com/johnny4young/gos/releases/latest/download/install.sh | bash
 
 # Install the latest stable Go
 gos latest
@@ -103,13 +103,23 @@ Choose the method that fits your setup.
 The fastest way to get started:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/johnny4young/gos/main/install.sh | bash
+curl -fsSL https://github.com/johnny4young/gos/releases/latest/download/install.sh | bash
 ```
 
-This downloads `gos` and places it in `/usr/local/bin`. You can customize the location:
+This downloads the latest published `gos` release and places it in `/usr/local/bin`.
+The release installer pins the downloaded script to the release asset checksum.
+You can customize the location:
 
 ```bash
-GOS_BIN_DIR="$HOME/.local/bin" curl -fsSL https://raw.githubusercontent.com/johnny4young/gos/main/install.sh | bash
+curl -fsSL https://github.com/johnny4young/gos/releases/latest/download/install.sh | GOS_BIN_DIR="$HOME/.local/bin" bash
+```
+
+If you intentionally want the unreleased development version from `main`, use
+the raw GitHub installer instead. This skips the release-pinned checksum path and
+should only be used for testing unreleased changes.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/johnny4young/gos/main/install.sh | bash
 ```
 
 ### Homebrew (macOS / Linux)
@@ -151,6 +161,7 @@ choco install gos
 
 ```bash
 git clone https://github.com/johnny4young/gos.git ~/.gos
+ln -sf "$HOME/.gos/gos.sh" "$HOME/.gos/gos"
 ```
 
 Then add to your shell profile (see [Manual Shell Configuration](#manual-shell-configuration)):
