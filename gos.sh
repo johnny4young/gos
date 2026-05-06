@@ -131,10 +131,41 @@ _gos_sha256() {
 
 # Fetch expected SHA256 for a package filename from the Go API.
 # Uses jq if available, falls back to python3 (always present on macOS).
+_gos_has_checksum_parser() {
+  command -v jq &>/dev/null || command -v python3 &>/dev/null
+}
+
+_gos_require_checksum() {
+  [ "${GOS_REQUIRE_CHECKSUM:-}" = "1" ]
+}
+
+_gos_checksum_unavailable() {
+  local reason="$1"
+
+  if _gos_require_checksum; then
+    echo "Error: checksum verification required but ${reason}." >&2
+    return 1
+  fi
+
+  echo "Warning: skipping integrity verification (${reason})." >&2
+}
+
 _gos_fetch_checksum() {
   local pkg="$1"
+  local include_all="${2:-false}"
   local json
-  json=$(_gos_download_stdout 'https://go.dev/dl/?mode=json')
+  local api_url='https://go.dev/dl/?mode=json'
+
+  if [ "$include_all" = "true" ]; then
+    api_url='https://go.dev/dl/?mode=json&include=all'
+  fi
+
+  if ! _gos_has_checksum_parser; then
+    echo ""
+    return 0
+  fi
+
+  json=$(_gos_download_stdout "$api_url")
 
   if command -v jq &>/dev/null; then
     echo "$json" | jq -r --arg pkg "$pkg" '.[].files[] | select(.filename == $pkg) | .sha256'
@@ -203,6 +234,7 @@ _gos_remove_old() {
 
 _gos_install_version() {
   local version=$1
+  local include_all_checksums="${2:-false}"
   local os arch ext pkg url tmp_dir tmp_file
 
   _gos_validate_version "$version" || return 1
@@ -232,18 +264,33 @@ _gos_install_version() {
 
   # Verify checksum if tools are available
   local expected_sha actual_sha
-  expected_sha=$(_gos_fetch_checksum "$pkg")
+  expected_sha=$(_gos_fetch_checksum "$pkg" "$include_all_checksums")
   if [ -n "$expected_sha" ]; then
     actual_sha=$(_gos_sha256 "$tmp_file")
-    if [ -n "$actual_sha" ] && [ "$actual_sha" != "$expected_sha" ]; then
+    if [ -z "$actual_sha" ]; then
+      _gos_checksum_unavailable "no SHA256 tool output was available" || {
+        rm -rf "$tmp_dir"
+        return 1
+      }
+    elif [ "$actual_sha" != "$expected_sha" ]; then
       echo "Error: checksum mismatch! Expected ${expected_sha}, got ${actual_sha}."
       echo "The download may be corrupted. Aborting."
       rm -rf "$tmp_dir"
       return 1
+    else
+      echo "Checksum verified."
     fi
-    echo "Checksum verified."
   else
-    echo "Warning: skipping integrity verification (install jq or python3 for checksum support)." >&2
+    local reason
+    if _gos_has_checksum_parser; then
+      reason="checksum metadata was not found for ${pkg}"
+    else
+      reason="jq or python3 is required to read checksum metadata"
+    fi
+    _gos_checksum_unavailable "$reason" || {
+      rm -rf "$tmp_dir"
+      return 1
+    }
   fi
 
   echo "Removing old Go installation..."
@@ -331,7 +378,7 @@ cmd_install() {
     return 0
   fi
 
-  _gos_install_version "$version"
+  _gos_install_version "$version" true
 }
 
 cmd_current() {

@@ -262,6 +262,7 @@ To manually enable them, see the [Manual Shell Configuration](#manual-shell-conf
 | Variable | Default | Description |
 |---|---|---|
 | `GOS_INSTALL_DIR` | `/usr/local/go` | Where Go gets installed. Override to install without `sudo`. Path basename must contain "go". |
+| `GOS_REQUIRE_CHECKSUM` | unset | Set to `1` to abort installs when checksum metadata or local SHA256 calculation is unavailable. |
 
 Example — install Go in your home directory (no sudo needed):
 

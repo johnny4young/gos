@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Security
+
+- Verify checksums for historical Go versions using the full downloads feed, with `GOS_REQUIRE_CHECKSUM=1` for fail-closed installs.
+
 ## [1.4.2] - 2026-04-26
 
 ## [1.4.1] - 2026-04-26
