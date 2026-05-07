@@ -48,9 +48,11 @@ release = workflow(".github/workflows/release.yml")
 ci = workflow(".github/workflows/ci.yml")
 readme = file_text("README.md")
 releasing = file_text("RELEASING.md")
+security = file_text("SECURITY.md")
 gos_version = file_text("gos.sh")[/^GOS_VERSION="([^"]+)"$/, 1]
 assert(gos_version && !gos_version.empty?, "gos.sh must define GOS_VERSION")
 assert(!releasing.empty?, "repository must include RELEASING.md")
+assert(!security.empty?, "repository must include SECURITY.md")
 
 release_on = workflow_on(release)
 assert(release_on.dig("workflow_dispatch", "inputs", "version"), "release workflow must keep workflow_dispatch version input")
@@ -240,6 +242,7 @@ assert(readme.include?("PowerShell"), "README must explain the PowerShell Window
 assert(readme.include?("It does not install Go"), "README must say the PowerShell installer only installs gos")
 assert(readme.include?("To update `gos`, run the same PowerShell installer again"), "README must document how to update gos on Windows")
 assert(readme.include?("Windows Package Managers"), "README must explain Windows package-manager status")
+assert(readme.include?("SECURITY.md"), "README must link to SECURITY.md")
 assert(!readme.include?("winget install johnny4young.gos"), "README must not advertise unpublished Winget install command")
 assert(!readme.include?("choco install gos"), "README must not advertise unpublished Chocolatey install command")
 
@@ -266,8 +269,31 @@ assert(!readme.include?("choco install gos"), "README must not advertise unpubli
   assert(releasing.include?(fragment), "RELEASING.md must mention #{fragment}")
 end
 assert(releasing.match?(/empty release\s+sections/), "RELEASING.md must mention empty release sections")
+assert(releasing.include?("SECURITY.md"), "RELEASING.md must include security-release checks")
 assert(releasing.include?("no public Chocolatey or Winget install commands"), "RELEASING.md must keep package-manager commands gated")
 assert(releasing.include?("`[Unreleased]` compare link"), "RELEASING.md must include changelog compare-link checks")
+
+[
+  "Supported Versions",
+  "Reporting a Vulnerability",
+  "GitHub Security Advisories",
+  "Do not open public issues",
+  "Security Scope",
+  "Trust Model",
+  "latest published `gos` version",
+  "go.dev/dl",
+  "include=all",
+  "GOS_REQUIRE_CHECKSUM=1",
+  "transactional",
+  "install.sh",
+  "install.ps1",
+  "gos-windows.zip",
+  "checksums.txt",
+  "artifact attestations",
+  "Raw `main` installer URLs"
+].each do |fragment|
+  assert(security.include?(fragment), "SECURITY.md must mention #{fragment}")
+end
 
 puts "ok - workflow YAML and invariants"
 RUBY

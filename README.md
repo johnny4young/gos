@@ -49,6 +49,7 @@ Works on **macOS**, **Linux**, and **Windows** (via Git Bash or WSL). Auto-detec
 - [Configuration](#configuration)
 - [How It Works](#how-it-works)
 - [Uninstallation](#uninstallation)
+- [Security](#security)
 - [Contributing](#contributing)
 - [Releasing](#releasing)
 - [License](#license)
@@ -344,6 +345,14 @@ rm -rf ~/.gos
 ```
 
 Then remove the `PATH` and `source` lines from your shell config file.
+
+---
+
+## Security
+
+Security reporting instructions, supported versions, and installer trust
+assumptions are documented in [SECURITY.md](SECURITY.md). Do not open public
+issues for sensitive vulnerability details.
 
 ---
 
