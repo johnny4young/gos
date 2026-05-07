@@ -243,18 +243,31 @@ _gos_prepare_install_parent() {
 
 _gos_extract_archive() {
   local ext="$1" tmp_file="$2" stage_dir="$3"
+  local ps_archive ps_stage
 
   if [ "$ext" = "zip" ]; then
     if command -v unzip &>/dev/null; then
       unzip -q "$tmp_file" -d "$stage_dir"
-    elif command -v powershell.exe &>/dev/null; then
-      powershell.exe -Command \
-        "Expand-Archive -Path '$(cygpath -w "$tmp_file")' -DestinationPath '$(cygpath -w "$stage_dir")' -Force"
     elif command -v tar &>/dev/null; then
       # Windows 10+ ships with tar that can handle zip.
       tar -xf "$tmp_file" -C "$stage_dir"
+    elif command -v powershell.exe &>/dev/null && command -v cygpath &>/dev/null; then
+      ps_archive=$(cygpath -w "$tmp_file") || {
+        echo "Error: failed to convert archive path for PowerShell." >&2
+        return 1
+      }
+      ps_stage=$(cygpath -w "$stage_dir") || {
+        echo "Error: failed to convert stage path for PowerShell." >&2
+        return 1
+      }
+      # The PowerShell command intentionally receives literal $env: lookups.
+      # shellcheck disable=SC2016
+      GOS_PS_ARCHIVE="$ps_archive" \
+      GOS_PS_DESTINATION="$ps_stage" \
+        powershell.exe -NoProfile -NonInteractive -Command \
+          'Expand-Archive -LiteralPath $env:GOS_PS_ARCHIVE -DestinationPath $env:GOS_PS_DESTINATION -Force'
     else
-      echo "Error: no extraction tool found (unzip, powershell, or tar)." >&2
+      echo "Error: no extraction tool found (unzip, tar, or powershell with cygpath)." >&2
       return 1
     fi
   else

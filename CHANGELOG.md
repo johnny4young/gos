@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Security
 
+- Harden Windows zip extraction by preferring `unzip`/`tar` and passing PowerShell fallback paths through environment variables with `-LiteralPath`.
 - Harden release workflow permissions, semver tag validation, and artifact provenance attestations for release assets.
 - Replace Go installations transactionally so failed extraction or activation keeps the previous install intact.
 - Verify checksums for historical Go versions using the full downloads feed, with `GOS_REQUIRE_CHECKSUM=1` for fail-closed installs.

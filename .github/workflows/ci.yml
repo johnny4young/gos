@@ -50,7 +50,7 @@ jobs:
 
       - name: Bash syntax
         run: |
-          bash -n gos.sh install.sh completions/gos.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/workflows.bash
+          bash -n gos.sh install.sh completions/gos.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/windows-extract.bash tests/workflows.bash
 
       - name: Run checksum tests
         run: |
@@ -63,6 +63,10 @@ jobs:
       - name: Run installer tests
         run: |
           bash tests/install-sh.bash
+
+      - name: Run Windows extraction tests
+        run: |
+          bash tests/windows-extract.bash
 
       - name: Smoke gos commands
         run: |
