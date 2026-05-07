@@ -69,6 +69,25 @@ _maybe_sudo() {
   fi
 }
 
+_prepare_bin_dir() {
+  if [ -d "$GOS_BIN_DIR" ]; then
+    return 0
+  fi
+
+  if mkdir -p "$GOS_BIN_DIR" 2>/dev/null; then
+    return 0
+  fi
+
+  if command -v sudo >/dev/null 2>&1 && sudo mkdir -p "$GOS_BIN_DIR"; then
+    return 0
+  fi
+
+  echo "Error: failed to create GOS_BIN_DIR='${GOS_BIN_DIR}'." >&2
+  echo "Create it manually or choose a writable install directory." >&2
+  return 1
+}
+
+_prepare_bin_dir
 _maybe_sudo mv "$tmp_file" "$GOS_BIN_DIR/gos"
 _maybe_sudo chmod +x "$GOS_BIN_DIR/gos"
 echo "gos installed to ${GOS_BIN_DIR}/gos"

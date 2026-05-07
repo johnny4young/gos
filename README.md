@@ -108,7 +108,8 @@ curl -fsSL https://github.com/johnny4young/gos/releases/latest/download/install.
 
 This downloads the latest published `gos` release and places it in `/usr/local/bin`.
 The release installer pins the downloaded script to the release asset checksum.
-You can customize the location:
+You can customize the location. The installer creates the target directory when
+possible:
 
 ```bash
 curl -fsSL https://github.com/johnny4young/gos/releases/latest/download/install.sh | GOS_BIN_DIR="$HOME/.local/bin" bash
@@ -261,6 +262,7 @@ To manually enable them, see the [Manual Shell Configuration](#manual-shell-conf
 
 | Variable | Default | Description |
 |---|---|---|
+| `GOS_BIN_DIR` | `/usr/local/bin` | Where the `gos` command is installed by `install.sh`. Missing custom directories are created when possible. |
 | `GOS_INSTALL_DIR` | `/usr/local/go` | Where Go gets installed. Override to install without `sudo`. Path basename must contain "go". |
 | `GOS_REQUIRE_CHECKSUM` | unset | Set to `1` to abort installs when checksum metadata or local SHA256 calculation is unavailable. |
 

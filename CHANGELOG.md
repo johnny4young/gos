@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - Add CI coverage for pull requests and pushes across ShellCheck, workflow validation, and Linux/macOS/Windows smoke tests.
 
+### Fixed
+
+- Create missing installer target directories for custom `GOS_BIN_DIR` and `GOS_INSTALL_DIR` paths when possible.
+
 ### Security
 
 - Harden release workflow permissions, semver tag validation, and artifact provenance attestations for release assets.

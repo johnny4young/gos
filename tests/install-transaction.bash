@@ -6,6 +6,7 @@ script="${repo_root}/gos.sh"
 test_root="$(mktemp -d)"
 fake_bin="${test_root}/bin"
 original_path="$PATH"
+real_mkdir="$(command -v mkdir)"
 
 cleanup() {
   rm -rf "$test_root"
@@ -142,9 +143,36 @@ cat >"${fake_bin}/go" <<'FAKE_GO'
 echo "go version go1.20.0 darwin/arm64"
 FAKE_GO
 
+cat >"${fake_bin}/mkdir" <<'FAKE_MKDIR'
+#!/usr/bin/env bash
+set -euo pipefail
+
+target=""
+for arg in "$@"; do
+  target="$arg"
+done
+
+if [ -n "${GOS_TEST_MKDIR_FAIL_PATH:-}" ] && [ "$target" = "$GOS_TEST_MKDIR_FAIL_PATH" ]; then
+  echo "fake mkdir failure: $target" >&2
+  exit 1
+fi
+
+exec "$GOS_TEST_REAL_MKDIR" "$@"
+FAKE_MKDIR
+
+cat >"${fake_bin}/sudo" <<'FAKE_SUDO'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'sudo'
+printf ' %s' "$@"
+printf '\n'
+"$@"
+FAKE_SUDO
+
 chmod +x "${fake_bin}/uname" "${fake_bin}/curl" "${fake_bin}/jq" \
   "${fake_bin}/sha256sum" "${fake_bin}/tar" "${fake_bin}/unzip" \
-  "${fake_bin}/go"
+  "${fake_bin}/go" "${fake_bin}/mkdir" "${fake_bin}/sudo"
 
 fail() {
   echo "not ok - $*" >&2
@@ -169,18 +197,34 @@ OLD_GO
 run_install() {
   local name="$1" extract_mode="$2" install_kind="$3"
   case_dir="${test_root}/${name}"
-  install_dir="${case_dir}/usr/local/go"
   tar_log="${case_dir}/tar.log"
+  mkdir_fail_path=""
   output=""
   status=0
 
-  mkdir -p "$(dirname "$install_dir")"
+  mkdir -p "$case_dir"
   : >"$tar_log"
 
-  if [ "$install_kind" = "custom" ]; then
-    install_dir="${case_dir}/custom/golang"
-    mkdir -p "$(dirname "$install_dir")"
-  fi
+  case "$install_kind" in
+    default)
+      install_dir="${case_dir}/usr/local/go"
+      mkdir -p "$(dirname "$install_dir")"
+      ;;
+    custom)
+      install_dir="${case_dir}/custom/golang"
+      mkdir -p "$(dirname "$install_dir")"
+      ;;
+    missing-parent)
+      install_dir="${case_dir}/.local/go"
+      ;;
+    mkdir-fail)
+      install_dir="${case_dir}/blocked/go"
+      mkdir_fail_path="$(dirname "$install_dir")"
+      ;;
+    *)
+      fail "unknown install kind: ${install_kind}"
+      ;;
+  esac
 
   set +e
   output="$(
@@ -188,6 +232,8 @@ run_install() {
     GOS_INSTALL_DIR="$install_dir" \
     GOS_TEST_TAR_LOG="$tar_log" \
     GOS_TEST_EXTRACT_MODE="$extract_mode" \
+    GOS_TEST_REAL_MKDIR="$real_mkdir" \
+    GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
     bash "$script" install 1.21.6 2>&1
   )"
   status=$?
@@ -213,6 +259,14 @@ assert_contains() {
   case "$haystack" in
     *"$needle"*) ;;
     *) fail "${name}: missing '${needle}'. Output: ${haystack}" ;;
+  esac
+}
+
+assert_not_contains() {
+  local haystack="$1" needle="$2" name="$3"
+  case "$haystack" in
+    *"$needle"*) fail "${name}: unexpected '${needle}'. Output: ${haystack}" ;;
+    *) ;;
   esac
 }
 
@@ -281,3 +335,21 @@ assert_status 0 "$status" "success empty"
 assert_new_install_active "$install_dir" "success empty"
 assert_no_backup_left "$install_dir" "success empty"
 pass "successful install works without previous install"
+
+run_install "success_missing_parent" "ok" "missing-parent"
+assert_status 0 "$status" "success missing parent"
+assert_new_install_active "$install_dir" "success missing parent"
+assert_no_backup_left "$install_dir" "success missing parent"
+pass "successful install creates missing parent directory"
+
+run_install "parent_creation_failure" "ok" "mkdir-fail"
+assert_nonzero_status "$status" "parent creation failure"
+assert_contains "$output" "failed to create parent directory" "parent creation failure"
+assert_not_contains "$output" "Activating new Go installation" "parent creation failure"
+if [ -e "$install_dir" ]; then
+  fail "parent creation failure: install dir was created unexpectedly"
+fi
+if [ ! -s "$tar_log" ]; then
+  fail "parent creation failure: extraction did not run before parent check"
+fi
+pass "parent directory creation failure aborts before activation"

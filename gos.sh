@@ -221,6 +221,26 @@ _gos_sudo() {
   fi
 }
 
+_gos_prepare_install_parent() {
+  local parent
+  parent=$(dirname "$GOS_INSTALL_DIR")
+
+  if [ -d "$parent" ]; then
+    return 0
+  fi
+
+  if mkdir -p "$parent" 2>/dev/null; then
+    return 0
+  fi
+
+  if _gos_sudo mkdir -p "$parent"; then
+    return 0
+  fi
+
+  echo "Error: failed to create parent directory for GOS_INSTALL_DIR: ${parent}" >&2
+  return 1
+}
+
 _gos_extract_archive() {
   local ext="$1" tmp_file="$2" stage_dir="$3"
 
@@ -378,6 +398,11 @@ _gos_install_version() {
   fi
 
   if ! _gos_validate_staged_install "$staged_go_dir"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  if ! _gos_prepare_install_parent; then
     rm -rf "$tmp_dir"
     return 1
   fi

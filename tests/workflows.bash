@@ -167,6 +167,8 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
 [
   "bash tests/checksum.bash",
   "bash tests/install-transaction.bash",
+  "bash tests/install-sh.bash",
+  "bash -n gos.sh install.sh completions/gos.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
