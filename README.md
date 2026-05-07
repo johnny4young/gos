@@ -50,6 +50,7 @@ Works on **macOS**, **Linux**, and **Windows** (via Git Bash or WSL). Auto-detec
 - [How It Works](#how-it-works)
 - [Uninstallation](#uninstallation)
 - [Contributing](#contributing)
+- [Releasing](#releasing)
 - [License](#license)
 
 ---
@@ -357,6 +358,12 @@ Contributions are welcome! Here's how:
 5. Submit a pull request
 
 Please open an issue first for major changes so we can discuss the approach.
+
+## Releasing
+
+Maintainer release steps are documented in [RELEASING.md](RELEASING.md). Use it
+to keep GitHub release assets, Homebrew, PowerShell, package metadata, README
+install commands, and changelog links in sync.
 
 ---
 

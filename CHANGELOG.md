@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Document that rerunning the PowerShell installer updates `gos` without installing Go by default.
 - Add Windows CI coverage that functionally installs, updates, and uninstalls `gos` through `install.ps1`.
 - Automate Chocolatey and Winget metadata updates from the same Windows release asset checksum.
+- Add a maintainer release checklist covering GitHub assets, Homebrew, PowerShell, package metadata, README commands, changelog anchors, and smoke checks.
 
 ### Fixed
 

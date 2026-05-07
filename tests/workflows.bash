@@ -47,8 +47,10 @@ end
 release = workflow(".github/workflows/release.yml")
 ci = workflow(".github/workflows/ci.yml")
 readme = file_text("README.md")
+releasing = file_text("RELEASING.md")
 gos_version = file_text("gos.sh")[/^GOS_VERSION="([^"]+)"$/, 1]
 assert(gos_version && !gos_version.empty?, "gos.sh must define GOS_VERSION")
+assert(!releasing.empty?, "repository must include RELEASING.md")
 
 release_on = workflow_on(release)
 assert(release_on.dig("workflow_dispatch", "inputs", "version"), "release workflow must keep workflow_dispatch version input")
@@ -240,6 +242,32 @@ assert(readme.include?("To update `gos`, run the same PowerShell installer again
 assert(readme.include?("Windows Package Managers"), "README must explain Windows package-manager status")
 assert(!readme.include?("winget install johnny4young.gos"), "README must not advertise unpublished Winget install command")
 assert(!readme.include?("choco install gos"), "README must not advertise unpublished Chocolatey install command")
+
+[
+  "workflow_dispatch",
+  "HOMEBREW_TAP_TOKEN",
+  "CHANGELOG.md",
+  "## [Unreleased]",
+  "README.md",
+  "gos.sh",
+  "install.sh",
+  "install.ps1",
+  "gos-windows.zip",
+  "checksums.txt",
+  "Homebrew",
+  "PowerShell",
+  "Chocolatey",
+  "Winget",
+  "bash tests/packaging.bash",
+  "bash tests/workflows.bash",
+  "git diff --check",
+  "scripts/update-packaging.bash"
+].each do |fragment|
+  assert(releasing.include?(fragment), "RELEASING.md must mention #{fragment}")
+end
+assert(releasing.match?(/empty release\s+sections/), "RELEASING.md must mention empty release sections")
+assert(releasing.include?("no public Chocolatey or Winget install commands"), "RELEASING.md must keep package-manager commands gated")
+assert(releasing.include?("`[Unreleased]` compare link"), "RELEASING.md must include changelog compare-link checks")
 
 puts "ok - workflow YAML and invariants"
 RUBY
