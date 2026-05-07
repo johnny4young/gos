@@ -11,22 +11,69 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
+  validate-release-ref:
+    name: Validate Release Ref
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release-ref.outputs.version }}
+      tag: ${{ steps.release-ref.outputs.tag }}
+    steps:
+      - name: Validate release ref
+        id: release-ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version || '' }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          semver_re='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'
+
+          case "$EVENT_NAME" in
+            workflow_dispatch)
+              VERSION="$INPUT_VERSION"
+              if [[ ! "$VERSION" =~ $semver_re ]]; then
+                printf '::error::Invalid version format %q. Use semver: 1.2.3 or 1.2.3-rc1 (no v prefix)\n' "$VERSION"
+                exit 1
+              fi
+              TAG="v${VERSION}"
+              ;;
+            push)
+              TAG="$REF_NAME"
+              if [[ "$TAG" != v* ]]; then
+                printf '::error::Release tag must start with v, got %q\n' "$TAG"
+                exit 1
+              fi
+              VERSION="${TAG#v}"
+              if [[ ! "$VERSION" =~ $semver_re ]]; then
+                printf '::error::Invalid release tag %q. Use v1.2.3 or v1.2.3-rc1\n' "$TAG"
+                exit 1
+              fi
+              ;;
+            *)
+              printf '::error::Unsupported release event %q\n' "$EVENT_NAME"
+              exit 1
+              ;;
+          esac
+
+          {
+            printf 'version=%s\n' "$VERSION"
+            printf 'tag=%s\n' "$TAG"
+          } >> "$GITHUB_OUTPUT"
+
   version-bump:
     name: Version Bump
+    needs: validate-release-ref
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Validate version format
-        run: |
-          VERSION="${{ github.event.inputs.version }}"
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
-            echo "::error::Invalid version format '${VERSION}'. Use semver: 1.2.3 or 1.2.3-rc1 (no 'v' prefix)"
-            exit 1
-          fi
-
       - uses: actions/checkout@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -37,13 +84,17 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Update version in gos.sh
+        env:
+          VERSION: ${{ needs.validate-release-ref.outputs.version }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
+          : "${VERSION:?missing release version}"
           sed -i "s/^GOS_VERSION=.*/GOS_VERSION=\"${VERSION}\"/" gos.sh
 
       - name: Update CHANGELOG.md
+        env:
+          VERSION: ${{ needs.validate-release-ref.outputs.version }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
+          : "${VERSION:?missing release version}"
           DATE=$(date +%Y-%m-%d)
           PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 
@@ -102,19 +153,23 @@ jobs:
           sed -i "s|^\[Unreleased\]: .*|[Unreleased]: https://github.com/johnny4young/gos/compare/v${VERSION}...HEAD|" CHANGELOG.md
 
       - name: Commit and tag
+        env:
+          VERSION: ${{ needs.validate-release-ref.outputs.version }}
+          TAG: ${{ needs.validate-release-ref.outputs.tag }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
+          : "${VERSION:?missing release version}"
+          : "${TAG:?missing release tag}"
           git add gos.sh CHANGELOG.md
-          git commit -m "release: v${VERSION}"
-          git tag "v${VERSION}"
+          git commit -m "release: ${TAG}"
+          git tag "$TAG"
           # Push only the new tag (avoid leaking unrelated local tags).
           git push origin main
-          git push origin "v${VERSION}"
+          git push origin "$TAG"
 
   smoke-test:
     name: Smoke Test
-    needs: [version-bump]
-    if: always() && (needs.version-bump.result == 'success' || needs.version-bump.result == 'skipped')
+    needs: [validate-release-ref, version-bump]
+    if: always() && needs.validate-release-ref.result == 'success' && (needs.version-bump.result == 'success' || needs.version-bump.result == 'skipped')
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -123,7 +178,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           # On workflow_dispatch, fetch the newly pushed tag to get updated code
-          ref: ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref }}
+          ref: ${{ needs.validate-release-ref.outputs.tag }}
 
       - name: Make script executable
         run: chmod +x gos.sh
@@ -136,34 +191,50 @@ jobs:
 
   release:
     name: Create Release
-    needs: [version-bump, smoke-test]
-    if: always() && (needs.version-bump.result == 'success' || needs.version-bump.result == 'skipped') && needs.smoke-test.result == 'success'
+    needs: [validate-release-ref, version-bump, smoke-test]
+    if: always() && needs.validate-release-ref.result == 'success' && (needs.version-bump.result == 'success' || needs.version-bump.result == 'skipped') && needs.smoke-test.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref }}
+          ref: ${{ needs.validate-release-ref.outputs.tag }}
 
       - name: Make scripts executable
         run: chmod +x gos.sh install.sh
 
       - name: Patch install.sh with release tag and gos.sh SHA256
+        env:
+          TAG: ${{ needs.validate-release-ref.outputs.tag }}
         run: |
-          TAG="${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref_name }}"
+          : "${TAG:?missing release tag}"
           GOS_SHA=$(sha256sum gos.sh | cut -d' ' -f1)
           sed -i "s|^GOS_RELEASE_TAG=.*|GOS_RELEASE_TAG=\"${TAG}\"|" install.sh
           sed -i "s|^GOS_EXPECTED_SHA256=.*|GOS_EXPECTED_SHA256=\"${GOS_SHA}\"|" install.sh
-          echo "Patched install.sh with TAG=${TAG} and SHA256=${GOS_SHA}"
+          printf 'Patched install.sh with TAG=%s and SHA256=%s\n' "$TAG" "$GOS_SHA"
 
       - name: Generate SHA256 checksums
         run: |
           sha256sum gos.sh > checksums.txt
           sha256sum install.sh >> checksums.txt
 
+      - name: Attest script release assets
+        uses: actions/attest@v4
+        with:
+          subject-checksums: checksums.txt
+
+      - name: Attest checksum manifest
+        uses: actions/attest@v4
+        with:
+          subject-path: checksums.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref_name }}
+          tag_name: ${{ needs.validate-release-ref.outputs.tag }}
           files: |
             gos.sh
             install.sh
@@ -172,7 +243,7 @@ jobs:
 
   update-formula:
     name: Update Homebrew Formula
-    needs: [release]
+    needs: [validate-release-ref, release]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout homebrew-gos tap
@@ -187,8 +258,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Update Formula/gos.rb with new version and SHA256
+        env:
+          TAG: ${{ needs.validate-release-ref.outputs.tag }}
         run: |
-          TAG="${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref_name }}"
+          : "${TAG:?missing release tag}"
           VERSION="${TAG#v}"
           ARCHIVE_URL="https://github.com/johnny4young/gos/archive/refs/tags/${TAG}.tar.gz"
 
@@ -202,12 +275,14 @@ jobs:
           sed -i "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/gos.rb
           sed -i "s|version \".*\"|version \"${VERSION}\"|" Formula/gos.rb
 
-          echo "Updated Formula/gos.rb: version=${VERSION} sha256=${SHA}"
+          printf 'Updated Formula/gos.rb: version=%s sha256=%s\n' "$VERSION" "$SHA"
 
       - name: Commit and push to homebrew-gos
+        env:
+          TAG: ${{ needs.validate-release-ref.outputs.tag }}
         run: |
+          : "${TAG:?missing release tag}"
           git add Formula/gos.rb
           git diff --cached --quiet && echo "No changes to commit" && exit 0
-          TAG="${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref_name }}"
           git commit -m "chore: update formula for ${TAG}"
           git push origin main
