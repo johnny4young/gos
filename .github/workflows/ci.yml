@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        run: |
+          shellcheck gos.sh install.sh completions/gos.bash tests/*.bash
+
+  smoke:
+    name: Smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install completion shells
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh fish
+
+      - name: Bash syntax
+        run: |
+          bash -n gos.sh install.sh completions/gos.bash tests/checksum.bash tests/install-transaction.bash tests/workflows.bash
+
+      - name: Run checksum tests
+        run: |
+          bash tests/checksum.bash
+
+      - name: Run transactional install tests
+        run: |
+          bash tests/install-transaction.bash
+
+      - name: Smoke gos commands
+        run: |
+          ./gos.sh version
+          ./gos.sh help
+
+      - name: Zsh completion syntax
+        if: runner.os != 'Windows'
+        run: |
+          zsh -n completions/gos.zsh
+
+      - name: Fish completion syntax
+        if: runner.os == 'Linux'
+        run: |
+          fish --no-config --no-execute completions/gos.fish
+
+  workflow-validation:
+    name: Workflow Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate workflow YAML and invariants
+        run: |
+          bash tests/workflows.bash
