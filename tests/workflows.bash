@@ -191,6 +191,8 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
   assert(smoke_runs.include?(command), "smoke job must run #{command}")
 end
 assert(smoke_runs.include?("packaging/windows/uninstall.ps1"), "smoke job must parse the PowerShell uninstaller")
+assert(smoke_runs.include?("tests/install-ps1.ps1"), "smoke job must parse the PowerShell installer test")
+assert(smoke_runs.include?("powershell -NoProfile -ExecutionPolicy Bypass -File tests/install-ps1.ps1"), "smoke job must run the functional PowerShell installer test")
 
 packaging_files = Dir.glob("packaging/**/*").select { |path| File.file?(path) }
 packaging_text = packaging_files.map { |path| File.read(path) }.join("\n")
@@ -199,6 +201,7 @@ packaging_text = packaging_files.map { |path| File.read(path) }.join("\n")
   "install.ps1",
   "packaging/windows/gos.cmd",
   "packaging/windows/uninstall.ps1",
+  "tests/install-ps1.ps1",
   "packaging/chocolatey/gos.nuspec",
   "packaging/chocolatey/tools/chocolateyInstall.ps1",
   "packaging/chocolatey/tools/chocolateyUninstall.ps1",

@@ -39,6 +39,10 @@ assert_contains install.ps1 "\$ErrorActionPreference = 'Stop'"
 assert_contains install.ps1 "Set-StrictMode -Version 2.0"
 assert_contains install.ps1 "\$GosReleaseTag = 'UPDATE_ON_RELEASE'"
 assert_contains install.ps1 "\$GosExpectedZipSha256 = 'UPDATE_ON_RELEASE'"
+# shellcheck disable=SC2016
+assert_contains install.ps1 '[string]$PackagePath = $env:GOS_WINDOWS_PACKAGE_PATH'
+# shellcheck disable=SC2016
+assert_contains install.ps1 '[string]$ExpectedSha256 = $env:GOS_WINDOWS_PACKAGE_SHA256'
 assert_contains install.ps1 "releases/download/\$GosReleaseTag/gos-windows.zip"
 assert_contains install.ps1 "raw.githubusercontent.com/\$GosRepo/main"
 assert_contains install.ps1 "Get-FileHash -LiteralPath"
@@ -52,5 +56,6 @@ assert_contains packaging/windows/gos.cmd 'bash.exe "%~dp0gos.sh" %*'
 # shellcheck disable=SC2016
 assert_contains packaging/windows/uninstall.ps1 'Remove-Item -LiteralPath $resolvedInstallDir -Recurse -Force'
 assert_contains packaging/windows/uninstall.ps1 "SetEnvironmentVariable('Path'"
+assert_file tests/install-ps1.ps1
 
 pass "PowerShell installer files are present and guarded"

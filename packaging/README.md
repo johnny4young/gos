@@ -12,7 +12,7 @@ release asset.
 |---|---|---|
 | GitHub release installer | Active | Canonical `curl | bash` path for stable releases. |
 | Homebrew | Active | Updated by the release workflow through `johnny4young/homebrew-gos`. |
-| PowerShell | Prepared | Release workflow publishes `install.ps1` and `gos-windows.zip` as the canonical Windows install path. |
+| PowerShell | CI-validated | Release workflow publishes `install.ps1` and `gos-windows.zip` as the canonical Windows install path. |
 | Chocolatey | Draft | Should wrap the Windows release asset after registry publication is ready. |
 | Winget | Draft | Should consume the Windows release asset after manifest validation and registry publication are ready. |
 

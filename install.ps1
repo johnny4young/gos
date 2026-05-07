@@ -1,6 +1,8 @@
 param(
   [string]$InstallDir = $env:GOS_HOME,
-  [switch]$NoPath
+  [switch]$NoPath,
+  [string]$PackagePath = $env:GOS_WINDOWS_PACKAGE_PATH,
+  [string]$ExpectedSha256 = $env:GOS_WINDOWS_PACKAGE_SHA256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -55,7 +57,7 @@ function Assert-Sha256 {
     [string]$ExpectedSha256
   )
 
-  if ($ExpectedSha256 -eq 'UPDATE_ON_RELEASE') {
+  if ([string]::IsNullOrWhiteSpace($ExpectedSha256) -or $ExpectedSha256 -eq 'UPDATE_ON_RELEASE') {
     Write-Warning 'No release checksum configured, skipping integrity check.'
     Write-Warning 'For a pinned, verified install use the GitHub release install.ps1 asset.'
     return
@@ -144,6 +146,25 @@ function Get-PayloadFromRelease {
   return $StageDir
 }
 
+function Get-PayloadFromLocalPackage {
+  param(
+    [string]$LocalPackagePath,
+    [string]$ExpectedPackageSha256,
+    [string]$StageDir
+  )
+
+  $resolvedPackagePath = (Resolve-Path -LiteralPath $LocalPackagePath).Path
+  Assert-Sha256 -Path $resolvedPackagePath -ExpectedSha256 $ExpectedPackageSha256
+  Expand-Archive -LiteralPath $resolvedPackagePath -DestinationPath $StageDir -Force
+
+  $payloadDir = Join-Path $StageDir 'gos'
+  if (Test-Path -LiteralPath (Join-Path $payloadDir 'gos.sh') -PathType Leaf) {
+    return $payloadDir
+  }
+
+  return $StageDir
+}
+
 function Get-PayloadFromMain {
   param([string]$StageDir)
 
@@ -163,7 +184,9 @@ $tempDir = New-TempDir
 $stageDir = Join-Path $tempDir 'stage'
 
 try {
-  if ($GosReleaseTag -ne 'UPDATE_ON_RELEASE') {
+  if (-not [string]::IsNullOrWhiteSpace($PackagePath)) {
+    $payloadDir = Get-PayloadFromLocalPackage -LocalPackagePath $PackagePath -ExpectedPackageSha256 $ExpectedSha256 -StageDir $stageDir
+  } elseif ($GosReleaseTag -ne 'UPDATE_ON_RELEASE') {
     $payloadDir = Get-PayloadFromRelease -TempDir $tempDir -StageDir $stageDir
   } else {
     $payloadDir = Get-PayloadFromMain -StageDir $stageDir
