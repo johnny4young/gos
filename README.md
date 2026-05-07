@@ -283,9 +283,10 @@ Add the export to your shell profile to make it permanent.
 2. Detects your OS via `uname -s` and architecture via `uname -m`
 3. Downloads the matching archive from `https://go.dev/dl/`
 4. Verifies SHA256 checksum against the Go API (uses `jq` or `python3`)
-5. Removes the previous Go installation at `$GOS_INSTALL_DIR`
-6. Extracts the new version in place
-7. Confirms with `go version`
+5. Extracts the new version into a temporary staging directory
+6. Validates the staged `go/bin/go` before touching `$GOS_INSTALL_DIR`
+7. Backs up the previous Go installation, activates the staged version, and rolls back automatically if activation fails
+8. Confirms with `go version`
 
 No symlinks, no shims, no magic. Just a clean install of the official Go binary.
 

@@ -221,21 +221,95 @@ _gos_sudo() {
   fi
 }
 
-_gos_remove_old() {
-  if [ ! -d "$GOS_INSTALL_DIR" ]; then
-    return 0
+_gos_extract_archive() {
+  local ext="$1" tmp_file="$2" stage_dir="$3"
+
+  if [ "$ext" = "zip" ]; then
+    if command -v unzip &>/dev/null; then
+      unzip -q "$tmp_file" -d "$stage_dir"
+    elif command -v powershell.exe &>/dev/null; then
+      powershell.exe -Command \
+        "Expand-Archive -Path '$(cygpath -w "$tmp_file")' -DestinationPath '$(cygpath -w "$stage_dir")' -Force"
+    elif command -v tar &>/dev/null; then
+      # Windows 10+ ships with tar that can handle zip.
+      tar -xf "$tmp_file" -C "$stage_dir"
+    else
+      echo "Error: no extraction tool found (unzip, powershell, or tar)." >&2
+      return 1
+    fi
+  else
+    tar -C "$stage_dir" -xzf "$tmp_file"
+  fi
+}
+
+_gos_validate_staged_install() {
+  local staged_go_dir="$1"
+  local staged_go_bin="${staged_go_dir}/bin/go"
+
+  if [ ! -x "$staged_go_bin" ]; then
+    echo "Error: archive did not contain an executable go/bin/go." >&2
+    return 1
+  fi
+}
+
+_gos_restore_backup() {
+  local backup_dir="$1"
+
+  echo "Rolling back Go installation..."
+  _gos_sudo rm -rf "$GOS_INSTALL_DIR" || return 1
+
+  if [ -n "$backup_dir" ] && [ -d "$backup_dir" ]; then
+    _gos_sudo mv "$backup_dir" "$GOS_INSTALL_DIR" || return 1
+  fi
+}
+
+_gos_activate_staged_install() {
+  local staged_go_dir="$1"
+  local backup_dir=""
+  local version_output
+
+  if [ -e "$GOS_INSTALL_DIR" ]; then
+    backup_dir="${GOS_INSTALL_DIR}.gos-backup.$$"
+    if [ -e "$backup_dir" ]; then
+      echo "Error: backup path already exists: ${backup_dir}" >&2
+      return 1
+    fi
+
+    echo "Backing up existing Go installation..."
+    _gos_sudo mv "$GOS_INSTALL_DIR" "$backup_dir" || return 1
   fi
 
-  # Use rm -rf on all platforms. On Windows this script runs inside
-  # Git Bash/MSYS2/Cygwin where rm -rf works natively, avoiding the
-  # command injection risk of passing paths through cmd.exe.
-  _gos_sudo rm -rf "$GOS_INSTALL_DIR"
+  echo "Activating new Go installation..."
+  if ! _gos_sudo mv "$staged_go_dir" "$GOS_INSTALL_DIR"; then
+    echo "Error: failed to move new Go installation into place." >&2
+    _gos_restore_backup "$backup_dir" || true
+    return 1
+  fi
+
+  local go_bin="${GOS_INSTALL_DIR}/bin/go"
+  if [ ! -x "$go_bin" ]; then
+    echo "Error: activated Go installation is missing bin/go." >&2
+    _gos_restore_backup "$backup_dir" || true
+    return 1
+  fi
+
+  if ! version_output=$("$go_bin" version 2>&1); then
+    echo "Error: activated Go failed validation: ${version_output}" >&2
+    _gos_restore_backup "$backup_dir" || true
+    return 1
+  fi
+
+  if [ -n "$backup_dir" ]; then
+    _gos_sudo rm -rf "$backup_dir"
+  fi
+
+  echo "Done! ${version_output}"
 }
 
 _gos_install_version() {
   local version=$1
   local include_all_checksums="${2:-false}"
-  local os arch ext pkg url tmp_dir tmp_file
+  local os arch ext pkg url tmp_dir tmp_file stage_dir staged_go_dir
 
   _gos_validate_version "$version" || return 1
 
@@ -251,9 +325,11 @@ _gos_install_version() {
   pkg="go${version}.${os}-${arch}.${ext}"
   url="https://go.dev/dl/${pkg}"
 
-  # Use a unique temp directory to prevent symlink/TOCTOU attacks
+  # Use a unique temp directory to prevent symlink/TOCTOU attacks.
   tmp_dir=$(mktemp -d) || { echo "Error: failed to create temp directory." >&2; return 1; }
   tmp_file="${tmp_dir}/${pkg}"
+  stage_dir="${tmp_dir}/stage"
+  staged_go_dir="${stage_dir}/go"
 
   echo "Downloading ${pkg}..."
   _gos_download "$url" "$tmp_file" || {
@@ -262,7 +338,7 @@ _gos_install_version() {
     return 1
   }
 
-  # Verify checksum if tools are available
+  # Verify checksum if tools are available.
   local expected_sha actual_sha
   expected_sha=$(_gos_fetch_checksum "$pkg" "$include_all_checksums")
   if [ -n "$expected_sha" ]; then
@@ -293,46 +369,25 @@ _gos_install_version() {
     }
   fi
 
-  echo "Removing old Go installation..."
-  _gos_remove_old
-
   echo "Extracting..."
-  local install_parent extract_ok=true
-  install_parent=$(dirname "$GOS_INSTALL_DIR")
-  if [ "$ext" = "zip" ]; then
-    if command -v unzip &>/dev/null; then
-      unzip -q "$tmp_file" -d "$install_parent" || extract_ok=false
-    elif command -v powershell.exe &>/dev/null; then
-      powershell.exe -Command \
-        "Expand-Archive -Path '$(cygpath -w "$tmp_file")' -DestinationPath '$(cygpath -w "$install_parent")' -Force" || extract_ok=false
-    elif command -v tar &>/dev/null; then
-      # Windows 10+ ships with tar that can handle zip
-      tar -xf "$tmp_file" -C "$install_parent" || extract_ok=false
-    else
-      echo "Error: no extraction tool found (unzip, powershell, or tar)."
-      rm -rf "$tmp_dir"
-      return 1
-    fi
-  else
-    _gos_sudo tar -C "$install_parent" -xzf "$tmp_file" || extract_ok=false
-  fi
-
-  rm -rf "$tmp_dir"
-
-  if [ "$extract_ok" = false ]; then
+  mkdir -p "$stage_dir"
+  if ! _gos_extract_archive "$ext" "$tmp_file" "$stage_dir"; then
     echo "Error: extraction failed."
+    rm -rf "$tmp_dir"
     return 1
   fi
 
-  local go_bin="${GOS_INSTALL_DIR}/bin/go"
-  if [ -x "$go_bin" ]; then
-    echo "Done! $("$go_bin" version)"
-  elif command -v go &>/dev/null; then
-    echo "Done! $(go version)"
-  else
-    echo "Done! Installed at ${GOS_INSTALL_DIR}."
-    echo "Add ${GOS_INSTALL_DIR}/bin to your PATH to use 'go'."
+  if ! _gos_validate_staged_install "$staged_go_dir"; then
+    rm -rf "$tmp_dir"
+    return 1
   fi
+
+  if ! _gos_activate_staged_install "$staged_go_dir"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  rm -rf "$tmp_dir"
 }
 
 # ─── Commands ─────────────────────────────────────────────────────────────────
