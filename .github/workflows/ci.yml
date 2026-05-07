@@ -50,7 +50,12 @@ jobs:
 
       - name: Bash syntax
         run: |
-          bash -n gos.sh install.sh completions/gos.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/windows-extract.bash tests/workflows.bash
+          bash -n gos.sh install.sh completions/gos.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/windows-extract.bash tests/workflows.bash
+
+      - name: PowerShell installer syntax
+        if: runner.os == 'Windows'
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -Command '$files = @("install.ps1", "packaging/windows/uninstall.ps1"); foreach ($file in $files) { $errors = $null; $tokens = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { $errors | Format-List; exit 1 } }'
 
       - name: Run checksum tests
         run: |
@@ -63,6 +68,10 @@ jobs:
       - name: Run installer tests
         run: |
           bash tests/install-sh.bash
+
+      - name: Run PowerShell installer tests
+        run: |
+          bash tests/install-ps1.bash
 
       - name: Run Windows extraction tests
         run: |

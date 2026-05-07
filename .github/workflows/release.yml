@@ -216,10 +216,35 @@ jobs:
           sed -i "s|^GOS_EXPECTED_SHA256=.*|GOS_EXPECTED_SHA256=\"${GOS_SHA}\"|" install.sh
           printf 'Patched install.sh with TAG=%s and SHA256=%s\n' "$TAG" "$GOS_SHA"
 
+      - name: Build Windows package asset
+        run: |
+          stage_dir=$(mktemp -d)
+          trap 'rm -rf "$stage_dir"' EXIT
+
+          mkdir -p "$stage_dir/gos"
+          cp gos.sh "$stage_dir/gos/gos.sh"
+          cp packaging/windows/gos.cmd "$stage_dir/gos/gos.cmd"
+          cp packaging/windows/uninstall.ps1 "$stage_dir/gos/uninstall.ps1"
+          cp LICENSE "$stage_dir/gos/LICENSE"
+
+          (cd "$stage_dir" && zip -qr "$GITHUB_WORKSPACE/gos-windows.zip" gos)
+
+      - name: Patch install.ps1 with release tag and Windows package SHA256
+        env:
+          TAG: ${{ needs.validate-release-ref.outputs.tag }}
+        run: |
+          : "${TAG:?missing release tag}"
+          WINDOWS_SHA=$(sha256sum gos-windows.zip | cut -d' ' -f1)
+          sed -i "s|^\$GosReleaseTag = .*|\$GosReleaseTag = '${TAG}'|" install.ps1
+          sed -i "s|^\$GosExpectedZipSha256 = .*|\$GosExpectedZipSha256 = '${WINDOWS_SHA}'|" install.ps1
+          printf 'Patched install.ps1 with TAG=%s and SHA256=%s\n' "$TAG" "$WINDOWS_SHA"
+
       - name: Generate SHA256 checksums
         run: |
           sha256sum gos.sh > checksums.txt
           sha256sum install.sh >> checksums.txt
+          sha256sum install.ps1 >> checksums.txt
+          sha256sum gos-windows.zip >> checksums.txt
 
       - name: Attest script release assets
         uses: actions/attest@v4
@@ -238,6 +263,8 @@ jobs:
           files: |
             gos.sh
             install.sh
+            install.ps1
+            gos-windows.zip
             checksums.txt
           generate_release_notes: true
 

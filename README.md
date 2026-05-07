@@ -40,6 +40,7 @@ Works on **macOS**, **Linux**, and **Windows** (via Git Bash or WSL). Auto-detec
 - [Installation](#installation)
   - [curl | bash](#curl--bash)
   - [Homebrew](#homebrew-macos--linux)
+  - [PowerShell](#powershell-windows)
   - [Windows Package Managers](#windows-package-managers)
   - [Git Clone](#git-clone)
   - [Manual Shell Config](#manual-shell-configuration)
@@ -89,7 +90,9 @@ Done. That's the whole setup.
 | `sudo` | Required for the default install path (`/usr/local/go`). Not needed if you override `GOS_INSTALL_DIR`. |
 | `jq` or `python3` (optional) | Enables SHA256 checksum verification after download. `python3` is pre-installed on macOS. |
 
-> **Windows users:** gos runs inside Git Bash or WSL. Native `cmd.exe` and PowerShell are not directly supported.
+> **Windows users:** install with PowerShell or Git Bash. The installed `gos`
+> command runs through Git Bash today, so install [Git for Windows](https://gitforwindows.org/)
+> or use WSL before running `gos`.
 
 ---
 
@@ -137,16 +140,44 @@ brew upgrade gos
 
 > The formula lives in [johnny4young/homebrew-gos](https://github.com/johnny4young/homebrew-gos) and is updated automatically on each release.
 
+### PowerShell (Windows)
+
+PowerShell is the primary Windows install path. Starting with the first release
+that ships `install.ps1`, use:
+
+```powershell
+irm https://github.com/johnny4young/gos/releases/latest/download/install.ps1 | iex
+```
+
+The installer places `gos` in `%LOCALAPPDATA%\Programs\gos`, adds that directory
+to your user `PATH`, verifies the release package checksum when installed from a
+release asset, and warns if Git Bash is not available. It does not install Go;
+after installing `gos`, run `gos latest` or `gos install <version>` when you want
+to install a Go toolchain.
+
+To update `gos`, run the same PowerShell installer again:
+
+```powershell
+irm https://github.com/johnny4young/gos/releases/latest/download/install.ps1 | iex
+```
+
+For development testing before that release asset exists:
+
+```powershell
+irm https://raw.githubusercontent.com/johnny4young/gos/main/install.ps1 | iex
+```
+
 ### Windows Package Managers
 
-Chocolatey and Winget are planned package-manager channels for Windows users.
-Their metadata is maintained under `packaging/` so releases can be made
-publishable without starting over.
+Chocolatey and Winget are planned package-manager channels for Windows users,
+but PowerShell is the canonical Windows installer first. Their metadata is
+maintained under `packaging/` so future package-manager submissions can reuse
+the same Windows release asset.
 
 The public `choco install` and `winget install` commands are intentionally not
 listed here yet. They should be added only after the packages are accepted by
 their registries, so users do not copy commands that fail. Until then, use the
-release installer from Git Bash or install through WSL.
+PowerShell installer, Git Bash, or WSL.
 
 ### Git Clone
 
@@ -297,6 +328,12 @@ sudo rm /usr/local/bin/gos
 ```bash
 brew uninstall gos
 brew untap johnny4young/gos
+```
+
+**If installed via PowerShell on Windows:**
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\gos\uninstall.ps1"
 ```
 
 **If installed via git clone:**

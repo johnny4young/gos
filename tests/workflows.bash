@@ -125,11 +125,16 @@ assert(release_checkout.dig("with", "ref").to_s.include?("needs.validate-release
 release_files = release_steps
   .map { |step| step.dig("with", "files").to_s }
   .join("\n")
-%w[gos.sh install.sh checksums.txt].each do |asset|
+%w[gos.sh install.sh install.ps1 gos-windows.zip checksums.txt].each do |asset|
   assert(release_files.include?(asset), "release workflow must upload #{asset}")
 end
 assert(release_steps.any? { |step| step.dig("with", "subject-checksums").to_s == "checksums.txt" }, "release workflow must attest script assets from checksums.txt")
 assert(release_steps.any? { |step| step.dig("with", "subject-path").to_s.include?("checksums.txt") }, "release workflow must attest checksums.txt")
+release_runs = release_steps.map { |step| step["run"].to_s }.join("\n")
+assert(release_runs.include?("gos-windows.zip"), "release workflow must build the Windows package asset")
+assert(release_runs.include?("$GosExpectedZipSha256"), "release workflow must patch install.ps1 with the Windows package checksum")
+assert(release_runs.include?("sha256sum install.ps1"), "release workflow must checksum install.ps1")
+assert(release_runs.include?("sha256sum gos-windows.zip"), "release workflow must checksum gos-windows.zip")
 
 update_formula = release_jobs.fetch("update-formula")
 assert(job_needs(update_formula).include?("validate-release-ref"), "update-formula must depend on validate-release-ref")
@@ -175,8 +180,9 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
   "bash tests/checksum.bash",
   "bash tests/install-transaction.bash",
   "bash tests/install-sh.bash",
+  "bash tests/install-ps1.bash",
   "bash tests/windows-extract.bash",
-  "bash -n gos.sh install.sh completions/gos.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n gos.sh install.sh completions/gos.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -184,11 +190,15 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
 ].each do |command|
   assert(smoke_runs.include?(command), "smoke job must run #{command}")
 end
+assert(smoke_runs.include?("packaging/windows/uninstall.ps1"), "smoke job must parse the PowerShell uninstaller")
 
 packaging_files = Dir.glob("packaging/**/*").select { |path| File.file?(path) }
 packaging_text = packaging_files.map { |path| File.read(path) }.join("\n")
 [
   "packaging/README.md",
+  "install.ps1",
+  "packaging/windows/gos.cmd",
+  "packaging/windows/uninstall.ps1",
   "packaging/chocolatey/gos.nuspec",
   "packaging/chocolatey/tools/chocolateyInstall.ps1",
   "packaging/chocolatey/tools/chocolateyUninstall.ps1",
@@ -206,6 +216,9 @@ assert(packaging_text.include?("PackageVersion: #{gos_version}"), "Winget manife
 assert(packaging_text.include?("releases/download/v#{gos_version}/gos.sh"), "Chocolatey install must use the current release asset")
 assert(packaging_text.include?("-ChecksumType 'sha256'"), "Chocolatey install must verify the release asset checksum")
 assert(packaging_text.include?("Install-BinFile -Name 'gos'"), "Chocolatey install must expose a gos command shim")
+assert(readme.include?("PowerShell"), "README must explain the PowerShell Windows install path")
+assert(readme.include?("It does not install Go"), "README must say the PowerShell installer only installs gos")
+assert(readme.include?("To update `gos`, run the same PowerShell installer again"), "README must document how to update gos on Windows")
 assert(readme.include?("Windows Package Managers"), "README must explain Windows package-manager status")
 assert(!readme.include?("winget install johnny4young.gos"), "README must not advertise unpublished Winget install command")
 assert(!readme.include?("choco install gos"), "README must not advertise unpublished Chocolatey install command")
