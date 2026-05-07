@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Fix release changelog automation so releases use curated `Unreleased` notes, keep `Unreleased` at the top, and fail instead of creating empty release sections.
 - Create missing installer target directories for custom `GOS_BIN_DIR` and `GOS_INSTALL_DIR` paths when possible.
 
 ### Security
@@ -29,6 +30,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Verify checksums for historical Go versions using the full downloads feed, with `GOS_REQUIRE_CHECKSUM=1` for fail-closed installs.
 
 ## [1.4.2] - 2026-04-26
+
+### Changed
+
+- Maintenance release with no user-facing changes.
 
 ## [1.4.1] - 2026-04-26
 
@@ -95,9 +100,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Homebrew formula
 
 [Unreleased]: https://github.com/johnny4young/gos/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/johnny4young/gos/releases/tag/v1.4.2
+[1.4.1]: https://github.com/johnny4young/gos/releases/tag/v1.4.1
 [1.4.0]: https://github.com/johnny4young/gos/releases/tag/v1.4.0
 [1.3.0]: https://github.com/johnny4young/gos/releases/tag/v1.3.0
 [1.1.0]: https://github.com/johnny4young/gos/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/johnny4young/gos/releases/tag/v1.0.0
-[1.4.1]: https://github.com/johnny4young/gos/releases/tag/v1.4.1
-[1.4.2]: https://github.com/johnny4young/gos/releases/tag/v1.4.2

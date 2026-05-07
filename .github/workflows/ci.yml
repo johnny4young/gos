@@ -50,7 +50,7 @@ jobs:
 
       - name: Bash syntax
         run: |
-          bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-packaging.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
+          bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
 
       - name: PowerShell installer syntax
         if: runner.os == 'Windows'
@@ -82,6 +82,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           bash tests/packaging.bash
+
+      - name: Run changelog automation tests
+        run: |
+          bash tests/changelog.bash
 
       - name: Run Windows extraction tests
         run: |

@@ -93,6 +93,9 @@ assert(job_needs(version_bump).include?("validate-release-ref"), "version-bump m
 assert(version_bump["if"].to_s.include?("workflow_dispatch"), "version-bump must only run for manual releases")
 assert(version_bump.dig("permissions", "contents") == "write", "version-bump must scope contents: write to its job")
 version_bump_steps = steps_for(release_jobs, "version-bump")
+version_bump_checkout = version_bump_steps.find { |step| step["uses"].to_s == "actions/checkout@v5" }
+assert(version_bump_checkout, "version-bump must checkout the repository")
+assert(version_bump_checkout.dig("with", "fetch-depth") == 0, "version-bump must fetch tags for changelog compare links")
 ["Update version in gos.sh", "Update CHANGELOG.md", "Commit and tag"].each do |name|
   step = step_named(version_bump_steps, name)
   assert(step, "version-bump must define #{name} step")
@@ -146,6 +149,9 @@ assert(release_runs.include?("InstallerSha256: ${WINDOWS_SHA}"), "release workfl
 
 version_bump_runs = version_bump_steps.map { |step| step["run"].to_s }.join("\n")
 assert(version_bump_runs.include?("scripts/update-packaging.bash"), "version-bump must update package metadata")
+assert(version_bump_runs.include?("scripts/update-changelog.bash"), "version-bump must use the changelog release helper")
+assert(!version_bump_runs.include?("git log"), "version-bump must not generate release notes from commit subjects")
+assert(!version_bump_runs.include?("head -5 CHANGELOG.md"), "version-bump must not insert release notes before Unreleased")
 assert(version_bump_runs.include?("packaging/chocolatey/gos.nuspec"), "version-bump commit must include Chocolatey metadata")
 assert(version_bump_runs.include?("packaging/winget/johnny4young.gos.yaml"), "version-bump commit must include Winget metadata")
 
@@ -190,13 +196,14 @@ assert(fish_completion["if"] == "runner.os == 'Linux'", "Fish completion syntax 
 assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion syntax must not be optional once fish is installed")
 
 [
+  "bash tests/changelog.bash",
   "bash tests/checksum.bash",
   "bash tests/install-transaction.bash",
   "bash tests/install-sh.bash",
   "bash tests/install-ps1.bash",
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
-  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-packaging.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -214,10 +221,12 @@ packaging_text = packaging_files.map { |path| File.read(path) }.join("\n")
   "packaging/README.md",
   "install.ps1",
   "scripts/build-windows-package.bash",
+  "scripts/update-changelog.bash",
   "scripts/update-packaging.bash",
   "packaging/windows/gos.cmd",
   "packaging/windows/uninstall.ps1",
   "tests/install-ps1.ps1",
+  "tests/changelog.bash",
   "tests/packaging.bash",
   "packaging/chocolatey/gos.nuspec",
   "packaging/chocolatey/tools/chocolateyInstall.ps1",
@@ -262,8 +271,10 @@ assert(!readme.include?("choco install gos"), "README must not advertise unpubli
   "Chocolatey",
   "Winget",
   "bash tests/packaging.bash",
+  "bash tests/changelog.bash",
   "bash tests/workflows.bash",
   "git diff --check",
+  "scripts/update-changelog.bash",
   "scripts/update-packaging.bash"
 ].each do |fragment|
   assert(releasing.include?(fragment), "RELEASING.md must mention #{fragment}")

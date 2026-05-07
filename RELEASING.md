@@ -44,9 +44,10 @@ bash tests/install-transaction.bash
 bash tests/install-sh.bash
 bash tests/install-ps1.bash
 bash tests/packaging.bash
+bash tests/changelog.bash
 bash tests/windows-extract.bash
 bash tests/workflows.bash
-bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-packaging.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
+bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
 zsh -n completions/gos.zsh
 ./gos.sh version
 ./gos.sh help
@@ -69,8 +70,9 @@ fish --no-config --no-execute completions/gos.fish
 4. Enter the version without `v`, for example `1.5.0`.
 5. Watch all jobs complete:
    - `validate-release-ref` validates the version or tag.
-   - `version-bump` updates `gos.sh`, `CHANGELOG.md`, Chocolatey metadata, and
-     Winget metadata, then commits and tags the release.
+   - `version-bump` updates `gos.sh`, promotes the curated `CHANGELOG.md`
+     `Unreleased` notes into the release section, updates Chocolatey metadata
+     and Winget metadata, then commits and tags the release.
    - `smoke-test` checks the release tag on Linux and macOS.
    - `release` patches installers, builds `gos-windows.zip`, creates checksums,
      publishes attestations, and uploads release assets.
