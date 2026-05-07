@@ -40,8 +40,15 @@ def step_named(steps, name)
   steps.find { |step| step["name"] == name }
 end
 
+def file_text(path)
+  File.file?(path) ? File.read(path) : ""
+end
+
 release = workflow(".github/workflows/release.yml")
 ci = workflow(".github/workflows/ci.yml")
+readme = file_text("README.md")
+gos_version = file_text("gos.sh")[/^GOS_VERSION="([^"]+)"$/, 1]
+assert(gos_version && !gos_version.empty?, "gos.sh must define GOS_VERSION")
 
 release_on = workflow_on(release)
 assert(release_on.dig("workflow_dispatch", "inputs", "version"), "release workflow must keep workflow_dispatch version input")
@@ -177,6 +184,31 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
 ].each do |command|
   assert(smoke_runs.include?(command), "smoke job must run #{command}")
 end
+
+packaging_files = Dir.glob("packaging/**/*").select { |path| File.file?(path) }
+packaging_text = packaging_files.map { |path| File.read(path) }.join("\n")
+[
+  "packaging/README.md",
+  "packaging/chocolatey/gos.nuspec",
+  "packaging/chocolatey/tools/chocolateyInstall.ps1",
+  "packaging/chocolatey/tools/chocolateyUninstall.ps1",
+  "packaging/chocolatey/tools/gos.cmd",
+  "packaging/winget/johnny4young.gos.yaml"
+].each do |path|
+  assert(File.file?(path), "packaging must keep #{path}")
+end
+assert(!packaging_text.include?("FILL_AFTER_RELEASE"), "packaging manifests must not contain placeholder checksums")
+assert(!packaging_text.include?("v1.0.0"), "packaging manifests must not point at stale v1.0.0 assets")
+assert(!packaging_text.include?("<version>1.0.0</version>"), "Chocolatey manifest must not keep stale 1.0.0 version")
+assert(!packaging_text.include?("PackageVersion: 1.0.0"), "Winget manifest must not keep stale 1.0.0 version")
+assert(packaging_text.include?("<version>#{gos_version}</version>"), "Chocolatey manifest must match GOS_VERSION")
+assert(packaging_text.include?("PackageVersion: #{gos_version}"), "Winget manifest must match GOS_VERSION")
+assert(packaging_text.include?("releases/download/v#{gos_version}/gos.sh"), "Chocolatey install must use the current release asset")
+assert(packaging_text.include?("-ChecksumType 'sha256'"), "Chocolatey install must verify the release asset checksum")
+assert(packaging_text.include?("Install-BinFile -Name 'gos'"), "Chocolatey install must expose a gos command shim")
+assert(readme.include?("Windows Package Managers"), "README must explain Windows package-manager status")
+assert(!readme.include?("winget install johnny4young.gos"), "README must not advertise unpublished Winget install command")
+assert(!readme.include?("choco install gos"), "README must not advertise unpublished Chocolatey install command")
 
 puts "ok - workflow YAML and invariants"
 RUBY

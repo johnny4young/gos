@@ -1,6 +1,8 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.singleton.1.6.0.schema.json
+# Draft only. Do not submit until release automation publishes a dedicated
+# Windows-friendly asset that exposes a gos command.
 PackageIdentifier: johnny4young.gos
-PackageVersion: 1.0.0
+PackageVersion: 1.4.2
 PackageName: gos
 Publisher: johnny4young
 License: MIT
@@ -19,7 +21,7 @@ PackageUrl: https://github.com/johnny4young/gos
 Installers:
   - Architecture: neutral
     InstallerType: zip
-    InstallerUrl: https://github.com/johnny4young/gos/archive/refs/tags/v1.0.0.zip
-    InstallerSha256: FILL_AFTER_RELEASE
+    InstallerUrl: https://github.com/johnny4young/gos/archive/refs/tags/v1.4.2.zip
+    InstallerSha256: 2dc275392a2b5e7e6ef978a6e4bbce398a043c9351b83ff8857a50e7e7ece341
 ManifestType: singleton
 ManifestVersion: 1.6.0

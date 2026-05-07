@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Changed
 
 - Add CI coverage for pull requests and pushes across ShellCheck, workflow validation, and Linux/macOS/Windows smoke tests.
+- Restore Winget and Chocolatey packaging metadata as a DevEx distribution track, with guardrails against stale versions and placeholder checksums.
 
 ### Fixed
 

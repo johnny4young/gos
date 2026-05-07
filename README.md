@@ -40,8 +40,7 @@ Works on **macOS**, **Linux**, and **Windows** (via Git Bash or WSL). Auto-detec
 - [Installation](#installation)
   - [curl | bash](#curl--bash)
   - [Homebrew](#homebrew-macos--linux)
-  - [Winget](#winget-windows)
-  - [Chocolatey](#chocolatey-windows)
+  - [Windows Package Managers](#windows-package-managers)
   - [Git Clone](#git-clone)
   - [Manual Shell Config](#manual-shell-configuration)
 - [Usage](#usage)
@@ -138,25 +137,16 @@ brew upgrade gos
 
 > The formula lives in [johnny4young/homebrew-gos](https://github.com/johnny4young/homebrew-gos) and is updated automatically on each release.
 
-### Winget (Windows)
+### Windows Package Managers
 
-> **Coming soon** — manifest must be submitted to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs).
+Chocolatey and Winget are planned package-manager channels for Windows users.
+Their metadata is maintained under `packaging/` so releases can be made
+publishable without starting over.
 
-```powershell
-winget install johnny4young.gos
-```
-
-> After installing, run `gos` commands inside **Git Bash** or **WSL**.
-
-### Chocolatey (Windows)
-
-> **Coming soon** — package must be submitted to [community.chocolatey.org](https://community.chocolatey.org/).
-
-```powershell
-choco install gos
-```
-
-> After installing, run `gos` commands inside **Git Bash** or **WSL**.
+The public `choco install` and `winget install` commands are intentionally not
+listed here yet. They should be added only after the packages are accepted by
+their registries, so users do not copy commands that fail. Until then, use the
+release installer from Git Bash or install through WSL.
 
 ### Git Clone
 
@@ -307,18 +297,6 @@ sudo rm /usr/local/bin/gos
 ```bash
 brew uninstall gos
 brew untap johnny4young/gos
-```
-
-**If installed via Winget:**
-
-```powershell
-winget uninstall johnny4young.gos
-```
-
-**If installed via Chocolatey:**
-
-```powershell
-choco uninstall gos
 ```
 
 **If installed via git clone:**
