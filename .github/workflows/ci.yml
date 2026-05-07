@@ -27,7 +27,7 @@ jobs:
 
       - name: Run ShellCheck
         run: |
-          shellcheck gos.sh install.sh completions/gos.bash tests/*.bash
+          shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash tests/*.bash
 
   smoke:
     name: Smoke (${{ matrix.os }})
@@ -50,7 +50,7 @@ jobs:
 
       - name: Bash syntax
         run: |
-          bash -n gos.sh install.sh completions/gos.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/windows-extract.bash tests/workflows.bash
+          bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-packaging.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
 
       - name: PowerShell installer syntax
         if: runner.os == 'Windows'
@@ -77,6 +77,11 @@ jobs:
       - name: Run PowerShell installer tests
         run: |
           bash tests/install-ps1.bash
+
+      - name: Run packaging automation tests
+        if: runner.os == 'Linux'
+        run: |
+          bash tests/packaging.bash
 
       - name: Run Windows extraction tests
         run: |

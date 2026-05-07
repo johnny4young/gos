@@ -13,8 +13,8 @@ release asset.
 | GitHub release installer | Active | Canonical `curl | bash` path for stable releases. |
 | Homebrew | Active | Updated by the release workflow through `johnny4young/homebrew-gos`. |
 | PowerShell | CI-validated | Release workflow publishes `install.ps1` and `gos-windows.zip` as the canonical Windows install path. |
-| Chocolatey | Draft | Should wrap the Windows release asset after registry publication is ready. |
-| Winget | Draft | Should consume the Windows release asset after manifest validation and registry publication are ready. |
+| Chocolatey | Draft | Metadata wraps the Windows release asset and is updated by release automation. |
+| Winget | Draft | Metadata consumes the Windows release asset and is updated by release automation. |
 
 Do not advertise `choco install gos` or `winget install johnny4young.gos` in the
 public README until the packages have been accepted by their registries.
@@ -28,7 +28,7 @@ public README until the packages have been accepted by their registries.
 - `install.ps1` must verify the Windows package SHA256 when patched by the
   release workflow.
 - Chocolatey downloads must use GitHub release assets, not raw branch URLs.
-- Chocolatey and Winget should use the dedicated Windows release asset before
-  they are submitted for publication.
-- Release automation should eventually update GitHub assets, Homebrew,
-  Chocolatey, Winget, README status, and changelog links from the same version.
+- Chocolatey and Winget use the dedicated Windows release asset before they are
+  submitted for publication.
+- Release automation updates GitHub assets, Homebrew, Chocolatey, Winget,
+  README status, and changelog links from the same version where applicable.

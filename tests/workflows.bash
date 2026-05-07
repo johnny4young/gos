@@ -132,9 +132,18 @@ assert(release_steps.any? { |step| step.dig("with", "subject-checksums").to_s ==
 assert(release_steps.any? { |step| step.dig("with", "subject-path").to_s.include?("checksums.txt") }, "release workflow must attest checksums.txt")
 release_runs = release_steps.map { |step| step["run"].to_s }.join("\n")
 assert(release_runs.include?("gos-windows.zip"), "release workflow must build the Windows package asset")
+assert(release_runs.include?("scripts/build-windows-package.bash"), "release workflow must use the Windows package builder")
 assert(release_runs.include?("$GosExpectedZipSha256"), "release workflow must patch install.ps1 with the Windows package checksum")
 assert(release_runs.include?("sha256sum install.ps1"), "release workflow must checksum install.ps1")
 assert(release_runs.include?("sha256sum gos-windows.zip"), "release workflow must checksum gos-windows.zip")
+assert(step_named(release_steps, "Validate package metadata"), "release workflow must validate package metadata before publishing")
+assert(release_runs.include?("PackageVersion: ${VERSION}"), "release workflow must validate Winget version metadata")
+assert(release_runs.include?("InstallerSha256: ${WINDOWS_SHA}"), "release workflow must validate Winget checksum metadata")
+
+version_bump_runs = version_bump_steps.map { |step| step["run"].to_s }.join("\n")
+assert(version_bump_runs.include?("scripts/update-packaging.bash"), "version-bump must update package metadata")
+assert(version_bump_runs.include?("packaging/chocolatey/gos.nuspec"), "version-bump commit must include Chocolatey metadata")
+assert(version_bump_runs.include?("packaging/winget/johnny4young.gos.yaml"), "version-bump commit must include Winget metadata")
 
 update_formula = release_jobs.fetch("update-formula")
 assert(job_needs(update_formula).include?("validate-release-ref"), "update-formula must depend on validate-release-ref")
@@ -156,7 +165,7 @@ ci_jobs = ci.fetch("jobs") { fail!("CI must define jobs") }
 end
 
 shellcheck_runs = ci_jobs.dig("shellcheck", "steps").map { |step| step["run"].to_s }.join("\n")
-assert(shellcheck_runs.include?("shellcheck gos.sh install.sh completions/gos.bash tests/*.bash"), "ShellCheck job must cover scripts and tests")
+assert(shellcheck_runs.include?("shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash tests/*.bash"), "ShellCheck job must cover scripts and tests")
 
 matrix_os = ci_jobs.dig("smoke", "strategy", "matrix", "os") || []
 %w[ubuntu-latest macos-latest windows-latest].each do |os|
@@ -181,8 +190,9 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
   "bash tests/install-transaction.bash",
   "bash tests/install-sh.bash",
   "bash tests/install-ps1.bash",
+  "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
-  "bash -n gos.sh install.sh completions/gos.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-packaging.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -199,9 +209,12 @@ packaging_text = packaging_files.map { |path| File.read(path) }.join("\n")
 [
   "packaging/README.md",
   "install.ps1",
+  "scripts/build-windows-package.bash",
+  "scripts/update-packaging.bash",
   "packaging/windows/gos.cmd",
   "packaging/windows/uninstall.ps1",
   "tests/install-ps1.ps1",
+  "tests/packaging.bash",
   "packaging/chocolatey/gos.nuspec",
   "packaging/chocolatey/tools/chocolateyInstall.ps1",
   "packaging/chocolatey/tools/chocolateyUninstall.ps1",
@@ -216,7 +229,9 @@ assert(!packaging_text.include?("<version>1.0.0</version>"), "Chocolatey manifes
 assert(!packaging_text.include?("PackageVersion: 1.0.0"), "Winget manifest must not keep stale 1.0.0 version")
 assert(packaging_text.include?("<version>#{gos_version}</version>"), "Chocolatey manifest must match GOS_VERSION")
 assert(packaging_text.include?("PackageVersion: #{gos_version}"), "Winget manifest must match GOS_VERSION")
-assert(packaging_text.include?("releases/download/v#{gos_version}/gos.sh"), "Chocolatey install must use the current release asset")
+assert(packaging_text.include?("releases/download/v#{gos_version}/gos-windows.zip"), "package metadata must use the current Windows release asset")
+assert(!packaging_text.include?("archive/refs/tags"), "Winget manifest must not point at source archives")
+assert(packaging_text.include?("Get-ChocolateyUnzip"), "Chocolatey install must unpack the Windows release asset")
 assert(packaging_text.include?("-ChecksumType 'sha256'"), "Chocolatey install must verify the release asset checksum")
 assert(packaging_text.include?("Install-BinFile -Name 'gos'"), "Chocolatey install must expose a gos command shim")
 assert(readme.include?("PowerShell"), "README must explain the PowerShell Windows install path")

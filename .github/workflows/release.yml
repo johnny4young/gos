@@ -90,6 +90,17 @@ jobs:
           : "${VERSION:?missing release version}"
           sed -i "s/^GOS_VERSION=.*/GOS_VERSION=\"${VERSION}\"/" gos.sh
 
+      - name: Update package metadata
+        env:
+          VERSION: ${{ needs.validate-release-ref.outputs.version }}
+        run: |
+          : "${VERSION:?missing release version}"
+          tmp_zip=$(mktemp)
+          trap 'rm -f "$tmp_zip"' EXIT
+          bash scripts/build-windows-package.bash "$tmp_zip"
+          WINDOWS_SHA=$(sha256sum "$tmp_zip" | cut -d' ' -f1)
+          bash scripts/update-packaging.bash "$VERSION" "$WINDOWS_SHA"
+
       - name: Update CHANGELOG.md
         env:
           VERSION: ${{ needs.validate-release-ref.outputs.version }}
@@ -159,7 +170,7 @@ jobs:
         run: |
           : "${VERSION:?missing release version}"
           : "${TAG:?missing release tag}"
-          git add gos.sh CHANGELOG.md
+          git add gos.sh CHANGELOG.md packaging/chocolatey/gos.nuspec packaging/chocolatey/tools/chocolateyInstall.ps1 packaging/winget/johnny4young.gos.yaml
           git commit -m "release: ${TAG}"
           git tag "$TAG"
           # Push only the new tag (avoid leaking unrelated local tags).
@@ -218,16 +229,7 @@ jobs:
 
       - name: Build Windows package asset
         run: |
-          stage_dir=$(mktemp -d)
-          trap 'rm -rf "$stage_dir"' EXIT
-
-          mkdir -p "$stage_dir/gos"
-          cp gos.sh "$stage_dir/gos/gos.sh"
-          cp packaging/windows/gos.cmd "$stage_dir/gos/gos.cmd"
-          cp packaging/windows/uninstall.ps1 "$stage_dir/gos/uninstall.ps1"
-          cp LICENSE "$stage_dir/gos/LICENSE"
-
-          (cd "$stage_dir" && zip -qr "$GITHUB_WORKSPACE/gos-windows.zip" gos)
+          bash scripts/build-windows-package.bash gos-windows.zip
 
       - name: Patch install.ps1 with release tag and Windows package SHA256
         env:
@@ -238,6 +240,22 @@ jobs:
           sed -i "s|^\$GosReleaseTag = .*|\$GosReleaseTag = '${TAG}'|" install.ps1
           sed -i "s|^\$GosExpectedZipSha256 = .*|\$GosExpectedZipSha256 = '${WINDOWS_SHA}'|" install.ps1
           printf 'Patched install.ps1 with TAG=%s and SHA256=%s\n' "$TAG" "$WINDOWS_SHA"
+
+      - name: Validate package metadata
+        env:
+          TAG: ${{ needs.validate-release-ref.outputs.tag }}
+        run: |
+          : "${TAG:?missing release tag}"
+          VERSION="${TAG#v}"
+          WINDOWS_SHA=$(sha256sum gos-windows.zip | cut -d' ' -f1)
+          WINDOWS_URL="https://github.com/johnny4young/gos/releases/download/${TAG}/gos-windows.zip"
+
+          grep -F "<version>${VERSION}</version>" packaging/chocolatey/gos.nuspec
+          grep -F "\$url = '${WINDOWS_URL}'" packaging/chocolatey/tools/chocolateyInstall.ps1
+          grep -F "\$checksum = '${WINDOWS_SHA}'" packaging/chocolatey/tools/chocolateyInstall.ps1
+          grep -F "PackageVersion: ${VERSION}" packaging/winget/johnny4young.gos.yaml
+          grep -F "InstallerUrl: ${WINDOWS_URL}" packaging/winget/johnny4young.gos.yaml
+          grep -F "InstallerSha256: ${WINDOWS_SHA}" packaging/winget/johnny4young.gos.yaml
 
       - name: Generate SHA256 checksums
         run: |
