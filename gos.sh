@@ -681,7 +681,7 @@ for item in data:
         continue
     for file in item.get("files", []):
         if file.get("kind") == "archive":
-            platforms.add(f"{file.get('os')}/{file.get('arch')}")
+            platforms.add(f"{file.get(\"os\")}/{file.get(\"arch\")}")
 for platform in sorted(platforms):
     print(platform)
 ' "$go_version"
@@ -697,6 +697,7 @@ _gos_json_array_from_lines() {
   local first="true" line
   printf '['
   while IFS= read -r line; do
+    line=${line%$'\r'}
     [ -z "$line" ] && continue
     if [ "$first" = "true" ]; then
       first="false"
