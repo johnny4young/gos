@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- Add project-aware version switching with `gos use` and `.go-version` pinning with `gos pin`.
+- Add `gos doctor` diagnostics for PATH, permissions, checksum tools, archive tools, and shell completions.
+- Add verified archive caching, `gos rollback`, platform discovery, and JSON output for script-friendly commands.
 - Add CI coverage for pull requests and pushes across ShellCheck, workflow validation, and Linux/macOS/Windows smoke tests.
 - Restore Winget and Chocolatey packaging metadata as a DevEx distribution track, with guardrails against stale versions and placeholder checksums.
 - Add PowerShell as the primary Windows installer strategy, with release packaging for a checksum-verified `gos-windows.zip` asset.

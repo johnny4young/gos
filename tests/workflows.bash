@@ -49,6 +49,9 @@ ci = workflow(".github/workflows/ci.yml")
 readme = file_text("README.md")
 releasing = file_text("RELEASING.md")
 security = file_text("SECURITY.md")
+bash_completion = file_text("completions/gos.bash")
+zsh_completion = file_text("completions/gos.zsh")
+fish_completion_file = file_text("completions/gos.fish")
 gos_version = file_text("gos.sh")[/^GOS_VERSION="([^"]+)"$/, 1]
 assert(gos_version && !gos_version.empty?, "gos.sh must define GOS_VERSION")
 assert(!releasing.empty?, "repository must include RELEASING.md")
@@ -198,12 +201,13 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
 [
   "bash tests/changelog.bash",
   "bash tests/checksum.bash",
+  "bash tests/features.bash",
   "bash tests/install-transaction.bash",
   "bash tests/install-sh.bash",
   "bash tests/install-ps1.bash",
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
-  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -227,6 +231,7 @@ packaging_text = packaging_files.map { |path| File.read(path) }.join("\n")
   "packaging/windows/uninstall.ps1",
   "tests/install-ps1.ps1",
   "tests/changelog.bash",
+  "tests/features.bash",
   "tests/packaging.bash",
   "packaging/chocolatey/gos.nuspec",
   "packaging/chocolatey/tools/chocolateyInstall.ps1",
@@ -254,6 +259,17 @@ assert(readme.include?("Windows Package Managers"), "README must explain Windows
 assert(readme.include?("SECURITY.md"), "README must link to SECURITY.md")
 assert(!readme.include?("winget install johnny4young.gos"), "README must not advertise unpublished Winget install command")
 assert(!readme.include?("choco install gos"), "README must not advertise unpublished Chocolatey install command")
+
+%w[use pin rollback platforms doctor].each do |command|
+  assert(readme.include?(command), "README must document #{command}")
+  assert(bash_completion.include?(command), "Bash completion must include #{command}")
+  assert(zsh_completion.include?(command), "Zsh completion must include #{command}")
+  assert(fish_completion_file.include?(command), "Fish completion must include #{command}")
+end
+assert(readme.include?("--json"), "README must document --json")
+assert(bash_completion.include?("--json"), "Bash completion must include --json")
+assert(zsh_completion.include?("--json"), "Zsh completion must include --json")
+assert(fish_completion_file.include?("-l json"), "Fish completion must include --json")
 
 [
   "workflow_dispatch",

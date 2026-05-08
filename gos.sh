@@ -3,6 +3,8 @@ set -euo pipefail
 
 GOS_VERSION="1.4.2"
 GOS_INSTALL_DIR="${GOS_INSTALL_DIR:-/usr/local/go}"
+GOS_CACHE_DIR="${GOS_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/gos}"
+GOS_OUTPUT_JSON=0
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -27,6 +29,33 @@ _gos_arch() {
 
 _gos_ext() {
   [ "$(_gos_os)" = "windows" ] && echo "zip" || echo "tar.gz"
+}
+
+_gos_json_enabled() {
+  [ "$GOS_OUTPUT_JSON" = "1" ]
+}
+
+_gos_json_escape() {
+  local value="$1"
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//$'\n'/\\n}
+  value=${value//$'\r'/\\r}
+  value=${value//$'\t'/\\t}
+  printf '%s' "$value"
+}
+
+_gos_json_string() {
+  printf '"%s"' "$(_gos_json_escape "$1")"
+}
+
+_gos_set_json_from_args() {
+  local arg
+  for arg in "$@"; do
+    if [ "$arg" = "--json" ]; then
+      GOS_OUTPUT_JSON=1
+    fi
+  done
 }
 
 # Validate version string to prevent path traversal and URL injection.
@@ -129,6 +158,55 @@ _gos_sha256() {
   fi
 }
 
+_gos_cache_path() {
+  local pkg="$1"
+  printf '%s/%s' "$GOS_CACHE_DIR" "$pkg"
+}
+
+_gos_store_cache() {
+  local pkg="$1" archive="$2" expected_sha="$3"
+  local cache_file
+
+  [ -n "$expected_sha" ] || return 0
+  cache_file=$(_gos_cache_path "$pkg")
+
+  if mkdir -p "$GOS_CACHE_DIR" 2>/dev/null && cp "$archive" "$cache_file" 2>/dev/null; then
+    return 0
+  fi
+
+  echo "Warning: could not write Go archive cache at ${GOS_CACHE_DIR}." >&2
+}
+
+_gos_try_cache() {
+  local pkg="$1" output="$2" expected_sha="$3"
+  local cache_file actual_sha
+
+  cache_file=$(_gos_cache_path "$pkg")
+  [ -f "$cache_file" ] || return 1
+
+  if [ -z "$expected_sha" ]; then
+    echo "Warning: cached ${pkg} was not reused because checksum metadata is unavailable." >&2
+    return 1
+  fi
+
+  actual_sha=$(_gos_sha256 "$cache_file")
+  if [ -z "$actual_sha" ]; then
+    echo "Warning: cached ${pkg} was not reused because no SHA256 tool output was available." >&2
+    return 1
+  fi
+
+  if [ "$actual_sha" != "$expected_sha" ]; then
+    echo "Warning: cached ${pkg} checksum mismatch; downloading a fresh archive." >&2
+    return 1
+  fi
+
+  if ! cp "$cache_file" "$output"; then
+    echo "Warning: cached ${pkg} could not be copied; downloading a fresh archive." >&2
+    return 1
+  fi
+  echo "Using cached ${pkg}."
+}
+
 # Fetch expected SHA256 for a package filename from the Go API.
 # Uses jq if available, falls back to python3 (always present on macOS).
 _gos_has_checksum_parser() {
@@ -187,7 +265,7 @@ for v in data:
 
 _gos_current() {
   if command -v go &>/dev/null; then
-    go version | grep -o 'go[0-9][0-9.]*' | head -1 | sed 's/go//'
+    go version | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' | head -1 | sed 's/go//'
   else
     echo "none"
   fi
@@ -296,6 +374,10 @@ _gos_restore_backup() {
   fi
 }
 
+_gos_rollback_dir() {
+  printf '%s.gos-rollback' "$GOS_INSTALL_DIR"
+}
+
 _gos_activate_staged_install() {
   local staged_go_dir="$1"
   local backup_dir=""
@@ -333,10 +415,58 @@ _gos_activate_staged_install() {
   fi
 
   if [ -n "$backup_dir" ]; then
-    _gos_sudo rm -rf "$backup_dir"
+    local rollback_dir
+    rollback_dir=$(_gos_rollback_dir)
+    _gos_sudo rm -rf "$rollback_dir"
+    _gos_sudo mv "$backup_dir" "$rollback_dir"
+    echo "Rollback available: gos rollback"
   fi
 
   echo "Done! ${version_output}"
+}
+
+_gos_activate_rollback() {
+  local rollback_dir current_backup version_output go_bin
+
+  rollback_dir=$(_gos_rollback_dir)
+  current_backup="${GOS_INSTALL_DIR}.gos-current.$$"
+
+  if [ ! -d "$rollback_dir" ]; then
+    echo "Error: no rollback installation found at ${rollback_dir}." >&2
+    return 1
+  fi
+
+  if [ -e "$GOS_INSTALL_DIR" ]; then
+    _gos_sudo mv "$GOS_INSTALL_DIR" "$current_backup" || return 1
+  fi
+
+  if ! _gos_sudo mv "$rollback_dir" "$GOS_INSTALL_DIR"; then
+    echo "Error: failed to restore rollback installation." >&2
+    if [ -e "$current_backup" ]; then
+      _gos_sudo mv "$current_backup" "$GOS_INSTALL_DIR" || true
+    fi
+    return 1
+  fi
+
+  go_bin="${GOS_INSTALL_DIR}/bin/go"
+  if [ ! -x "$go_bin" ]; then
+    echo "Error: rollback installation is missing bin/go." >&2
+    _gos_restore_backup "$current_backup" || true
+    return 1
+  fi
+
+  if ! version_output=$("$go_bin" version 2>&1); then
+    echo "Error: rollback Go failed validation: ${version_output}" >&2
+    _gos_restore_backup "$current_backup" || true
+    return 1
+  fi
+
+  if [ -e "$current_backup" ]; then
+    _gos_sudo rm -rf "$rollback_dir"
+    _gos_sudo mv "$current_backup" "$rollback_dir"
+  fi
+
+  echo "Rolled back! ${version_output}"
 }
 
 _gos_install_version() {
@@ -351,7 +481,7 @@ _gos_install_version() {
   ext=$(_gos_ext)
 
   if [ "$os" = "unsupported" ] || [ "$arch" = "unsupported" ]; then
-    echo "Error: unsupported OS or architecture: $os/$arch"
+    echo "Error: unsupported OS or architecture: detected $(uname -s)/$(uname -m) (mapped to ${os}/${arch})."
     return 1
   fi
 
@@ -364,16 +494,23 @@ _gos_install_version() {
   stage_dir="${tmp_dir}/stage"
   staged_go_dir="${stage_dir}/go"
 
-  echo "Downloading ${pkg}..."
-  _gos_download "$url" "$tmp_file" || {
-    echo "Error: download failed. Version '${version}' may not exist."
-    rm -rf "$tmp_dir"
-    return 1
-  }
+  # Resolve checksum metadata before consulting the local archive cache.
+  local expected_sha actual_sha cache_hit
+  expected_sha=$(_gos_fetch_checksum "$pkg" "$include_all_checksums")
+  cache_hit="false"
+
+  if _gos_try_cache "$pkg" "$tmp_file" "$expected_sha"; then
+    cache_hit="true"
+  else
+    echo "Downloading ${pkg}..."
+    _gos_download "$url" "$tmp_file" || {
+      echo "Error: download failed. Version '${version}' may not exist."
+      rm -rf "$tmp_dir"
+      return 1
+    }
+  fi
 
   # Verify checksum if tools are available.
-  local expected_sha actual_sha
-  expected_sha=$(_gos_fetch_checksum "$pkg" "$include_all_checksums")
   if [ -n "$expected_sha" ]; then
     actual_sha=$(_gos_sha256 "$tmp_file")
     if [ -z "$actual_sha" ]; then
@@ -388,6 +525,9 @@ _gos_install_version() {
       return 1
     else
       echo "Checksum verified."
+      if [ "$cache_hit" != "true" ]; then
+        _gos_store_cache "$pkg" "$tmp_file" "$expected_sha"
+      fi
     fi
   else
     local reason
@@ -426,6 +566,146 @@ _gos_install_version() {
   fi
 
   rm -rf "$tmp_dir"
+}
+
+_gos_find_upward() {
+  local start_dir="$1" filename="$2" dir
+  dir=$(cd "$start_dir" 2>/dev/null && pwd) || return 1
+
+  while [ "$dir" != "/" ]; do
+    if [ -f "${dir}/${filename}" ]; then
+      printf '%s\n' "${dir}/${filename}"
+      return 0
+    fi
+    dir=$(dirname "$dir")
+  done
+
+  return 1
+}
+
+_gos_read_go_version_file() {
+  local file="$1" line
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%%#*}
+    line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [ -z "$line" ] && continue
+    line="${line#go}"
+    printf '%s\n' "$line"
+    return 0
+  done < "$file"
+  return 1
+}
+
+_gos_read_go_mod_version() {
+  local file="$1"
+  awk '
+    $1 == "toolchain" && $2 ~ /^go[0-9]+\.[0-9]+/ {
+      sub(/^go/, "", $2)
+      toolchain = $2
+    }
+    $1 == "go" && $2 ~ /^[0-9]+\.[0-9]+/ && go_version == "" {
+      go_version = $2
+    }
+    END {
+      if (toolchain != "") {
+        print toolchain
+      } else if (go_version != "") {
+        print go_version
+      } else {
+        exit 1
+      }
+    }
+  ' "$file"
+}
+
+_gos_resolve_project_version() {
+  local start_dir="$1" version_file go_mod version
+
+  if version_file=$(_gos_find_upward "$start_dir" ".go-version"); then
+    version=$(_gos_read_go_version_file "$version_file") || return 1
+    printf '%s|%s\n' "$version" "$version_file"
+    return 0
+  fi
+
+  if go_mod=$(_gos_find_upward "$start_dir" "go.mod"); then
+    version=$(_gos_read_go_mod_version "$go_mod") || return 1
+    printf '%s|%s\n' "$version" "$go_mod"
+    return 0
+  fi
+
+  return 1
+}
+
+_gos_list_versions() {
+  local json
+  json=$(_gos_download_stdout 'https://go.dev/dl/?mode=json&include=all')
+
+  if command -v jq &>/dev/null; then
+    echo "$json" \
+      | jq -r '.[].version' \
+      | sed 's/^go//' \
+      | sort -t. -k1,1n -k2,2n -k3,3n \
+      | uniq \
+      | sed 's/^/go/'
+  else
+    echo "$json" \
+      | grep -o '"version": *"go[0-9.]*"' \
+      | grep -o 'go[0-9][0-9.]*' \
+      | sed 's/^go//' \
+      | sort -t. -k1,1n -k2,2n -k3,3n \
+      | uniq \
+      | sed 's/^/go/'
+  fi
+}
+
+_gos_platforms_for_version() {
+  local version="$1" json go_version
+  go_version="go${version#go}"
+  json=$(_gos_download_stdout 'https://go.dev/dl/?mode=json&include=all')
+
+  if command -v jq &>/dev/null; then
+    echo "$json" \
+      | jq -r --arg version "$go_version" \
+        '.[] | select(.version == $version) | .files[] | select(.kind == "archive") | "\(.os)/\(.arch)"' \
+      | sort -u
+  elif command -v python3 &>/dev/null; then
+    echo "$json" | python3 -c '
+import json
+import sys
+
+version = sys.argv[1]
+data = json.load(sys.stdin)
+platforms = set()
+for item in data:
+    if item.get("version") != version:
+        continue
+    for file in item.get("files", []):
+        if file.get("kind") == "archive":
+            platforms.add(f"{file.get('os')}/{file.get('arch')}")
+for platform in sorted(platforms):
+    print(platform)
+' "$go_version"
+  else
+    echo "$json" \
+      | grep -o "${go_version}\\.[^\"]*" \
+      | sed -E "s/^${go_version//./\\.}\\.([^-]+)-([^.]*)\\..*/\\1\\/\\2/" \
+      | sort -u
+  fi
+}
+
+_gos_json_array_from_lines() {
+  local first="true" line
+  printf '['
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    if [ "$first" = "true" ]; then
+      first="false"
+    else
+      printf ','
+    fi
+    _gos_json_string "$line"
+  done
+  printf ']'
 }
 
 # ─── Commands ─────────────────────────────────────────────────────────────────
@@ -476,7 +756,21 @@ cmd_install() {
 
 cmd_current() {
   local current
+  _gos_set_json_from_args "$@"
   current=$(_gos_current)
+  if _gos_json_enabled; then
+    if [ "$current" = "none" ]; then
+      printf '{"found":false,"version":null,"current":null}\n'
+    else
+      printf '{"found":true,"version":'
+      _gos_json_string "$current"
+      printf ',"current":'
+      _gos_json_string "go${current}"
+      printf '}\n'
+    fi
+    return 0
+  fi
+
   if [ "$current" = "none" ]; then
     echo "No Go installation found."
   else
@@ -485,29 +779,247 @@ cmd_current() {
 }
 
 cmd_list() {
-  echo "Fetching available Go versions..."
-  local json
-  json=$(_gos_download_stdout 'https://go.dev/dl/?mode=json&include=all')
-
-  if command -v jq &>/dev/null; then
-    echo "$json" \
-      | jq -r '.[].version' \
-      | sed 's/^go//' \
-      | sort -t. -k1,1n -k2,2n -k3,3n \
-      | uniq \
-      | sed 's/^/go/'
+  _gos_set_json_from_args "$@"
+  if _gos_json_enabled; then
+    printf '{"versions":'
+    _gos_list_versions | _gos_json_array_from_lines
+    printf '}\n'
   else
-    echo "$json" \
-      | grep -o '"version": *"go[0-9.]*"' \
-      | grep -o 'go[0-9][0-9.]*' \
-      | sed 's/^go//' \
-      | sort -t. -k1,1n -k2,2n -k3,3n \
-      | uniq \
-      | sed 's/^/go/'
+    echo "Fetching available Go versions..."
+    _gos_list_versions
   fi
 }
 
+cmd_platforms() {
+  local version="" arg platforms
+  for arg in "$@"; do
+    if [ "$arg" = "--json" ]; then
+      GOS_OUTPUT_JSON=1
+    elif [ -z "$version" ]; then
+      version="${arg#go}"
+    fi
+  done
+
+  if [ -z "$version" ]; then
+    version=$(_gos_fetch_latest)
+  fi
+
+  _gos_validate_version "$version" || return 1
+  platforms=$(_gos_platforms_for_version "$version")
+
+  if [ -z "$platforms" ]; then
+    echo "Error: no supported platforms found for go${version}." >&2
+    return 1
+  fi
+
+  if _gos_json_enabled; then
+    printf '{"version":'
+    _gos_json_string "go${version}"
+    printf ',"platforms":'
+    printf '%s\n' "$platforms" | _gos_json_array_from_lines
+    printf '}\n'
+    return 0
+  fi
+
+  echo "Supported platforms for go${version}:"
+  printf '%s\n' "$platforms"
+}
+
+cmd_use() {
+  local start_dir="${1:-$PWD}" resolved version source
+
+  if [ "$start_dir" = "--json" ]; then
+    echo "Error: gos use does not support --json." >&2
+    return 1
+  fi
+
+  if ! resolved=$(_gos_resolve_project_version "$start_dir"); then
+    echo "Error: no .go-version or go.mod found from ${start_dir} upward." >&2
+    return 1
+  fi
+
+  version="${resolved%%|*}"
+  source="${resolved#*|}"
+  version="${version#go}"
+
+  _gos_validate_version "$version" || return 1
+  echo "Using Go ${version} from ${source}"
+  cmd_install "$version"
+}
+
+cmd_pin() {
+  local version="${1:-}"
+  if [ -z "$version" ]; then
+    echo "Usage: gos pin <version>  e.g. gos pin 1.24.0" >&2
+    return 1
+  fi
+
+  version="${version#go}"
+  _gos_validate_version "$version" || return 1
+  printf '%s\n' "$version" > .go-version
+  echo "Pinned Go ${version} in .go-version"
+}
+
+cmd_rollback() {
+  _gos_activate_rollback
+}
+
+_gos_doctor_add_json_check() {
+  local status="$1" name="$2" message="$3" fix="$4"
+
+  if [ -n "${GOS_DOCTOR_JSON_ITEMS:-}" ]; then
+    GOS_DOCTOR_JSON_ITEMS="${GOS_DOCTOR_JSON_ITEMS},"
+  fi
+
+  GOS_DOCTOR_JSON_ITEMS="${GOS_DOCTOR_JSON_ITEMS}{\"name\":$(_gos_json_string "$name"),\"status\":$(_gos_json_string "$status"),\"message\":$(_gos_json_string "$message")"
+  if [ -n "$fix" ]; then
+    GOS_DOCTOR_JSON_ITEMS="${GOS_DOCTOR_JSON_ITEMS},\"fix\":$(_gos_json_string "$fix")"
+  fi
+  GOS_DOCTOR_JSON_ITEMS="${GOS_DOCTOR_JSON_ITEMS}}"
+}
+
+_gos_doctor_check() {
+  local status="$1" name="$2" message="$3" fix="${4:-}"
+
+  [ "$status" = "problem" ] && GOS_DOCTOR_PROBLEMS=$((GOS_DOCTOR_PROBLEMS + 1))
+  [ "$status" = "warn" ] && GOS_DOCTOR_WARNINGS=$((GOS_DOCTOR_WARNINGS + 1))
+
+  if _gos_json_enabled; then
+    _gos_doctor_add_json_check "$status" "$name" "$message" "$fix"
+    return 0
+  fi
+
+  printf '%s - %s: %s\n' "$status" "$name" "$message"
+  if [ -n "$fix" ]; then
+    printf 'fix - %s\n' "$fix"
+  fi
+}
+
+_gos_parent_writable_or_sudo() {
+  local dir="$1" parent
+  parent=$(dirname "$dir")
+
+  while [ ! -d "$parent" ] && [ "$parent" != "/" ]; do
+    parent=$(dirname "$parent")
+  done
+
+  [ -w "$parent" ] && return 0
+  [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null && return 0
+  return 1
+}
+
+cmd_doctor() {
+  local os arch raw_os raw_arch install_error go_path go_version go_bin
+  GOS_DOCTOR_PROBLEMS=0
+  GOS_DOCTOR_WARNINGS=0
+  GOS_DOCTOR_JSON_ITEMS=""
+  _gos_set_json_from_args "$@"
+
+  os=$(_gos_os)
+  arch=$(_gos_arch)
+  raw_os=$(uname -s)
+  raw_arch=$(uname -m)
+  if [ "$os" = "unsupported" ] || [ "$arch" = "unsupported" ]; then
+    _gos_doctor_check "problem" "platform" "unsupported platform detected: ${raw_os}/${raw_arch}" "Open an issue with the detected OS and architecture before installing Go."
+  else
+    _gos_doctor_check "ok" "platform" "detected ${os}/${arch} from ${raw_os}/${raw_arch}"
+  fi
+
+  if install_error=$(_gos_validate_install_dir "$GOS_INSTALL_DIR" 2>&1); then
+    if [ -d "$GOS_INSTALL_DIR" ] && [ -w "$GOS_INSTALL_DIR" ]; then
+      _gos_doctor_check "ok" "install-dir" "${GOS_INSTALL_DIR} exists and is writable"
+    elif _gos_parent_writable_or_sudo "$GOS_INSTALL_DIR"; then
+      _gos_doctor_check "ok" "install-dir" "${GOS_INSTALL_DIR} can be created or updated"
+    else
+      _gos_doctor_check "problem" "install-dir" "${GOS_INSTALL_DIR} is not writable and sudo is unavailable" "Use GOS_INSTALL_DIR under your home directory or install sudo."
+    fi
+  else
+    _gos_doctor_check "problem" "install-dir" "$install_error" "Set GOS_INSTALL_DIR to a safe path whose basename contains go."
+  fi
+
+  if go_path=$(command -v go 2>/dev/null); then
+    go_version=$(go version 2>/dev/null || true)
+    _gos_doctor_check "ok" "go" "${go_path} reports: ${go_version}"
+  else
+    _gos_doctor_check "problem" "go" "go is not on PATH" "Run gos latest or add ${GOS_INSTALL_DIR}/bin to PATH after installing Go."
+  fi
+
+  go_bin="${GOS_INSTALL_DIR}/bin"
+  if [ -d "$go_bin" ] && go_path=$(command -v go 2>/dev/null); then
+    case "$go_path" in
+      "${go_bin}/go"|*"\\${go_bin}\\go.exe")
+        _gos_doctor_check "ok" "path-order" "PATH resolves go from ${go_bin}"
+        ;;
+      *)
+        _gos_doctor_check "problem" "path-order" "PATH resolves go from ${go_path}, not ${go_bin}" "Put ${go_bin} before other Go installations in PATH."
+        ;;
+    esac
+  elif [ -d "$go_bin" ]; then
+    _gos_doctor_check "problem" "path-order" "${go_bin} exists but go is not on PATH" "Add ${go_bin} to PATH."
+  else
+    _gos_doctor_check "warn" "path-order" "${go_bin} does not exist yet"
+  fi
+
+  if command -v curl &>/dev/null || command -v wget &>/dev/null; then
+    _gos_doctor_check "ok" "download" "curl or wget is available"
+  else
+    _gos_doctor_check "problem" "download" "neither curl nor wget is available" "Install curl or wget."
+  fi
+
+  if _gos_has_checksum_parser; then
+    _gos_doctor_check "ok" "checksum-metadata" "jq or python3 is available"
+  elif _gos_require_checksum; then
+    _gos_doctor_check "problem" "checksum-metadata" "GOS_REQUIRE_CHECKSUM=1 but jq/python3 is missing" "Install jq or python3."
+  else
+    _gos_doctor_check "warn" "checksum-metadata" "jq/python3 is missing; checksum metadata cannot be parsed"
+  fi
+
+  if [ -n "$(_gos_sha256 "$0")" ]; then
+    _gos_doctor_check "ok" "checksum-hash" "SHA256 hash tool is available"
+  elif _gos_require_checksum; then
+    _gos_doctor_check "problem" "checksum-hash" "GOS_REQUIRE_CHECKSUM=1 but no SHA256 tool is available" "Install sha256sum or shasum."
+  else
+    _gos_doctor_check "warn" "checksum-hash" "no SHA256 tool found; downloads cannot be locally hashed"
+  fi
+
+  if [ "$os" = "windows" ]; then
+    if command -v unzip &>/dev/null || command -v tar &>/dev/null || { command -v powershell.exe &>/dev/null && command -v cygpath &>/dev/null; }; then
+      _gos_doctor_check "ok" "extract" "Windows zip extraction tool is available"
+    else
+      _gos_doctor_check "problem" "extract" "no Windows extraction tool is available" "Install unzip, tar, or Git for Windows with PowerShell access."
+    fi
+  elif command -v tar &>/dev/null; then
+    _gos_doctor_check "ok" "extract" "tar is available"
+  else
+    _gos_doctor_check "problem" "extract" "tar is not available" "Install tar."
+  fi
+
+  if [ -f "${BASH_SOURCE[0]%/*}/completions/gos.bash" ] && [ -f "${BASH_SOURCE[0]%/*}/completions/gos.zsh" ] && [ -f "${BASH_SOURCE[0]%/*}/completions/gos.fish" ]; then
+    _gos_doctor_check "ok" "completions" "Bash, Zsh, and Fish completion files are present"
+  else
+    _gos_doctor_check "warn" "completions" "one or more completion files are missing"
+  fi
+
+  if _gos_json_enabled; then
+    if [ "$GOS_DOCTOR_PROBLEMS" -gt 0 ]; then
+      printf '{"status":"problem","problems":%s,"warnings":%s,"checks":[%s]}\n' "$GOS_DOCTOR_PROBLEMS" "$GOS_DOCTOR_WARNINGS" "$GOS_DOCTOR_JSON_ITEMS"
+    else
+      printf '{"status":"ok","problems":0,"warnings":%s,"checks":[%s]}\n' "$GOS_DOCTOR_WARNINGS" "$GOS_DOCTOR_JSON_ITEMS"
+    fi
+  fi
+
+  [ "$GOS_DOCTOR_PROBLEMS" -eq 0 ]
+}
+
 cmd_version() {
+  _gos_set_json_from_args "$@"
+  if _gos_json_enabled; then
+    printf '{"gos_version":'
+    _gos_json_string "$GOS_VERSION"
+    printf '}\n'
+    return 0
+  fi
+
   echo "gos v${GOS_VERSION}"
 }
 
@@ -523,16 +1035,28 @@ USAGE:
 COMMANDS:
   latest              Install the latest stable Go version
   install <version>   Install a specific Go version (e.g. gos install 1.26.1)
+  use [path]          Install the Go version requested by .go-version or go.mod
+  pin <version>       Write .go-version in the current directory
+  rollback            Restore the previous Go installation, if available
   current             Show the currently active Go version
   list                List all available Go versions
+  platforms [version] List supported OS/arch archives for a Go version
+  doctor              Diagnose gos, Go, PATH, and tool dependencies
   version             Show gos version
   help                Show this help message
+
+OPTIONS:
+  --json              Machine-readable output for current, list, platforms,
+                      doctor, and version
 
 EXAMPLES:
   gos latest
   gos install 1.24.0
+  gos use
+  gos pin 1.24.0
+  gos doctor
   gos current
-  gos list
+  gos list --json
 
 EOF
 }
@@ -540,17 +1064,37 @@ EOF
 # ─── Entrypoint ───────────────────────────────────────────────────────────────
 
 main() {
-  _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+  if [ "${1:-}" = "--json" ]; then
+    GOS_OUTPUT_JSON=1
+    shift
+  fi
 
   local cmd="${1:-help}"
   shift || true
 
   case "$cmd" in
-    latest)  cmd_latest ;;
-    install) cmd_install "${1:-}" ;;
-    current) cmd_current ;;
-    list)    cmd_list ;;
-    version) cmd_version ;;
+    latest)
+      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      cmd_latest "$@"
+      ;;
+    install)
+      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      cmd_install "${1:-}"
+      ;;
+    use)
+      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      cmd_use "${1:-}"
+      ;;
+    pin)       cmd_pin "${1:-}" ;;
+    rollback)
+      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      cmd_rollback
+      ;;
+    current)   cmd_current "$@" ;;
+    list)      cmd_list "$@" ;;
+    platforms) cmd_platforms "$@" ;;
+    doctor)    cmd_doctor "$@" ;;
+    version)   cmd_version "$@" ;;
     help|--help|-h) cmd_help ;;
     *)
       echo "Error: unknown command: $cmd"

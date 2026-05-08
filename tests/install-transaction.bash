@@ -230,6 +230,7 @@ run_install() {
   output="$(
     PATH="${fake_bin}:${original_path}" \
     GOS_INSTALL_DIR="$install_dir" \
+    GOS_CACHE_DIR="${case_dir}/cache" \
     GOS_TEST_TAR_LOG="$tar_log" \
     GOS_TEST_EXTRACT_MODE="$extract_mode" \
     GOS_TEST_REAL_MKDIR="$real_mkdir" \

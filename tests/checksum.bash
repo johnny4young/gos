@@ -228,6 +228,7 @@ run_install() {
   local -a env_vars=(
     "PATH=${fake_bin}:${original_path}"
     "GOS_INSTALL_DIR=${case_dir}/go"
+    "GOS_CACHE_DIR=${case_dir}/cache"
     "GOS_TEST_URL_LOG=${url_log}"
     "GOS_TEST_TAR_LOG=${tar_log}"
     "GOS_TEST_JSON_FILE=${json_file}"

@@ -23,6 +23,8 @@ You're on Go 1.19. Your project needs 1.22. You just want to switch — not inst
 ```bash
 gos latest        # installs the latest stable Go
 gos install 1.21  # installs a specific version
+gos use           # installs the version requested by the current project
+gos doctor        # checks your local setup
 gos current       # shows what you're running
 ```
 
@@ -74,6 +76,10 @@ Done. That's the whole setup.
 
 - **One command to latest Go** — `gos latest` fetches and installs the newest stable release
 - **Pin any version** — `gos install 1.21.6` gets exactly what you need
+- **Project-aware switching** — `gos use` reads `.go-version`, `toolchain`, or `go` directives
+- **Doctor diagnostics** — `gos doctor` checks Go, PATH, permissions, checksum tools, and extraction tools
+- **Cache and rollback** — verified archives are cached, and `gos rollback` restores the previous install
+- **Machine-readable output** — `--json` is available for `current`, `list`, `platforms`, `doctor`, and `version`
 - **Auto-detects everything** — OS (`darwin`, `linux`, `windows`) and architecture (`amd64`, `arm64`, `armv6l`, `386`)
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)
 - **Zero dependencies** — just `curl` and `bash`, both pre-installed on most systems
@@ -234,8 +240,13 @@ exec fish          # for Fish
 |---|---|
 | `gos latest` | Install the latest stable Go version |
 | `gos install <version>` | Install a specific Go version |
+| `gos use [path]` | Install the Go version requested by `.go-version` or `go.mod` |
+| `gos pin <version>` | Write `.go-version` in the current directory |
+| `gos rollback` | Restore the previous Go installation, if available |
 | `gos current` | Show the currently active Go version |
 | `gos list` | List all available Go versions |
+| `gos platforms [version]` | List supported OS/arch archives for a Go version |
+| `gos doctor` | Diagnose gos, Go, PATH, and local tool dependencies |
 | `gos version` | Show gos version |
 | `gos help` | Show help message |
 
@@ -248,16 +259,24 @@ Latest: go1.24.1
 Current: go1.22.0 -> go1.24.1
 Downloading go1.24.1.darwin-arm64.tar.gz...
 Checksum verified.
-Removing old Go installation...
 Extracting...
+Backing up existing Go installation...
+Activating new Go installation...
+Rollback available: gos rollback
 Done! go version go1.24.1 darwin/arm64
 
 $ gos install 1.21.6
 Downloading go1.21.6.linux-amd64.tar.gz...
 Checksum verified.
-Removing old Go installation...
 Extracting...
+Backing up existing Go installation...
+Activating new Go installation...
+Rollback available: gos rollback
 Done! go version go1.21.6 linux/amd64
+
+$ gos use
+Using Go 1.21.6 from /path/to/project/.go-version
+Already on Go 1.21.6, nothing to do.
 
 $ gos current
 go1.24.1
@@ -269,6 +288,25 @@ go1.24.0
 go1.23.5
 go1.23.4
 ...
+
+$ gos doctor
+ok - platform: detected darwin/arm64 from Darwin/arm64
+ok - install-dir: /usr/local/go can be created or updated
+ok - go: /usr/local/go/bin/go reports: go version go1.24.1 darwin/arm64
+...
+
+$ gos current --json
+{"found":true,"version":"1.24.1","current":"go1.24.1"}
+```
+
+### Project-aware versions
+
+`gos use` searches from the current directory upward. It prefers `.go-version`,
+then a `toolchain goX.Y.Z` directive in `go.mod`, then the `go X.Y` directive.
+
+```bash
+gos pin 1.24.1   # writes .go-version
+gos use          # installs/switches to that version
 ```
 
 ---
@@ -286,6 +324,7 @@ To manually enable them, see the [Manual Shell Configuration](#manual-shell-conf
 | Variable | Default | Description |
 |---|---|---|
 | `GOS_BIN_DIR` | `/usr/local/bin` | Where the `gos` command is installed by `install.sh`. Missing custom directories are created when possible. |
+| `GOS_CACHE_DIR` | `$XDG_CACHE_HOME/gos` or `$HOME/.cache/gos` | Where verified Go archives are cached for reuse. |
 | `GOS_INSTALL_DIR` | `/usr/local/go` | Where Go gets installed. Override to install without `sudo`. Path basename must contain "go". |
 | `GOS_REQUIRE_CHECKSUM` | unset | Set to `1` to abort installs when checksum metadata or local SHA256 calculation is unavailable. |
 
@@ -308,10 +347,12 @@ Add the export to your shell profile to make it permanent.
 2. Detects your OS via `uname -s` and architecture via `uname -m`
 3. Downloads the matching archive from `https://go.dev/dl/`
 4. Verifies SHA256 checksum against the Go API (uses `jq` or `python3`)
-5. Extracts the new version into a temporary staging directory
-6. Validates the staged `go/bin/go` before touching `$GOS_INSTALL_DIR`
-7. Backs up the previous Go installation, activates the staged version, and rolls back automatically if activation fails
-8. Confirms with `go version`
+5. Reuses a cached archive only after its checksum matches the Go metadata
+6. Extracts the new version into a temporary staging directory
+7. Validates the staged `go/bin/go` before touching `$GOS_INSTALL_DIR`
+8. Backs up the previous Go installation, activates the staged version, and rolls back automatically if activation fails
+9. Keeps the previous install available for `gos rollback`
+10. Confirms with `go version`
 
 No symlinks, no shims, no magic. Just a clean install of the official Go binary.
 

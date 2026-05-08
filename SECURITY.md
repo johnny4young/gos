@@ -69,6 +69,7 @@ For Go toolchain installs:
   so older pinned versions can still resolve published SHA256 metadata.
 - When checksum metadata and a local SHA256 tool are available, `gos` verifies
   the downloaded archive before replacing the active Go installation.
+- Cached archives are reused only after their SHA256 matches Go metadata.
 - `GOS_REQUIRE_CHECKSUM=1` makes checksum metadata and local hash calculation
   mandatory, causing installs to fail closed when verification cannot run.
 - Go replacement is transactional: the new archive is staged, verified,
