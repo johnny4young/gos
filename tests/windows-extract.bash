@@ -23,7 +23,18 @@ pass() {
 link_tool() {
   local tool="$1" target
   target=$(PATH="$real_tools_path" command -v "$tool") || fail "missing required tool: ${tool}"
-  ln -sf "$target" "${case_bin}/${tool}"
+  if [ "$tool" = "bash" ]; then
+    cat >"${case_bin}/${tool}" <<EOF
+#!$target
+exec "$target" "\$@"
+EOF
+  else
+    cat >"${case_bin}/${tool}" <<EOF
+#!/usr/bin/env bash
+exec "$target" "\$@"
+EOF
+  fi
+  chmod +x "${case_bin}/${tool}"
 }
 
 write_go_tree_script() {
@@ -120,6 +131,8 @@ FAKE_GO
   chmod +x "${case_bin}/uname" "${case_bin}/curl" "${case_bin}/jq" \
     "${case_bin}/sha256sum" "${case_bin}/go"
 
+  # Wrap tools instead of symlinking them: symlinks may execute from the fake
+  # bin directory, which can break DLL discovery on Windows.
   for tool in bash dirname basename grep sed tr wc head mktemp rm chmod mv cut cat mkdir; do
     link_tool "$tool"
   done
