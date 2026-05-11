@@ -271,22 +271,30 @@ _gos_current() {
   fi
 }
 
-# Determine if sudo is needed for GOS_INSTALL_DIR
+_gos_existing_parent_for() {
+  local dir="$1" parent
+  parent=$(dirname "$dir")
+
+  while [ ! -d "$parent" ] && [ "$parent" != "/" ]; do
+    parent=$(dirname "$parent")
+  done
+
+  printf '%s\n' "$parent"
+}
+
+# Determine if sudo is needed for operations under GOS_INSTALL_DIR's parent.
 _gos_needs_sudo() {
   # Never use sudo on Windows
   if [ "$(_gos_os)" = "windows" ]; then
     return 1
   fi
-  # If install dir exists and is writable, no sudo
-  if [ -d "$GOS_INSTALL_DIR" ] && [ -w "$GOS_INSTALL_DIR" ]; then
-    return 1
-  fi
-  # If parent dir is writable, no sudo
+
   local parent
-  parent=$(dirname "$GOS_INSTALL_DIR")
+  parent=$(_gos_existing_parent_for "$GOS_INSTALL_DIR")
   if [ -w "$parent" ]; then
     return 1
   fi
+
   return 0
 }
 
@@ -378,6 +386,33 @@ _gos_rollback_dir() {
   printf '%s.gos-rollback' "$GOS_INSTALL_DIR"
 }
 
+_gos_warn_rollback_unavailable() {
+  local backup_dir="$1" rollback_dir="$2"
+
+  echo "Warning: rollback was not saved automatically." >&2
+  echo "Warning: previous Go installation remains at: ${backup_dir}" >&2
+  echo "Warning: to enable rollback manually, run: sudo mv \"${backup_dir}\" \"${rollback_dir}\"" >&2
+}
+
+_gos_save_rollback_backup() {
+  local backup_dir="$1" rollback_dir
+  rollback_dir=$(_gos_rollback_dir)
+
+  if [ -e "$rollback_dir" ] && ! _gos_sudo rm -rf "$rollback_dir"; then
+    echo "Warning: failed to remove existing rollback installation at ${rollback_dir}." >&2
+    _gos_warn_rollback_unavailable "$backup_dir" "$rollback_dir"
+    return 0
+  fi
+
+  if ! _gos_sudo mv "$backup_dir" "$rollback_dir"; then
+    echo "Warning: failed to save rollback installation at ${rollback_dir}." >&2
+    _gos_warn_rollback_unavailable "$backup_dir" "$rollback_dir"
+    return 0
+  fi
+
+  echo "Rollback available: gos rollback"
+}
+
 _gos_activate_staged_install() {
   local staged_go_dir="$1"
   local backup_dir=""
@@ -415,11 +450,7 @@ _gos_activate_staged_install() {
   fi
 
   if [ -n "$backup_dir" ]; then
-    local rollback_dir
-    rollback_dir=$(_gos_rollback_dir)
-    _gos_sudo rm -rf "$rollback_dir"
-    _gos_sudo mv "$backup_dir" "$rollback_dir"
-    echo "Rollback available: gos rollback"
+    _gos_save_rollback_backup "$backup_dir"
   fi
 
   echo "Done! ${version_output}"
@@ -898,11 +929,7 @@ _gos_doctor_check() {
 
 _gos_parent_writable_or_sudo() {
   local dir="$1" parent
-  parent=$(dirname "$dir")
-
-  while [ ! -d "$parent" ] && [ "$parent" != "/" ]; do
-    parent=$(dirname "$parent")
-  done
+  parent=$(_gos_existing_parent_for "$dir")
 
   [ -w "$parent" ] && return 0
   [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null && return 0

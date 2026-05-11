@@ -7,6 +7,9 @@ test_root="$(mktemp -d)"
 fake_bin="${test_root}/bin"
 original_path="$PATH"
 real_mkdir="$(command -v mkdir)"
+real_mv="$(command -v mv)"
+real_rm="$(command -v rm)"
+real_chmod="$(command -v chmod)"
 
 cleanup() {
   rm -rf "$test_root"
@@ -160,6 +163,83 @@ fi
 exec "$GOS_TEST_REAL_MKDIR" "$@"
 FAKE_MKDIR
 
+cat >"${fake_bin}/mv" <<'FAKE_MV'
+#!/usr/bin/env bash
+set -euo pipefail
+
+source_path="${1:-}"
+target_path="${2:-}"
+
+is_protected_parent_op() {
+  local path="$1"
+  [ -n "${GOS_TEST_PROTECTED_PARENT:-}" ] || return 1
+  case "$path" in
+    "${GOS_TEST_PROTECTED_PARENT}"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if [ -n "${GOS_TEST_MV_FAIL_TARGET:-}" ] && [ "$target_path" = "$GOS_TEST_MV_FAIL_TARGET" ]; then
+  echo "fake mv failure: $target_path" >&2
+  exit 1
+fi
+
+if is_protected_parent_op "$source_path" || is_protected_parent_op "$target_path"; then
+  if [ "${GOS_TEST_UNDER_SUDO:-}" != "1" ]; then
+    echo "fake mv permission denied: $source_path -> $target_path" >&2
+    exit 1
+  fi
+
+  "$GOS_TEST_REAL_CHMOD" u+w "$GOS_TEST_PROTECTED_PARENT"
+  set +e
+  "$GOS_TEST_REAL_MV" "$@"
+  status=$?
+  set -e
+  "$GOS_TEST_REAL_CHMOD" u-w "$GOS_TEST_PROTECTED_PARENT"
+  exit "$status"
+fi
+
+exec "$GOS_TEST_REAL_MV" "$@"
+FAKE_MV
+
+cat >"${fake_bin}/rm" <<'FAKE_RM'
+#!/usr/bin/env bash
+set -euo pipefail
+
+target=""
+for arg in "$@"; do
+  case "$arg" in
+    -*) ;;
+    *) target="$arg" ;;
+  esac
+done
+
+if [ -n "${GOS_TEST_RM_FAIL_TARGET:-}" ] && [ "$target" = "$GOS_TEST_RM_FAIL_TARGET" ]; then
+  echo "fake rm failure: $target" >&2
+  exit 1
+fi
+
+if [ -n "${GOS_TEST_PROTECTED_PARENT:-}" ]; then
+  case "$target" in
+    "${GOS_TEST_PROTECTED_PARENT}"/*)
+      if [ "${GOS_TEST_UNDER_SUDO:-}" != "1" ]; then
+        echo "fake rm permission denied: $target" >&2
+        exit 1
+      fi
+      "$GOS_TEST_REAL_CHMOD" u+w "$GOS_TEST_PROTECTED_PARENT"
+      set +e
+      "$GOS_TEST_REAL_RM" "$@"
+      status=$?
+      set -e
+      "$GOS_TEST_REAL_CHMOD" u-w "$GOS_TEST_PROTECTED_PARENT"
+      exit "$status"
+      ;;
+  esac
+fi
+
+exec "$GOS_TEST_REAL_RM" "$@"
+FAKE_RM
+
 cat >"${fake_bin}/sudo" <<'FAKE_SUDO'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -167,12 +247,13 @@ set -euo pipefail
 printf 'sudo'
 printf ' %s' "$@"
 printf '\n'
-"$@"
+GOS_TEST_UNDER_SUDO=1 "$@"
 FAKE_SUDO
 
 chmod +x "${fake_bin}/uname" "${fake_bin}/curl" "${fake_bin}/jq" \
   "${fake_bin}/sha256sum" "${fake_bin}/tar" "${fake_bin}/unzip" \
-  "${fake_bin}/go" "${fake_bin}/mkdir" "${fake_bin}/sudo"
+  "${fake_bin}/go" "${fake_bin}/mkdir" "${fake_bin}/mv" \
+  "${fake_bin}/rm" "${fake_bin}/sudo"
 
 fail() {
   echo "not ok - $*" >&2
@@ -199,6 +280,9 @@ run_install() {
   case_dir="${test_root}/${name}"
   tar_log="${case_dir}/tar.log"
   mkdir_fail_path=""
+  protected_parent=""
+  mv_fail_target=""
+  rm_fail_target=""
   output=""
   status=0
 
@@ -221,6 +305,18 @@ run_install() {
       install_dir="${case_dir}/blocked/go"
       mkdir_fail_path="$(dirname "$install_dir")"
       ;;
+    protected-parent)
+      install_dir="${case_dir}/usr/local/go"
+      protected_parent="$(dirname "$install_dir")"
+      ;;
+    rollback-mv-fail)
+      install_dir="${case_dir}/usr/local/go"
+      mv_fail_target="${install_dir}.gos-rollback"
+      ;;
+    rollback-rm-fail)
+      install_dir="${case_dir}/usr/local/go"
+      rm_fail_target="${install_dir}.gos-rollback"
+      ;;
     *)
       fail "unknown install kind: ${install_kind}"
       ;;
@@ -234,7 +330,13 @@ run_install() {
     GOS_TEST_TAR_LOG="$tar_log" \
     GOS_TEST_EXTRACT_MODE="$extract_mode" \
     GOS_TEST_REAL_MKDIR="$real_mkdir" \
+    GOS_TEST_REAL_MV="$real_mv" \
+    GOS_TEST_REAL_RM="$real_rm" \
+    GOS_TEST_REAL_CHMOD="$real_chmod" \
     GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
+    GOS_TEST_PROTECTED_PARENT="$protected_parent" \
+    GOS_TEST_MV_FAIL_TARGET="$mv_fail_target" \
+    GOS_TEST_RM_FAIL_TARGET="$rm_fail_target" \
     bash "$script" install 1.21.6 2>&1
   )"
   status=$?
@@ -300,6 +402,15 @@ assert_no_backup_left() {
   fi
 }
 
+assert_backup_left() {
+  local install_dir="$1" name="$2"
+  local backups
+  backups=$(find "$(dirname "$install_dir")" -maxdepth 1 -name "$(basename "$install_dir").gos-backup.*" -print)
+  if [ -z "$backups" ]; then
+    fail "${name}: expected backup path to remain"
+  fi
+}
+
 create_old_install "${test_root}/extract_failure/usr/local/go"
 run_install "extract_failure" "fail" "default"
 assert_nonzero_status "$status" "extract failure"
@@ -330,6 +441,40 @@ assert_status 0 "$status" "success existing"
 assert_new_install_active "$install_dir" "success existing"
 assert_no_backup_left "$install_dir" "success existing"
 pass "successful install replaces existing custom install"
+
+create_old_install "${test_root}/protected_parent/usr/local/go"
+chmod u-w "${test_root}/protected_parent/usr/local"
+run_install "protected_parent" "ok" "protected-parent"
+chmod u+w "${test_root}/protected_parent/usr/local"
+assert_status 0 "$status" "protected parent"
+assert_new_install_active "$install_dir" "protected parent"
+assert_no_backup_left "$install_dir" "protected parent"
+assert_contains "$output" "sudo mv ${install_dir} ${install_dir}.gos-backup" "protected parent backup sudo"
+assert_contains "$output" "sudo mv ${install_dir}.gos-backup" "protected parent rollback sudo"
+assert_contains "$output" "Rollback available: gos rollback" "protected parent rollback output"
+pass "install uses sudo for sibling renames when parent is not writable"
+
+create_old_install "${test_root}/rollback_mv_failure/usr/local/go"
+run_install "rollback_mv_failure" "ok" "rollback-mv-fail"
+assert_status 0 "$status" "rollback mv failure"
+assert_new_install_active "$install_dir" "rollback mv failure"
+assert_backup_left "$install_dir" "rollback mv failure"
+assert_not_contains "$output" "Rollback available: gos rollback" "rollback mv failure output"
+assert_contains "$output" "Warning: failed to save rollback installation" "rollback mv failure warning"
+assert_contains "$output" "previous Go installation remains at:" "rollback mv failure backup"
+assert_contains "$output" "sudo mv" "rollback mv failure manual command"
+pass "rollback save mv failure keeps backup and avoids false availability"
+
+create_old_install "${test_root}/rollback_rm_failure/usr/local/go"
+mkdir -p "${test_root}/rollback_rm_failure/usr/local/go.gos-rollback"
+run_install "rollback_rm_failure" "ok" "rollback-rm-fail"
+assert_status 0 "$status" "rollback rm failure"
+assert_new_install_active "$install_dir" "rollback rm failure"
+assert_backup_left "$install_dir" "rollback rm failure"
+assert_not_contains "$output" "Rollback available: gos rollback" "rollback rm failure output"
+assert_contains "$output" "Warning: failed to remove existing rollback installation" "rollback rm failure warning"
+assert_contains "$output" "previous Go installation remains at:" "rollback rm failure backup"
+pass "rollback save rm failure keeps backup and avoids false availability"
 
 run_install "success_empty" "ok" "default"
 assert_status 0 "$status" "success empty"

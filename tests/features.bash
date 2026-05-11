@@ -204,7 +204,7 @@ OLD_GO
 case_dir="${test_root}/json"
 run_gos "$case_dir" bash "$script" version --json
 [ "$status" -eq 0 ] || fail "version --json failed: ${output}"
-assert_contains "$output" '"gos_version":"1.4.2"' "version json"
+assert_contains "$output" '"gos_version":"1.4.3"' "version json"
 
 run_gos "$case_dir" bash "$script" current --json
 [ "$status" -eq 0 ] || fail "current --json failed: ${output}"
