@@ -1,0 +1,95 @@
+name: Bug report
+description: Report a reproducible problem with gos.
+title: "bug: "
+labels:
+  - bug
+  - needs triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail to reproduce it without touching a real Go install.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include exact commands and relevant environment variables.
+      placeholder: |
+        1. Run `...`
+        2. See `...`
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and output
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: gos-version
+    attributes:
+      label: gos version
+      placeholder: gos v1.4.3
+    validations:
+      required: true
+  - type: input
+    id: go-version
+    attributes:
+      label: go version
+      placeholder: go version go1.26.3 darwin/arm64
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows Git Bash
+        - Windows WSL
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: shell
+    attributes:
+      label: Shell
+      placeholder: bash 5.2, zsh, Git Bash, PowerShell
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - curl | bash
+        - Homebrew
+        - PowerShell
+        - git clone
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: gos doctor
+      description: Paste `gos doctor` output if available.
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Public report safety
+      options:
+        - label: I have not included secrets, tokens, private paths, or sensitive vulnerability details.
+          required: true

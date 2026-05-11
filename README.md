@@ -399,15 +399,14 @@ issues for sensitive vulnerability details.
 
 ## Contributing
 
-Contributions are welcome! Here's how:
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for
+setup, issue reporting, validation commands, and pull request expectations.
 
-1. Fork the repo
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Make your changes
-4. Test on your platform
-5. Submit a pull request
+Community support options are documented in [SUPPORT.md](SUPPORT.md), and all
+participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Please open an issue first for major changes so we can discuss the approach.
+Please open an issue or discussion first for major changes so the approach can
+be reviewed before implementation.
 
 ## Releasing
 
