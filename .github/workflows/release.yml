@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g. 1.1.0)'
+        description: 'Version to release (e.g. 1.1.0). Ensure CHANGELOG.md has bullet notes under ## [Unreleased].'
         required: true
 
 permissions:
@@ -91,6 +91,13 @@ jobs:
           : "${VERSION:?missing release version}"
           sed -i "s/^GOS_VERSION=.*/GOS_VERSION=\"${VERSION}\"/" gos.sh
 
+      - name: Update CHANGELOG.md
+        env:
+          VERSION: ${{ needs.validate-release-ref.outputs.version }}
+        run: |
+          : "${VERSION:?missing release version}"
+          bash scripts/update-changelog.bash "$VERSION"
+
       - name: Update package metadata
         env:
           VERSION: ${{ needs.validate-release-ref.outputs.version }}
@@ -101,13 +108,6 @@ jobs:
           bash scripts/build-windows-package.bash "$tmp_zip"
           WINDOWS_SHA=$(sha256sum "$tmp_zip" | cut -d' ' -f1)
           bash scripts/update-packaging.bash "$VERSION" "$WINDOWS_SHA"
-
-      - name: Update CHANGELOG.md
-        env:
-          VERSION: ${{ needs.validate-release-ref.outputs.version }}
-        run: |
-          : "${VERSION:?missing release version}"
-          bash scripts/update-changelog.bash "$VERSION"
 
       - name: Commit and tag
         env:
