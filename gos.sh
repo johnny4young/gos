@@ -300,11 +300,52 @@ _gos_needs_sudo() {
 
 # Run a command with sudo only if needed
 _gos_sudo() {
+  local output status sudo_output sudo_status
+
   if _gos_needs_sudo; then
     sudo "$@"
-  else
-    "$@"
+    return
   fi
+
+  set +e
+  output=$("$@" 2>&1)
+  status=$?
+  set -e
+
+  if [ "$status" -eq 0 ]; then
+    if [ -n "$output" ]; then
+      printf '%s' "$output"
+    fi
+    return 0
+  fi
+
+  # Some environments (notably Git Bash on Windows) can report the install parent as
+  # writable even when operations like sibling renames fail with a permissions error.
+  # Retry with sudo when available and the error looks permission-related.
+  if [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null; then
+    case "$output" in
+      *"Permission denied"*|*"permission denied"*|*"Operation not permitted"*|*"operation not permitted"*|*"Access is denied"*|*"access denied"*)
+        set +e
+        sudo_output=$(sudo "$@" 2>&1)
+        sudo_status=$?
+        set -e
+        if [ "$sudo_status" -eq 0 ]; then
+          if [ -n "$sudo_output" ]; then
+            printf '%s' "$sudo_output"
+          fi
+          return 0
+        fi
+        printf '%s' "$output" >&2
+        if [ -n "$sudo_output" ]; then
+          printf '%s' "$sudo_output" >&2
+        fi
+        return "$sudo_status"
+        ;;
+    esac
+  fi
+
+  printf '%s' "$output" >&2
+  return "$status"
 }
 
 _gos_prepare_install_parent() {
