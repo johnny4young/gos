@@ -25,8 +25,9 @@ commands, and changelog links aligned.
    - `GITHUB_TOKEN` is provided by GitHub Actions.
    - `HOMEBREW_TAP_TOKEN` can push to `johnny4young/homebrew-gos`.
 4. Verify `CHANGELOG.md` has `## [Unreleased]` immediately after the intro and
-   contains user-facing bullets for the release. Do not publish empty release
-   sections.
+   contains at least one bullet item for the release (a line starting with
+   `- `). Do not publish empty release sections. For a maintenance release, a
+   common entry is `- Maintenance release with no user-facing changes.`
 5. If the release includes a security fix, prepare the private advisory and
    public wording from `SECURITY.md` before publishing.
 6. Verify `README.md` points users to supported install paths:

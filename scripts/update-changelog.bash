@@ -94,8 +94,10 @@ awk '
   }
 ' "$raw_notes" > "$release_notes"
 
-if ! grep -Eq '^- ' "$release_notes"; then
-  printf 'error: ## [Unreleased] has no release-note bullets; refusing to create an empty release section\n' >&2
+if ! grep -Eq '^[[:space:]]*[-*] ' "$release_notes"; then
+  printf 'error: ## [Unreleased] has no release-note list items; refusing to create an empty release section\n' >&2
+  printf 'hint: add at least one bullet line (e.g. "- ...") under "## [Unreleased]" in %s\n' "$changelog_file" >&2
+  printf 'hint: for a maintenance release, a common entry is: - Maintenance release with no user-facing changes.\n' >&2
   exit 1
 fi
 
