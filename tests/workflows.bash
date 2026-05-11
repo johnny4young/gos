@@ -96,7 +96,7 @@ assert(job_needs(version_bump).include?("validate-release-ref"), "version-bump m
 assert(version_bump["if"].to_s.include?("workflow_dispatch"), "version-bump must only run for manual releases")
 assert(version_bump.dig("permissions", "contents") == "write", "version-bump must scope contents: write to its job")
 version_bump_steps = steps_for(release_jobs, "version-bump")
-version_bump_checkout = version_bump_steps.find { |step| step["uses"].to_s == "actions/checkout@v5" }
+version_bump_checkout = version_bump_steps.find { |step| step["uses"].to_s == "actions/checkout@v6" }
 assert(version_bump_checkout, "version-bump must checkout the repository")
 assert(version_bump_checkout.dig("with", "fetch-depth") == 0, "version-bump must fetch tags for changelog compare links")
 ["Update version in gos.sh", "Update CHANGELOG.md", "Commit and tag"].each do |name|
@@ -111,7 +111,7 @@ assert(job_needs(smoke_job).include?("validate-release-ref"), "smoke-test must d
 assert(job_needs(smoke_job).include?("version-bump"), "smoke-test must depend on version-bump")
 smoke_steps = steps_for(release_jobs, "smoke-test")
 smoke_runs = smoke_steps.map { |step| step["run"].to_s }
-smoke_checkout = smoke_steps.find { |step| step["uses"].to_s == "actions/checkout@v5" }
+smoke_checkout = smoke_steps.find { |step| step["uses"].to_s == "actions/checkout@v6" }
 assert(smoke_checkout, "smoke-test must checkout the release tag")
 assert(smoke_checkout.dig("with", "ref").to_s.include?("needs.validate-release-ref.outputs.tag"), "smoke-test must checkout the validated release tag")
 assert(smoke_runs.any? { |run| run.include?("./gos.sh version") }, "release smoke-test must run gos version")
@@ -128,7 +128,7 @@ release_steps = steps_for(release_jobs, "release")
 release_uses = release_steps.map { |step| step["uses"].to_s }
 assert(release_uses.include?("softprops/action-gh-release@v3"), "release workflow must use softprops/action-gh-release@v3")
 assert(release_uses.include?("actions/attest@v4"), "release workflow must use actions/attest@v4")
-release_checkout = release_steps.find { |step| step["uses"].to_s == "actions/checkout@v5" }
+release_checkout = release_steps.find { |step| step["uses"].to_s == "actions/checkout@v6" }
 assert(release_checkout, "release job must checkout the release tag")
 assert(release_checkout.dig("with", "ref").to_s.include?("needs.validate-release-ref.outputs.tag"), "release job must checkout the validated release tag")
 

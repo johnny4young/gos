@@ -74,7 +74,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
@@ -132,7 +132,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           # On workflow_dispatch, fetch the newly pushed tag to get updated code
           ref: ${{ needs.validate-release-ref.outputs.tag }}
@@ -156,7 +156,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.validate-release-ref.outputs.tag }}
 
@@ -238,7 +238,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout homebrew-gos tap
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: johnny4young/homebrew-gos
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
