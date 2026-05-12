@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-05-12
+
+### Changed
+
+- Add open source community standards.
+- Bump actions/checkout from 5 to 6.
+- Accept actions/checkout@v6 in workflow invariants.
+- Clarify changelog requirement.
+
+### Fixed
+
+- Preserve rollback backups when install parent needs sudo.
+- Retry with sudo on permission errors.
+- Generate changelog notes during manual release.
+
 ## [1.4.3] - 2026-05-08
 
 ### Changed
@@ -105,7 +120,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Homebrew formula
 
 
-[Unreleased]: https://github.com/johnny4young/gos/compare/v1.4.3...HEAD
+[Unreleased]: https://github.com/johnny4young/gos/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/johnny4young/gos/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/johnny4young/gos/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/johnny4young/gos/releases/tag/v1.4.2
 [1.4.1]: https://github.com/johnny4young/gos/releases/tag/v1.4.1
