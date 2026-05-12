@@ -63,7 +63,7 @@ assert(release.dig("permissions", "contents") == "read", "release workflow must 
 assert(release.dig("defaults", "run", "shell") == "bash", "release workflow must default to bash shell")
 
 release_jobs = release.fetch("jobs") { fail!("release workflow must define jobs") }
-%w[validate-release-ref version-bump smoke-test release update-formula].each do |job|
+%w[validate-release-ref release-preflight version-bump smoke-test release update-formula].each do |job|
   assert(release_jobs.key?(job), "release workflow must define #{job} job")
 end
 
@@ -80,6 +80,7 @@ validate_run = validate_step["run"].to_s
 [
   "semver_re=",
   "workflow_dispatch)",
+  "Manual releases must be run from main",
   "push)",
   "version=%s",
   "tag=%s",
@@ -91,8 +92,26 @@ end
 release_run_blocks = release_jobs.values.flat_map { |job| (job["steps"] || []).map { |step| step["run"].to_s } }.join("\n")
 assert(!release_run_blocks.include?("github.event.inputs.version"), "release run scripts must not interpolate workflow inputs directly")
 
+release_preflight = release_jobs.fetch("release-preflight")
+assert(job_needs(release_preflight).include?("validate-release-ref"), "release-preflight must depend on validate-release-ref")
+assert(release_preflight["if"].to_s.include?("workflow_dispatch"), "release-preflight must only run for manual releases")
+assert(release_preflight.dig("permissions", "contents") != "write", "release-preflight must not request contents: write")
+release_preflight_steps = steps_for(release_jobs, "release-preflight")
+release_preflight_checkout = release_preflight_steps.find { |step| step["uses"].to_s == "actions/checkout@v6" }
+assert(release_preflight_checkout, "release-preflight must checkout the repository")
+assert(release_preflight_checkout.dig("with", "fetch-depth") == 0, "release-preflight must fetch tags before checking tag uniqueness")
+release_preflight_step = step_named(release_preflight_steps, "Validate manual release readiness")
+assert(release_preflight_step, "release-preflight must validate manual release readiness")
+release_preflight_env = release_preflight_step["env"] || {}
+assert(release_preflight_env.values.any? { |value| value.to_s.include?("needs.validate-release-ref.outputs") }, "release-preflight must use validated release outputs")
+release_preflight_run = release_preflight_step["run"].to_s
+assert(release_preflight_run.include?("refs/tags/${TAG}"), "release-preflight must fail before reusing an existing tag")
+assert(release_preflight_run.include?("Release tag %s already exists"), "release-preflight must explain existing tag failures")
+assert(release_preflight_run.include?('scripts/update-changelog.bash --check "$VERSION"'), "release-preflight must validate changelog notes without mutating files")
+
 version_bump = release_jobs.fetch("version-bump")
 assert(job_needs(version_bump).include?("validate-release-ref"), "version-bump must depend on validate-release-ref")
+assert(job_needs(version_bump).include?("release-preflight"), "version-bump must wait for release-preflight")
 assert(version_bump["if"].to_s.include?("workflow_dispatch"), "version-bump must only run for manual releases")
 assert(version_bump.dig("permissions", "contents") == "write", "version-bump must scope contents: write to its job")
 version_bump_steps = steps_for(release_jobs, "version-bump")
@@ -108,7 +127,9 @@ end
 
 smoke_job = release_jobs.fetch("smoke-test")
 assert(job_needs(smoke_job).include?("validate-release-ref"), "smoke-test must depend on validate-release-ref")
+assert(job_needs(smoke_job).include?("release-preflight"), "smoke-test must depend on release-preflight")
 assert(job_needs(smoke_job).include?("version-bump"), "smoke-test must depend on version-bump")
+assert(smoke_job["if"].to_s.include?("needs.release-preflight.result"), "smoke-test must respect release-preflight result")
 smoke_steps = steps_for(release_jobs, "smoke-test")
 smoke_runs = smoke_steps.map { |step| step["run"].to_s }
 smoke_checkout = smoke_steps.find { |step| step["uses"].to_s == "actions/checkout@v6" }
@@ -119,8 +140,10 @@ assert(smoke_runs.any? { |run| run.include?("./gos.sh help") }, "release smoke-t
 
 release_job = release_jobs.fetch("release")
 assert(job_needs(release_job).include?("validate-release-ref"), "release job must depend on validate-release-ref")
+assert(job_needs(release_job).include?("release-preflight"), "release job must depend on release-preflight")
 assert(job_needs(release_job).include?("version-bump"), "release job must depend on version-bump")
 assert(job_needs(release_job).include?("smoke-test"), "release job must depend on smoke-test")
+assert(release_job["if"].to_s.include?("needs.release-preflight.result"), "release job must respect release-preflight result")
 assert(release_job.dig("permissions", "contents") == "write", "release job must scope contents: write to release publishing")
 assert(release_job.dig("permissions", "id-token") == "write", "release job must grant id-token: write for attestations")
 assert(release_job.dig("permissions", "attestations") == "write", "release job must grant attestations: write")
@@ -295,7 +318,7 @@ assert(fish_completion_file.include?("-l json"), "Fish completion must include -
 ].each do |fragment|
   assert(releasing.include?(fragment), "RELEASING.md must mention #{fragment}")
 end
-assert(releasing.match?(/empty release\s+sections/), "RELEASING.md must mention empty release sections")
+assert(releasing.include?("generates notes from non-merge git commit subjects"), "RELEASING.md must explain automatic changelog generation")
 assert(releasing.include?("SECURITY.md"), "RELEASING.md must include security-release checks")
 assert(releasing.include?("no public Chocolatey or Winget install commands"), "RELEASING.md must keep package-manager commands gated")
 assert(releasing.include?("`[Unreleased]` compare link"), "RELEASING.md must include changelog compare-link checks")

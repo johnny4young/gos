@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  printf 'Usage: %s <version>\n' "${0##*/}" >&2
+  printf 'Usage: %s [--check] <version>\n' "${0##*/}" >&2
 }
 
 trim_trailing_blank_lines() {
@@ -20,8 +20,120 @@ trim_trailing_blank_lines() {
   ' "$1"
 }
 
+generate_release_notes_from_git() {
+  local output_file="$1"
+  local range_args=()
+
+  if [[ -n "$previous_tag" ]]; then
+    range_args=("${previous_tag}..HEAD")
+  fi
+
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf 'error: ## [Unreleased] has no release-note list items and git history is unavailable\n' >&2
+    return 1
+  fi
+
+  if ! git log --no-merges --reverse --format='%s' "${range_args[@]}" > "$commit_subjects"; then
+    printf 'error: failed to read git commit subjects for changelog generation\n' >&2
+    return 1
+  fi
+
+  awk '
+    function trim(value) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      return value
+    }
+
+    function sentence(value) {
+      value = trim(value)
+      if (value == "") {
+        return ""
+      }
+      value = toupper(substr(value, 1, 1)) substr(value, 2)
+      if (value !~ /[.!?]$/) {
+        value = value "."
+      }
+      return value
+    }
+
+    function category_for(type) {
+      if (type == "feat") {
+        return "Added"
+      }
+      if (type == "fix" || type == "perf") {
+        return "Fixed"
+      }
+      if (type == "security") {
+        return "Security"
+      }
+      return "Changed"
+    }
+
+    {
+      raw = trim($0)
+      if (raw == "" || raw ~ /^release: v[0-9]/) {
+        next
+      }
+
+      type = ""
+      text = raw
+      if (match(raw, /^[A-Za-z]+(\([^)]+\))?!?:[[:space:]]*/)) {
+        prefix = substr(raw, RSTART, RLENGTH)
+        type = tolower(prefix)
+        sub(/\(.*/, "", type)
+        sub(/!?:.*/, "", type)
+        text = substr(raw, RLENGTH + 1)
+      }
+
+      text = sentence(text)
+      if (text == "") {
+        next
+      }
+
+      category = category_for(type)
+      notes[category] = notes[category] "- " text "\n"
+      seen[category] = 1
+      count++
+    }
+
+    END {
+      if (count == 0) {
+        exit 1
+      }
+
+      order[1] = "Added"
+      order[2] = "Changed"
+      order[3] = "Fixed"
+      order[4] = "Security"
+
+      first = 1
+      for (i = 1; i <= 4; i++) {
+        category = order[i]
+        if (seen[category]) {
+          if (!first) {
+            print ""
+          }
+          print "### " category
+          print ""
+          printf "%s", notes[category]
+          first = 0
+        }
+      }
+    }
+  ' "$commit_subjects" > "$output_file" || {
+    printf 'error: ## [Unreleased] has no release-note list items and no release commits were found since %s\n' "${previous_tag:-the beginning of history}" >&2
+    return 1
+  }
+}
+
+check_only=0
+if [[ "${1:-}" == "--check" ]]; then
+  check_only=1
+  shift
+fi
+
 version="${1:-}"
-if [[ -z "$version" ]]; then
+if [[ -z "$version" || $# -ne 1 ]]; then
   usage
   exit 2
 fi
@@ -47,12 +159,13 @@ fi
 
 raw_notes="$(mktemp)"
 release_notes="$(mktemp)"
+commit_subjects="$(mktemp)"
 body_with_release="$(mktemp)"
 body_without_links="$(mktemp)"
 links_file="$(mktemp)"
 body_trimmed="$(mktemp)"
 next_file="$(mktemp)"
-trap 'rm -f "$raw_notes" "$release_notes" "$body_with_release" "$body_without_links" "$links_file" "$body_trimmed" "$next_file"' EXIT
+trap 'rm -f "$raw_notes" "$release_notes" "$commit_subjects" "$body_with_release" "$body_without_links" "$links_file" "$body_trimmed" "$next_file"' EXIT
 
 awk '
   $0 == "## [Unreleased]" {
@@ -95,10 +208,14 @@ awk '
 ' "$raw_notes" > "$release_notes"
 
 if ! grep -Eq '^[[:space:]]*[-*] ' "$release_notes"; then
-  printf 'error: ## [Unreleased] has no release-note list items; refusing to create an empty release section\n' >&2
-  printf 'hint: add at least one bullet line (e.g. "- ...") under "## [Unreleased]" in %s\n' "$changelog_file" >&2
-  printf 'hint: for a maintenance release, a common entry is: - Maintenance release with no user-facing changes.\n' >&2
-  exit 1
+  generate_release_notes_from_git "$release_notes" || {
+    printf 'hint: add at least one bullet line (e.g. "- ...") under "## [Unreleased]" in %s or use conventional commit subjects before releasing\n' "$changelog_file" >&2
+    exit 1
+  }
+fi
+
+if (( check_only )); then
+  exit 0
 fi
 
 awk -v version="$version" -v release_date="$release_date" -v notes_file="$release_notes" '

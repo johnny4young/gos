@@ -24,10 +24,11 @@ commands, and changelog links aligned.
 3. Confirm the release workflow secrets are available:
    - `GITHUB_TOKEN` is provided by GitHub Actions.
    - `HOMEBREW_TAP_TOKEN` can push to `johnny4young/homebrew-gos`.
-4. Verify `CHANGELOG.md` has `## [Unreleased]` immediately after the intro and
-   contains at least one bullet item for the release (a line starting with
-   `- `). Do not publish empty release sections. For a maintenance release, a
-   common entry is `- Maintenance release with no user-facing changes.`
+4. Verify `CHANGELOG.md` has `## [Unreleased]` immediately after the intro.
+   Curated bullets under `Unreleased` are optional: if the section is empty, the
+   manual release generates notes from non-merge git commit subjects since the
+   previous tag. Keep commit subjects release-note friendly, preferably using
+   conventional prefixes such as `feat:`, `fix:`, `docs:`, `ci:`, or `security:`.
 5. If the release includes a security fix, prepare the private advisory and
    public wording from `SECURITY.md` before publishing.
 6. Verify `README.md` points users to supported install paths:
@@ -72,9 +73,12 @@ fish --no-config --no-execute completions/gos.fish
 4. Enter the version without `v`, for example `1.5.0`.
 5. Watch all jobs complete:
    - `validate-release-ref` validates the version or tag.
-   - `version-bump` updates `gos.sh`, promotes the curated `CHANGELOG.md`
-     `Unreleased` notes into the release section, updates Chocolatey metadata
-     and Winget metadata, then commits and tags the release.
+   - `release-preflight` fails manual releases before any mutation if the run
+     is not from `main`, the tag already exists, or changelog notes cannot be
+     resolved from `Unreleased` or git commits.
+   - `version-bump` updates `gos.sh`, promotes `Unreleased` notes or generated
+     git commit notes into the release section, updates Chocolatey metadata and
+     Winget metadata, then commits and tags the release.
    - `smoke-test` checks the release tag on Linux and macOS.
    - `release` patches installers, builds `gos-windows.zip`, creates checksums,
      publishes attestations, and uploads release assets.
