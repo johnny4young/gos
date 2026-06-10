@@ -61,6 +61,7 @@ bash -n gos.sh install.sh
 bash tests/install-transaction.bash
 bash tests/checksum.bash
 bash tests/features.bash
+bash tests/detection.bash
 ```
 
 Before opening a pull request, run the broader local suite when possible:

@@ -69,9 +69,13 @@ For Go toolchain installs:
   so older pinned versions can still resolve published SHA256 metadata.
 - When checksum metadata and a local SHA256 tool are available, `gos` verifies
   the downloaded archive before replacing the active Go installation.
+- When feed metadata cannot be parsed (no `jq`/`python3`) or the feed lookup
+  fails, `gos` falls back to the archive's published `.sha256` companion file
+  on the same download host before giving up on verification.
 - Cached archives are reused only after their SHA256 matches Go metadata.
 - `GOS_REQUIRE_CHECKSUM=1` makes checksum metadata and local hash calculation
   mandatory, causing installs to fail closed when verification cannot run.
+  `install.sh` honors the same variable for its own release-pinned check.
 - Go replacement is transactional: the new archive is staged, verified,
   activated, and rolled back if activation fails.
 

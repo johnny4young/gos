@@ -37,7 +37,7 @@ while [ "$#" -gt 0 ]; do
       output="$2"
       shift 2
       ;;
-    --proto)
+    --proto|--connect-timeout|--retry)
       shift 2
       ;;
     --tlsv1.2|-fsSL)
@@ -55,6 +55,20 @@ printf '%s\n' "$url" >>"$GOS_TEST_URL_LOG"
 case "$url" in
   'https://go.dev/dl/?mode=json'|'https://go.dev/dl/?mode=json&include=all')
     cat "$GOS_TEST_JSON_FILE"
+    ;;
+  https://dl.google.com/go/go*.sha256)
+    case "${GOS_TEST_SHA256_FILE_MODE:-absent}" in
+      valid)
+        printf '%s\n' "$GOS_TEST_EXPECTED_SHA"
+        ;;
+      garbage)
+        printf '<!DOCTYPE html>not a checksum\n'
+        ;;
+      *)
+        echo "curl: (22) The requested URL returned error: 404" >&2
+        exit 22
+        ;;
+    esac
     ;;
   https://go.dev/dl/go*)
     printf 'fake archive for %s\n' "$url" >"$output"
@@ -212,7 +226,8 @@ assert_tar_not_called() {
 }
 
 run_install() {
-  local name="$1" metadata="$2" hash_mode="$3" strict="$4"
+  local name="$1" metadata="$2" hash_mode="$3" strict="$4" sha_file_mode="${5:-absent}"
+  local expected_sha="expectedsha"
   case_dir="${test_root}/${name}"
   url_log="${case_dir}/urls.log"
   tar_log="${case_dir}/tar.log"
@@ -225,6 +240,12 @@ run_install() {
   : >"$tar_log"
   printf '[]\n' >"$json_file"
 
+  # The .sha256 companion fallback validates strict 64-hex digests, so those
+  # cases need a syntactically valid checksum value.
+  if [ "$sha_file_mode" != "absent" ]; then
+    expected_sha="$(printf '%064d' 0)"
+  fi
+
   local -a env_vars=(
     "PATH=${fake_bin}:${original_path}"
     "GOS_INSTALL_DIR=${case_dir}/go"
@@ -234,8 +255,9 @@ run_install() {
     "GOS_TEST_JSON_FILE=${json_file}"
     "GOS_TEST_METADATA=${metadata}"
     "GOS_TEST_HASH_MODE=${hash_mode}"
+    "GOS_TEST_SHA256_FILE_MODE=${sha_file_mode}"
     "GOS_TEST_EXPECTED_PKG=go1.21.6.darwin-arm64.tar.gz"
-    "GOS_TEST_EXPECTED_SHA=expectedsha"
+    "GOS_TEST_EXPECTED_SHA=${expected_sha}"
   )
 
   if [ "$strict" = "strict" ]; then
@@ -287,3 +309,29 @@ assert_nonzero_status "$status" "missing metadata strict"
 assert_contains "$output" "checksum verification required" "missing metadata strict"
 assert_tar_not_called "$tar_log" "missing metadata strict"
 pass "missing metadata fails in strict mode"
+
+run_install "sha_file_fallback" "missing" "ok" "default" "valid"
+assert_status 0 "$status" "sha file fallback"
+assert_file_contains "$url_log" "https://dl.google.com/go/go1.21.6.darwin-arm64.tar.gz.sha256" "sha file fallback"
+assert_contains "$output" "Checksum verified." "sha file fallback"
+assert_not_contains "$output" "skipping integrity verification" "sha file fallback"
+assert_tar_called "$tar_log" "sha file fallback"
+pass "missing feed metadata falls back to the .sha256 companion file"
+
+run_install "sha_file_fallback_mismatch" "missing" "mismatch" "default" "valid"
+assert_nonzero_status "$status" "sha file fallback mismatch"
+assert_contains "$output" "checksum mismatch" "sha file fallback mismatch"
+assert_tar_not_called "$tar_log" "sha file fallback mismatch"
+pass "a mismatched .sha256 companion checksum aborts before extraction"
+
+run_install "sha_file_garbage" "missing" "ok" "default" "garbage"
+assert_status 0 "$status" "sha file garbage"
+assert_contains "$output" "Warning: skipping integrity verification" "sha file garbage"
+assert_tar_called "$tar_log" "sha file garbage"
+pass "non-checksum .sha256 content is rejected and treated as unavailable"
+
+run_install "sha_file_garbage_strict" "missing" "ok" "strict" "garbage"
+assert_nonzero_status "$status" "sha file garbage strict"
+assert_contains "$output" "checksum verification required" "sha file garbage strict"
+assert_tar_not_called "$tar_log" "sha file garbage strict"
+pass "non-checksum .sha256 content fails closed in strict mode"

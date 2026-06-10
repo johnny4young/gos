@@ -27,7 +27,7 @@ while [ "$#" -gt 0 ]; do
       output="$2"
       shift 2
       ;;
-    --proto)
+    --proto|--connect-timeout|--retry)
       shift 2
       ;;
     --tlsv1.2|-fsSL)
@@ -163,7 +163,11 @@ assert_not_installed() {
 }
 
 run_installer() {
-  local name="$1" install_kind="$2"
+  local name="$1" install_kind="$2" strict="${3:-default}"
+  local require_checksum=""
+  if [ "$strict" = "strict" ]; then
+    require_checksum="1"
+  fi
   case_dir="${test_root}/${name}"
   url_log="${case_dir}/urls.log"
   sudo_log="${case_dir}/sudo.log"
@@ -208,6 +212,7 @@ run_installer() {
     GOS_TEST_REAL_MKDIR="$real_mkdir" \
     GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
     GOS_TEST_MKDIR_MODE="$mkdir_mode" \
+    GOS_REQUIRE_CHECKSUM="$require_checksum" \
     bash "$script" 2>&1
   )"
   status=$?
@@ -237,3 +242,15 @@ assert_contains "$output" "failed to create GOS_BIN_DIR" "failed bin"
 assert_not_installed "$bin_dir" "failed bin"
 assert_file_contains "$sudo_log" "sudo mkdir -p ${bin_dir}" "failed bin"
 pass "GOS_BIN_DIR creation failure aborts before install"
+
+run_installer "unpinned_default_warns" "existing"
+assert_status 0 "$status" "unpinned default"
+assert_contains "$output" "Warning: no release checksum configured" "unpinned default"
+assert_installed "$bin_dir" "unpinned default"
+pass "unpinned installer warns but proceeds by default"
+
+run_installer "unpinned_strict" "existing" "strict"
+assert_nonzero_status "$status" "unpinned strict"
+assert_contains "$output" "GOS_REQUIRE_CHECKSUM=1 but this installer is not release-pinned" "unpinned strict"
+assert_not_installed "$bin_dir" "unpinned strict"
+pass "GOS_REQUIRE_CHECKSUM=1 fails closed for unpinned installers"

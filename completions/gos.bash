@@ -3,7 +3,7 @@
 
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local commands="latest install use pin rollback current list platforms doctor version help"
+  local commands="latest install use pin rollback prune current list platforms doctor version help"
   local options="--json"
   local words="$commands"
 

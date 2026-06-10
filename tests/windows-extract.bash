@@ -79,7 +79,7 @@ while [ "$#" -gt 0 ]; do
       output="$2"
       shift 2
       ;;
-    --proto)
+    --proto|--connect-timeout|--retry)
       shift 2
       ;;
     --tlsv1.2|-fsSL)

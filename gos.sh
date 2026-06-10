@@ -5,8 +5,20 @@ GOS_VERSION="1.5.0"
 GOS_INSTALL_DIR="${GOS_INSTALL_DIR:-/usr/local/go}"
 GOS_CACHE_DIR="${GOS_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/gos}"
 GOS_OUTPUT_JSON=0
+GOS_TMP_DIR=""
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
+# Temp staging is cleaned from a trap so interrupted installs (Ctrl-C, kill)
+# do not leak partially extracted archives.
+_gos_cleanup_tmp() {
+  if [ -n "$GOS_TMP_DIR" ] && [ -d "$GOS_TMP_DIR" ]; then
+    rm -rf "$GOS_TMP_DIR"
+  fi
+}
+trap _gos_cleanup_tmp EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 _gos_os() {
   case "$(uname -s)" in
@@ -21,8 +33,9 @@ _gos_arch() {
   case "$(uname -m)" in
     x86_64|amd64) echo "amd64" ;;
     arm64|aarch64) echo "arm64" ;;
-    armv6l) echo "armv6l" ;;
-    i386|i686) echo "386" ;;
+    # Go ships a single 32-bit ARM build (armv6l); armv7l/armv8l CPUs run it.
+    armv6l|armv7l|armv8l) echo "armv6l" ;;
+    i386|i486|i586|i686) echo "386" ;;
     *) echo "unsupported" ;;
   esac
 }
@@ -62,7 +75,7 @@ _gos_set_json_from_args() {
 # Accepts: 1.22, 1.22.0, 1.23rc1, 1.23beta2
 _gos_validate_version() {
   local version="$1"
-  if ! echo "$version" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$'; then
+  if ! printf '%s\n' "$version" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$'; then
     echo "Error: invalid version format '${version}'." >&2
     echo "Expected format: X.Y[.Z][rcN|betaN]  e.g. 1.22.0, 1.23rc1" >&2
     return 1
@@ -77,6 +90,14 @@ _gos_validate_install_dir() {
     echo "Error: GOS_INSTALL_DIR is empty." >&2
     return 1
   fi
+  # Require an absolute path so install/cleanup never depends on the CWD
+  case "$dir" in
+    /*) ;;
+    *)
+      echo "Error: GOS_INSTALL_DIR='${dir}' must be an absolute path." >&2
+      return 1
+      ;;
+  esac
   # Reject known system-critical roots
   case "$dir" in
     /|/usr|/etc|/home|/var|/bin|/sbin|/lib|/opt|/tmp|/root|/sys|/proc|/dev)
@@ -86,7 +107,7 @@ _gos_validate_install_dir() {
   esac
   # Require at least 2 path components (e.g. /usr/local/go, not /go)
   local depth
-  depth=$(echo "$dir" | tr -cd '/' | wc -c | tr -d ' ')
+  depth=$(printf '%s' "$dir" | tr -cd '/' | wc -c | tr -d ' ')
   if [ "$depth" -lt 2 ]; then
     echo "Error: GOS_INSTALL_DIR='${dir}' is too shallow. Use a path like /usr/local/go." >&2
     return 1
@@ -110,11 +131,11 @@ _gos_validate_install_dir() {
 _gos_download() {
   local url="$1" output="$2"
   if command -v curl &>/dev/null; then
-    curl --proto '=https' --tlsv1.2 -fsSL -o "$output" "$url"
+    curl --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 2 -fsSL -o "$output" "$url"
   elif command -v wget &>/dev/null; then
-    wget --https-only -qO "$output" "$url"
+    wget --https-only --timeout=15 --tries=3 -qO "$output" "$url"
   else
-    echo "Error: neither curl nor wget found. Install one and try again."
+    echo "Error: neither curl nor wget found. Install one and try again." >&2
     return 1
   fi
 }
@@ -123,27 +144,67 @@ _gos_download() {
 _gos_download_stdout() {
   local url="$1"
   if command -v curl &>/dev/null; then
-    curl --proto '=https' --tlsv1.2 -fsSL "$url"
+    curl --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 2 -fsSL "$url"
   elif command -v wget &>/dev/null; then
-    wget --https-only -qO- "$url"
+    wget --https-only --timeout=15 --tries=3 -qO- "$url"
   else
     echo "Error: neither curl nor wget found. Install one and try again." >&2
     return 1
   fi
 }
 
-_gos_fetch_latest() {
-  local json
-  json=$(_gos_download_stdout 'https://go.dev/dl/?mode=json')
+# ─── Go downloads feed ────────────────────────────────────────────────────────
+# The feed is fetched at most once per feed variant per run. Helpers that run
+# inside command substitutions inherit a cache warmed in the parent shell, so
+# commands like `gos latest` resolve version and checksum with one request.
+
+GOS_FEED_JSON_DEFAULT=""
+GOS_FEED_JSON_ALL=""
+
+_gos_feed_json() {
+  local include_all="${1:-false}"
+
+  if [ "$include_all" = "true" ]; then
+    if [ -z "$GOS_FEED_JSON_ALL" ]; then
+      GOS_FEED_JSON_ALL=$(_gos_download_stdout 'https://go.dev/dl/?mode=json&include=all') || return 1
+    fi
+    printf '%s\n' "$GOS_FEED_JSON_ALL"
+  else
+    if [ -z "$GOS_FEED_JSON_DEFAULT" ]; then
+      GOS_FEED_JSON_DEFAULT=$(_gos_download_stdout 'https://go.dev/dl/?mode=json') || return 1
+    fi
+    printf '%s\n' "$GOS_FEED_JSON_DEFAULT"
+  fi
+}
+
+# Print bare version numbers (no "go" prefix) from feed JSON in feed order,
+# using the most robust parser available.
+_gos_feed_versions() {
+  local json="$1"
 
   if command -v jq &>/dev/null; then
-    echo "$json" | jq -r '.[0].version' | sed 's/^go//'
+    printf '%s\n' "$json" | jq -r '.[].version' | sed 's/^go//'
+  elif command -v python3 &>/dev/null; then
+    printf '%s\n' "$json" | python3 -c '
+import json, sys
+
+for item in json.load(sys.stdin):
+    version = item.get("version", "")
+    print(version[2:] if version.startswith("go") else version)
+'
   else
-    echo "$json" \
+    # Last-resort text scraping; may truncate rc/beta suffixes.
+    printf '%s\n' "$json" \
       | grep -o '"version": *"go[0-9.]*"' \
-      | head -1 \
-      | grep -o '[0-9][0-9.]*'
+      | grep -o 'go[0-9][0-9.]*' \
+      | sed 's/^go//'
   fi
+}
+
+_gos_fetch_latest() {
+  local json
+  json=$(_gos_feed_json false) || return 1
+  _gos_feed_versions "$json" | head -1
 }
 
 # Compute SHA256 checksum (cross-platform: Linux has sha256sum, macOS has shasum)
@@ -232,23 +293,18 @@ _gos_fetch_checksum() {
   local pkg="$1"
   local include_all="${2:-false}"
   local json
-  local api_url='https://go.dev/dl/?mode=json'
-
-  if [ "$include_all" = "true" ]; then
-    api_url='https://go.dev/dl/?mode=json&include=all'
-  fi
 
   if ! _gos_has_checksum_parser; then
     echo ""
     return 0
   fi
 
-  json=$(_gos_download_stdout "$api_url")
+  json=$(_gos_feed_json "$include_all") || { echo ""; return 0; }
 
   if command -v jq &>/dev/null; then
-    echo "$json" | jq -r --arg pkg "$pkg" '.[].files[] | select(.filename == $pkg) | .sha256'
+    printf '%s\n' "$json" | jq -r --arg pkg "$pkg" '.[].files[] | select(.filename == $pkg) | .sha256'
   elif command -v python3 &>/dev/null; then
-    echo "$json" | python3 -c "
+    printf '%s\n' "$json" | python3 -c "
 import json, sys
 pkg = sys.argv[1]
 data = json.load(sys.stdin)
@@ -261,6 +317,26 @@ for v in data:
   else
     echo ""
   fi
+}
+
+# Fallback checksum source: the companion .sha256 file published next to each
+# archive. go.dev redirects archive downloads to dl.google.com, so this stays
+# within the trust boundary already used for the archive bytes. It enables
+# verification even when jq/python3 are unavailable or feed metadata is absent.
+_gos_fetch_checksum_file() {
+  local pkg="$1" sha
+
+  sha=$(_gos_download_stdout "https://dl.google.com/go/${pkg}.sha256" 2>/dev/null) || return 1
+  # Some companion files publish "<sha256>  <filename>"; keep only the digest.
+  sha="${sha%%[[:space:]]*}"
+  case "$sha" in
+    *[!0-9a-fA-F]*) return 1 ;;
+  esac
+  if [ "${#sha}" -ne 64 ]; then
+    return 1
+  fi
+
+  printf '%s\n' "$sha" | tr '[:upper:]' '[:lower:]'
 }
 
 _gos_current() {
@@ -307,8 +383,10 @@ _gos_sudo() {
     return
   fi
 
+  # LC_ALL=C keeps failure messages in English so the permission-error
+  # detection below works regardless of the user's locale.
   set +e
-  output=$("$@" 2>&1)
+  output=$(LC_ALL=C "$@" 2>&1)
   status=$?
   set -e
 
@@ -326,7 +404,7 @@ _gos_sudo() {
     case "$output" in
       *"Permission denied"*|*"permission denied"*|*"Operation not permitted"*|*"operation not permitted"*|*"Access is denied"*|*"access denied"*)
         set +e
-        sudo_output=$(sudo "$@" 2>&1)
+        sudo_output=$(LC_ALL=C sudo "$@" 2>&1)
         sudo_status=$?
         set -e
         if [ "$sudo_status" -eq 0 ]; then
@@ -553,7 +631,7 @@ _gos_install_version() {
   ext=$(_gos_ext)
 
   if [ "$os" = "unsupported" ] || [ "$arch" = "unsupported" ]; then
-    echo "Error: unsupported OS or architecture: detected $(uname -s)/$(uname -m) (mapped to ${os}/${arch})."
+    echo "Error: unsupported OS or architecture: detected $(uname -s)/$(uname -m) (mapped to ${os}/${arch})." >&2
     return 1
   fi
 
@@ -561,14 +639,24 @@ _gos_install_version() {
   url="https://go.dev/dl/${pkg}"
 
   # Use a unique temp directory to prevent symlink/TOCTOU attacks.
+  # The EXIT/INT/TERM trap removes it on every exit path.
   tmp_dir=$(mktemp -d) || { echo "Error: failed to create temp directory." >&2; return 1; }
+  GOS_TMP_DIR="$tmp_dir"
   tmp_file="${tmp_dir}/${pkg}"
   stage_dir="${tmp_dir}/stage"
   staged_go_dir="${stage_dir}/go"
 
   # Resolve checksum metadata before consulting the local archive cache.
+  # The feed cache is warmed here, in the parent shell, so the command
+  # substitution below reuses it instead of re-downloading the feed.
   local expected_sha actual_sha cache_hit
-  expected_sha=$(_gos_fetch_checksum "$pkg" "$include_all_checksums")
+  expected_sha=""
+  if _gos_has_checksum_parser && _gos_feed_json "$include_all_checksums" >/dev/null; then
+    expected_sha=$(_gos_fetch_checksum "$pkg" "$include_all_checksums") || expected_sha=""
+  fi
+  if [ -z "$expected_sha" ]; then
+    expected_sha=$(_gos_fetch_checksum_file "$pkg") || expected_sha=""
+  fi
   cache_hit="false"
 
   if _gos_try_cache "$pkg" "$tmp_file" "$expected_sha"; then
@@ -576,8 +664,7 @@ _gos_install_version() {
   else
     echo "Downloading ${pkg}..."
     _gos_download "$url" "$tmp_file" || {
-      echo "Error: download failed. Version '${version}' may not exist."
-      rm -rf "$tmp_dir"
+      echo "Error: download failed. Version '${version}' may not exist." >&2
       return 1
     }
   fi
@@ -586,14 +673,10 @@ _gos_install_version() {
   if [ -n "$expected_sha" ]; then
     actual_sha=$(_gos_sha256 "$tmp_file")
     if [ -z "$actual_sha" ]; then
-      _gos_checksum_unavailable "no SHA256 tool output was available" || {
-        rm -rf "$tmp_dir"
-        return 1
-      }
+      _gos_checksum_unavailable "no SHA256 tool output was available" || return 1
     elif [ "$actual_sha" != "$expected_sha" ]; then
-      echo "Error: checksum mismatch! Expected ${expected_sha}, got ${actual_sha}."
-      echo "The download may be corrupted. Aborting."
-      rm -rf "$tmp_dir"
+      echo "Error: checksum mismatch! Expected ${expected_sha}, got ${actual_sha}." >&2
+      echo "The download may be corrupted. Aborting." >&2
       return 1
     else
       echo "Checksum verified."
@@ -606,38 +689,26 @@ _gos_install_version() {
     if _gos_has_checksum_parser; then
       reason="checksum metadata was not found for ${pkg}"
     else
-      reason="jq or python3 is required to read checksum metadata"
+      reason="no checksum source was available (jq/python3 missing and the ${pkg}.sha256 lookup failed)"
     fi
-    _gos_checksum_unavailable "$reason" || {
-      rm -rf "$tmp_dir"
-      return 1
-    }
+    _gos_checksum_unavailable "$reason" || return 1
   fi
 
   echo "Extracting..."
   mkdir -p "$stage_dir"
   if ! _gos_extract_archive "$ext" "$tmp_file" "$stage_dir"; then
-    echo "Error: extraction failed."
-    rm -rf "$tmp_dir"
+    echo "Error: extraction failed." >&2
     return 1
   fi
 
-  if ! _gos_validate_staged_install "$staged_go_dir"; then
-    rm -rf "$tmp_dir"
-    return 1
-  fi
+  _gos_validate_staged_install "$staged_go_dir" || return 1
 
-  if ! _gos_prepare_install_parent; then
-    rm -rf "$tmp_dir"
-    return 1
-  fi
+  _gos_prepare_install_parent || return 1
 
-  if ! _gos_activate_staged_install "$staged_go_dir"; then
-    rm -rf "$tmp_dir"
-    return 1
-  fi
+  _gos_activate_staged_install "$staged_go_dir" || return 1
 
   rm -rf "$tmp_dir"
+  GOS_TMP_DIR=""
 }
 
 _gos_find_upward() {
@@ -710,30 +781,24 @@ _gos_resolve_project_version() {
 
 _gos_list_versions() {
   local json
-  json=$(_gos_download_stdout 'https://go.dev/dl/?mode=json&include=all')
+  json=$(_gos_feed_json true) || {
+    echo "Error: could not fetch the Go version list. Check your internet connection." >&2
+    return 1
+  }
 
-  if command -v jq &>/dev/null; then
-    echo "$json" \
-      | jq -r '.[].version' \
-      | sed 's/^go//' \
-      | sort -t. -k1,1n -k2,2n -k3,3n \
-      | uniq \
-      | sed 's/^/go/'
-  else
-    echo "$json" \
-      | grep -o '"version": *"go[0-9.]*"' \
-      | grep -o 'go[0-9][0-9.]*' \
-      | sed 's/^go//' \
-      | sort -t. -k1,1n -k2,2n -k3,3n \
-      | uniq \
-      | sed 's/^/go/'
-  fi
+  _gos_feed_versions "$json" \
+    | sort -t. -k1,1n -k2,2n -k3,3n \
+    | uniq \
+    | sed 's/^/go/'
 }
 
 _gos_platforms_for_version() {
   local version="$1" json go_version
   go_version="go${version#go}"
-  json=$(_gos_download_stdout 'https://go.dev/dl/?mode=json&include=all')
+  json=$(_gos_feed_json true) || {
+    echo "Error: could not fetch the Go downloads feed. Check your internet connection." >&2
+    return 1
+  }
 
   if command -v jq &>/dev/null; then
     echo "$json" \
@@ -787,9 +852,13 @@ cmd_latest() {
   echo "Fetching latest stable Go version..."
   local latest current
 
-  latest=$(_gos_fetch_latest)
+  # Warm the default-feed cache in the parent shell so the version lookup and
+  # the checksum lookup share one network request.
+  _gos_feed_json false >/dev/null || true
+
+  latest=$(_gos_fetch_latest) || latest=""
   if [ -z "$latest" ]; then
-    echo "Error: could not fetch latest version. Check your internet connection."
+    echo "Error: could not fetch latest version. Check your internet connection." >&2
     return 1
   fi
 
@@ -808,7 +877,7 @@ cmd_latest() {
 cmd_install() {
   local version=$1
   if [ -z "$version" ]; then
-    echo "Usage: gos install <version>  e.g. gos install 1.26.1"
+    echo "Usage: gos install <version>  e.g. gos install 1.26.1" >&2
     return 1
   fi
 
@@ -852,10 +921,14 @@ cmd_current() {
 }
 
 cmd_list() {
+  local versions
   _gos_set_json_from_args "$@"
   if _gos_json_enabled; then
+    # Resolve the list before emitting JSON so failures never print a
+    # truncated document.
+    versions=$(_gos_list_versions) || return 1
     printf '{"versions":'
-    _gos_list_versions | _gos_json_array_from_lines
+    printf '%s\n' "$versions" | _gos_json_array_from_lines
     printf '}\n'
   else
     echo "Fetching available Go versions..."
@@ -874,11 +947,15 @@ cmd_platforms() {
   done
 
   if [ -z "$version" ]; then
-    version=$(_gos_fetch_latest)
+    version=$(_gos_fetch_latest) || version=""
+    if [ -z "$version" ]; then
+      echo "Error: could not fetch latest version. Check your internet connection." >&2
+      return 1
+    fi
   fi
 
   _gos_validate_version "$version" || return 1
-  platforms=$(_gos_platforms_for_version "$version")
+  platforms=$(_gos_platforms_for_version "$version") || platforms=""
 
   if [ -z "$platforms" ]; then
     echo "Error: no supported platforms found for go${version}." >&2
@@ -935,6 +1012,48 @@ cmd_pin() {
 
 cmd_rollback() {
   _gos_activate_rollback
+}
+
+cmd_prune() {
+  local prune_rollback="false" arg rollback_dir removed=0 file
+
+  for arg in "$@"; do
+    case "$arg" in
+      --rollback) prune_rollback="true" ;;
+      *)
+        echo "Error: unknown option for gos prune: ${arg}" >&2
+        echo "Usage: gos prune [--rollback]" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  # Delete only files that look like cached Go archives. GOS_CACHE_DIR is
+  # user-controlled, so prune never runs rm -rf against it.
+  if [ -d "$GOS_CACHE_DIR" ]; then
+    for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip; do
+      [ -f "$file" ] || continue
+      rm -f "$file"
+      removed=$((removed + 1))
+    done
+  fi
+  if [ "$removed" -gt 0 ]; then
+    echo "Removed ${removed} cached Go archive(s) from ${GOS_CACHE_DIR}."
+  else
+    echo "No cached Go archives found in ${GOS_CACHE_DIR}."
+  fi
+
+  rollback_dir=$(_gos_rollback_dir)
+  if [ "$prune_rollback" = "true" ]; then
+    if [ -d "$rollback_dir" ]; then
+      _gos_sudo rm -rf "$rollback_dir" || return 1
+      echo "Removed rollback installation at ${rollback_dir}."
+    else
+      echo "No rollback installation found at ${rollback_dir}."
+    fi
+  elif [ -d "$rollback_dir" ]; then
+    echo "Rollback installation kept at ${rollback_dir} (remove it with: gos prune --rollback)."
+  fi
 }
 
 _gos_doctor_add_json_check() {
@@ -1063,7 +1182,11 @@ cmd_doctor() {
     _gos_doctor_check "problem" "extract" "tar is not available" "Install tar."
   fi
 
-  if [ -f "${BASH_SOURCE[0]%/*}/completions/gos.bash" ] && [ -f "${BASH_SOURCE[0]%/*}/completions/gos.zsh" ] && [ -f "${BASH_SOURCE[0]%/*}/completions/gos.fish" ]; then
+  local script_dir
+  # dirname handles bare invocations like `bash gos.sh`, where
+  # ${BASH_SOURCE[0]%/*} would leave the filename unchanged.
+  script_dir=$(dirname "${BASH_SOURCE[0]}")
+  if [ -f "${script_dir}/completions/gos.bash" ] && [ -f "${script_dir}/completions/gos.zsh" ] && [ -f "${script_dir}/completions/gos.fish" ]; then
     _gos_doctor_check "ok" "completions" "Bash, Zsh, and Fish completion files are present"
   else
     _gos_doctor_check "warn" "completions" "one or more completion files are missing"
@@ -1107,6 +1230,7 @@ COMMANDS:
   use [path]          Install the Go version requested by .go-version or go.mod
   pin <version>       Write .go-version in the current directory
   rollback            Restore the previous Go installation, if available
+  prune [--rollback]  Remove cached Go archives (and the rollback copy with --rollback)
   current             Show the currently active Go version
   list                List all available Go versions
   platforms [version] List supported OS/arch archives for a Go version
@@ -1159,6 +1283,10 @@ main() {
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       cmd_rollback
       ;;
+    prune)
+      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      cmd_prune "$@"
+      ;;
     current)   cmd_current "$@" ;;
     list)      cmd_list "$@" ;;
     platforms) cmd_platforms "$@" ;;
@@ -1166,7 +1294,7 @@ main() {
     version)   cmd_version "$@" ;;
     help|--help|-h) cmd_help ;;
     *)
-      echo "Error: unknown command: $cmd"
+      echo "Error: unknown command: $cmd" >&2
       cmd_help
       return 1
       ;;

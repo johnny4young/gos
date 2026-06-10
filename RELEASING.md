@@ -48,9 +48,10 @@ bash tests/install-ps1.bash
 bash tests/packaging.bash
 bash tests/changelog.bash
 bash tests/features.bash
+bash tests/detection.bash
 bash tests/windows-extract.bash
 bash tests/workflows.bash
-bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
+bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
 zsh -n completions/gos.zsh
 ./gos.sh version
 ./gos.sh help

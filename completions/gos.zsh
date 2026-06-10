@@ -9,6 +9,7 @@ _gos() {
     'use:Install the Go version requested by .go-version or go.mod'
     'pin:Write .go-version in the current directory'
     'rollback:Restore the previous Go installation'
+    'prune:Remove cached Go archives and optionally the rollback copy'
     'current:Show the currently active Go version'
     'list:List all available Go versions'
     'platforms:List supported OS/arch archives for a Go version'

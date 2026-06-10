@@ -25,7 +25,8 @@ cd "$repo_root"
 tag="v${version}"
 windows_url="https://github.com/johnny4young/gos/releases/download/${tag}/gos-windows.zip"
 
-ruby - "$version" "$windows_url" "$windows_sha" <<'RUBY'
+# -EUTF-8 keeps file rewriting locale-independent (manifests may contain UTF-8).
+ruby -EUTF-8 - "$version" "$windows_url" "$windows_sha" <<'RUBY'
 version, windows_url, windows_sha = ARGV
 
 def replace!(path, pattern, replacement)

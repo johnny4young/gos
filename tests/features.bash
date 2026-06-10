@@ -3,6 +3,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="${repo_root}/gos.sh"
+gos_version="$(sed -n 's/^GOS_VERSION="\([^"]*\)"$/\1/p' "$script")"
+[ -n "$gos_version" ] || { echo "not ok - could not read GOS_VERSION from gos.sh" >&2; exit 1; }
 test_root="$(mktemp -d)"
 fake_bin="${test_root}/bin"
 original_path="$PATH"
@@ -43,7 +45,7 @@ while [ "$#" -gt 0 ]; do
       output="$2"
       shift 2
       ;;
-    --proto)
+    --proto|--connect-timeout|--retry)
       shift 2
       ;;
     --tlsv1.2|-fsSL)
@@ -57,6 +59,11 @@ while [ "$#" -gt 0 ]; do
 done
 
 printf '%s\n' "$url" >>"$GOS_TEST_URL_LOG"
+
+if [ "${GOS_TEST_DOWNLOAD_MODE:-ok}" = "fail-all" ]; then
+  echo "curl: (6) Could not resolve host: go.dev" >&2
+  exit 6
+fi
 
 case "$url" in
   'https://go.dev/dl/?mode=json'|'https://go.dev/dl/?mode=json&include=all')
@@ -84,6 +91,11 @@ JSON
       exit 1
     fi
     printf 'fake archive for %s\n' "$url" >"$output"
+    ;;
+  https://dl.google.com/go/go*.sha256)
+    # Companion checksum fallback is exercised in tests/checksum.bash.
+    echo "404" >&2
+    exit 22
     ;;
   *)
     echo "unexpected curl URL: $url" >&2
@@ -145,7 +157,7 @@ FAKE_TAR
 
 cat >"${fake_bin}/go" <<'FAKE_GO'
 #!/usr/bin/env bash
-echo "go version go1.20rc1 darwin/arm64"
+echo "go version go${GOS_TEST_GO_VERSION:-1.20rc1} darwin/arm64"
 FAKE_GO
 
 chmod +x "${fake_bin}/uname" "${fake_bin}/curl" "${fake_bin}/sha256sum" \
@@ -179,11 +191,12 @@ run_gos() {
   set +e
   output="$(
     PATH="${fake_bin}:${original_path}" \
-    GOS_INSTALL_DIR="${case_dir}/go" \
+    GOS_INSTALL_DIR="${GOS_TEST_INSTALL_DIR:-${case_dir}/go}" \
     GOS_CACHE_DIR="${case_dir}/cache" \
     GOS_TEST_URL_LOG="${case_dir}/urls.log" \
     GOS_TEST_DOWNLOAD_MODE="${GOS_TEST_DOWNLOAD_MODE:-ok}" \
     GOS_TEST_UNSUPPORTED_PLATFORM="${GOS_TEST_UNSUPPORTED_PLATFORM:-0}" \
+    GOS_TEST_GO_VERSION="${GOS_TEST_GO_VERSION:-}" \
     "$@" 2>&1
   )"
   status=$?
@@ -204,7 +217,7 @@ OLD_GO
 case_dir="${test_root}/json"
 run_gos "$case_dir" bash "$script" version --json
 [ "$status" -eq 0 ] || fail "version --json failed: ${output}"
-assert_contains "$output" '"gos_version":"1.4.3"' "version json"
+assert_contains "$output" "\"gos_version\":\"${gos_version}\"" "version json"
 
 run_gos "$case_dir" bash "$script" current --json
 [ "$status" -eq 0 ] || fail "current --json failed: ${output}"
@@ -288,3 +301,90 @@ GOS_TEST_UNSUPPORTED_PLATFORM=1 run_gos "$case_dir" bash "$script" install 1.21.
 [ "$status" -ne 0 ] || fail "unsupported platform should fail"
 assert_contains "$output" "detected Plan9/mystery" "unsupported platform"
 pass "unsupported platform errors include detected OS and arch"
+
+case_dir="${test_root}/validate-version"
+# The command-substitution payload is intentionally literal: it must reach
+# gos.sh unexpanded to prove the validator rejects it.
+# shellcheck disable=SC2016
+for bad in '1.21.6;rm -rf /' '../1.21' '1.21.6$(touch pwned)' 'v1.21.6' '1'; do
+  run_gos "$case_dir" bash "$script" install "$bad"
+  [ "$status" -ne 0 ] || fail "install '${bad}' should fail"
+  assert_contains "$output" "invalid version format" "version validation '${bad}'"
+  if [ -s "${case_dir}/urls.log" ]; then
+    fail "install '${bad}' must not reach the network"
+  fi
+done
+run_gos "$case_dir" bash "$script" install ""
+[ "$status" -ne 0 ] || fail "install with empty version should fail"
+assert_contains "$output" "Usage: gos install <version>" "empty version usage"
+pass "unsafe or malformed versions are rejected before any network access"
+
+case_dir="${test_root}/validate-install-dir"
+GOS_TEST_INSTALL_DIR="/usr" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "system-critical install dir should fail"
+assert_contains "$output" "system-critical path" "install dir system path"
+GOS_TEST_INSTALL_DIR="relative/go" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "relative install dir should fail"
+assert_contains "$output" "must be an absolute path" "install dir relative path"
+GOS_TEST_INSTALL_DIR="/golang" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "shallow install dir should fail"
+assert_contains "$output" "too shallow" "install dir shallow path"
+GOS_TEST_INSTALL_DIR="${case_dir}/payload" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "install dir without go basename should fail"
+assert_contains "$output" "does not contain 'go'" "install dir basename"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "install dir validation must run before any network access"
+fi
+pass "install dir guardrails refuse dangerous paths before any work"
+
+case_dir="${test_root}/idempotent"
+GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "idempotent install failed: ${output}"
+assert_contains "$output" "Already on Go 1.21.6, nothing to do." "idempotent install"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "idempotent install must not reach the network"
+fi
+GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" latest
+[ "$status" -eq 0 ] || fail "idempotent latest failed: ${output}"
+assert_contains "$output" "Already on Go 1.21.6, nothing to do." "idempotent latest"
+if grep -q 'dl/go1' "${case_dir}/urls.log"; then
+  fail "idempotent latest must not download any archive"
+fi
+pass "installing the active version is a no-op"
+
+case_dir="${test_root}/offline"
+GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" latest
+[ "$status" -ne 0 ] || fail "offline latest should fail"
+assert_contains "$output" "could not fetch latest version" "offline latest"
+GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" list
+[ "$status" -ne 0 ] || fail "offline list should fail"
+assert_contains "$output" "could not fetch the Go version list" "offline list"
+GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "offline install should fail"
+assert_contains "$output" "download failed" "offline install"
+GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" platforms 1.21.6
+[ "$status" -ne 0 ] || fail "offline platforms should fail"
+assert_contains "$output" "could not fetch the Go downloads feed" "offline platforms"
+pass "network failures produce actionable errors and non-zero exits"
+
+case_dir="${test_root}/prune"
+mkdir -p "$case_dir"
+create_old_install "${case_dir}/go"
+run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "prune setup install failed: ${output}"
+[ -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "prune setup did not cache archive"
+[ -d "${case_dir}/go.gos-rollback" ] || fail "prune setup did not create rollback"
+run_gos "$case_dir" bash "$script" prune
+[ "$status" -eq 0 ] || fail "prune failed: ${output}"
+assert_contains "$output" "Removed 1 cached Go archive(s)" "prune cache"
+assert_contains "$output" "Rollback installation kept" "prune keeps rollback"
+[ ! -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "prune left cached archive"
+[ -d "${case_dir}/go.gos-rollback" ] || fail "prune must not remove rollback by default"
+run_gos "$case_dir" bash "$script" prune --rollback
+[ "$status" -eq 0 ] || fail "prune --rollback failed: ${output}"
+assert_contains "$output" "Removed rollback installation" "prune rollback"
+[ ! -d "${case_dir}/go.gos-rollback" ] || fail "prune --rollback left rollback dir"
+run_gos "$case_dir" bash "$script" prune --bogus
+[ "$status" -ne 0 ] || fail "prune with unknown option should fail"
+assert_contains "$output" "unknown option for gos prune" "prune unknown option"
+pass "prune clears cached archives and removes the rollback only on request"

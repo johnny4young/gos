@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- Add `gos prune [--rollback]` to remove cached Go archives and, optionally, the rollback installation.
+- Add a `.sha256` companion-file checksum fallback so downloads are verified even without `jq`/`python3`.
+- Map `armv7l`/`armv8l` hardware to Go's `armv6l` builds so 32-bit Raspberry Pi OS installs work.
+
+### Changed
+
+- `gos latest` now resolves the version and its checksum from a single downloads-feed request.
+- Version listing and latest-version parsing prefer `python3` before falling back to text scraping when `jq` is missing.
+- `GOS_INSTALL_DIR` must now be an absolute path.
+- Network failures in `latest`, `install`, `list`, and `platforms` now print actionable errors instead of aborting mid-command.
+- Download commands use connection timeouts and retries instead of waiting indefinitely.
+
+### Fixed
+
+- Interrupted installs no longer leak temporary staging directories; cleanup now runs from an exit trap in `gos.sh` and `install.sh`.
+- `install.sh` executes only after the full script is downloaded and parsed, supports `wget` when `curl` is missing, honors `GOS_REQUIRE_CHECKSUM=1`, and fails with a clear message when sudo is unavailable.
+- `gos list --json` no longer emits a truncated JSON document when the feed request fails.
+- Sudo retry detection now works on non-English locales.
+- `gos doctor` completions check now resolves the script directory correctly when invoked as `bash gos.sh`.
+- Feature tests no longer hard-code the released version, and Ruby-based checks run under any locale.
+
 ## [1.5.0] - 2026-05-12
 
 ### Changed

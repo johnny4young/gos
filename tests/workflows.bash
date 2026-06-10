@@ -4,7 +4,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-ruby <<'RUBY'
+# -EUTF-8 keeps file parsing locale-independent (repo files contain UTF-8).
+ruby -EUTF-8 <<'RUBY'
 require "yaml"
 
 def fail!(message)
@@ -224,13 +225,14 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
 [
   "bash tests/changelog.bash",
   "bash tests/checksum.bash",
+  "bash tests/detection.bash",
   "bash tests/features.bash",
   "bash tests/install-transaction.bash",
   "bash tests/install-sh.bash",
   "bash tests/install-ps1.bash",
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
-  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -283,7 +285,7 @@ assert(readme.include?("SECURITY.md"), "README must link to SECURITY.md")
 assert(!readme.include?("winget install johnny4young.gos"), "README must not advertise unpublished Winget install command")
 assert(!readme.include?("choco install gos"), "README must not advertise unpublished Chocolatey install command")
 
-%w[use pin rollback platforms doctor].each do |command|
+%w[use pin rollback prune platforms doctor].each do |command|
   assert(readme.include?(command), "README must document #{command}")
   assert(bash_completion.include?(command), "Bash completion must include #{command}")
   assert(zsh_completion.include?(command), "Zsh completion must include #{command}")

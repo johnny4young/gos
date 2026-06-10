@@ -243,6 +243,7 @@ exec fish          # for Fish
 | `gos use [path]` | Install the Go version requested by `.go-version` or `go.mod` |
 | `gos pin <version>` | Write `.go-version` in the current directory |
 | `gos rollback` | Restore the previous Go installation, if available |
+| `gos prune [--rollback]` | Remove cached Go archives; `--rollback` also removes the rollback copy |
 | `gos current` | Show the currently active Go version |
 | `gos list` | List all available Go versions |
 | `gos platforms [version]` | List supported OS/arch archives for a Go version |
@@ -324,9 +325,9 @@ To manually enable them, see the [Manual Shell Configuration](#manual-shell-conf
 | Variable | Default | Description |
 |---|---|---|
 | `GOS_BIN_DIR` | `/usr/local/bin` | Where the `gos` command is installed by `install.sh`. Missing custom directories are created when possible. |
-| `GOS_CACHE_DIR` | `$XDG_CACHE_HOME/gos` or `$HOME/.cache/gos` | Where verified Go archives are cached for reuse. |
+| `GOS_CACHE_DIR` | `$XDG_CACHE_HOME/gos` or `$HOME/.cache/gos` | Where verified Go archives are cached for reuse. Clear it with `gos prune`. |
 | `GOS_INSTALL_DIR` | `/usr/local/go` | Where Go gets installed. Override to install without `sudo`. Path basename must contain "go". |
-| `GOS_REQUIRE_CHECKSUM` | unset | Set to `1` to abort installs when checksum metadata or local SHA256 calculation is unavailable. |
+| `GOS_REQUIRE_CHECKSUM` | unset | Set to `1` to abort installs when checksum metadata or local SHA256 calculation is unavailable. Honored by both `gos` and `install.sh`. |
 
 Example — install Go in your home directory (no sudo needed):
 
@@ -346,7 +347,7 @@ Add the export to your shell profile to make it permanent.
 1. Queries the [official Go downloads API](https://go.dev/dl/?mode=json) for available versions
 2. Detects your OS via `uname -s` and architecture via `uname -m`
 3. Downloads the matching archive from `https://go.dev/dl/`
-4. Verifies SHA256 checksum against the Go API (uses `jq` or `python3`)
+4. Verifies SHA256 checksum against the Go API (uses `jq` or `python3`), falling back to the archive's published `.sha256` companion file when API metadata cannot be parsed
 5. Reuses a cached archive only after its checksum matches the Go metadata
 6. Extracts the new version into a temporary staging directory
 7. Validates the staged `go/bin/go` before touching `$GOS_INSTALL_DIR`
