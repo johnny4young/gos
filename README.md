@@ -78,7 +78,7 @@ Done. That's the whole setup.
 - **Pin any version** — `gos install 1.21.6` gets exactly what you need
 - **Project-aware switching** — `gos use` reads `.go-version`, `toolchain`, or `go` directives
 - **Doctor diagnostics** — `gos doctor` checks Go, PATH, permissions, checksum tools, and extraction tools
-- **Cache and rollback** — verified archives are cached, and `gos rollback` restores the previous install
+- **Cache and rollback** — verified archives are cached, `gos rollback` restores the previous install, and `gos prune` reclaims the disk space
 - **Machine-readable output** — `--json` is available for `current`, `list`, `platforms`, `doctor`, and `version`
 - **Auto-detects everything** — OS (`darwin`, `linux`, `windows`) and architecture (`amd64`, `arm64`, `armv6l`, `386`)
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)

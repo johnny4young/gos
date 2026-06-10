@@ -47,7 +47,15 @@ function Invoke-Download {
     [string]$OutFile
   )
 
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  # Enforce a TLS 1.2 floor without downgrading runtimes that support TLS 1.3
+  # (the Tls13 enum value is missing on older .NET Framework builds).
+  $protocols = [Net.SecurityProtocolType]::Tls12
+  try {
+    $protocols = $protocols -bor [Net.SecurityProtocolType]::Tls13
+  } catch {
+    Write-Verbose 'TLS 1.3 is not available on this runtime; keeping the TLS 1.2 floor.'
+  }
+  [Net.ServicePointManager]::SecurityProtocol = $protocols
   Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile
 }
 

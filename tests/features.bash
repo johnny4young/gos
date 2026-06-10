@@ -388,3 +388,26 @@ run_gos "$case_dir" bash "$script" prune --bogus
 [ "$status" -ne 0 ] || fail "prune with unknown option should fail"
 assert_contains "$output" "unknown option for gos prune" "prune unknown option"
 pass "prune clears cached archives and removes the rollback only on request"
+
+case_dir="${test_root}/single-fetch"
+run_gos "$case_dir" bash "$script" latest
+[ "$status" -eq 0 ] || fail "latest install failed: ${output}"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "latest did not install newest version"
+feed_fetches=$(grep -c 'mode=json' "${case_dir}/urls.log")
+if [ "$feed_fetches" -ne 1 ]; then
+  fail "latest should fetch the downloads feed exactly once, got ${feed_fetches}: $(cat "${case_dir}/urls.log")"
+fi
+pass "latest resolves version and checksum from a single feed request"
+
+case_dir="${test_root}/use-no-manifest"
+mkdir -p "${case_dir}/empty"
+run_gos "$case_dir" bash "$script" use "${case_dir}/empty"
+[ "$status" -ne 0 ] || fail "use without manifests should fail"
+assert_contains "$output" "no .go-version or go.mod found" "use without manifests"
+pass "use fails with a clear error when no project manifest exists"
+
+case_dir="${test_root}/pin-no-arg"
+run_gos "$case_dir" bash "$script" pin
+[ "$status" -ne 0 ] || fail "pin without version should fail"
+assert_contains "$output" "Usage: gos pin <version>" "pin without version"
+pass "pin without a version prints usage and fails"

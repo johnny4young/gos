@@ -739,6 +739,9 @@ _gos_read_go_version_file() {
   return 1
 }
 
+# Resolve the Go version requested by a go.mod. Precedence mirrors the Go
+# toolchain itself: an explicit `toolchain goX.Y.Z` directive wins over the
+# `go X.Y` language directive; only the first `go` directive is considered.
 _gos_read_go_mod_version() {
   local file="$1"
   awk '

@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Fixed
 
 - Interrupted installs no longer leak temporary staging directories; cleanup now runs from an exit trap in `gos.sh` and `install.sh`.
+- The Windows installer no longer downgrades TLS 1.3-capable connections to TLS 1.2; it now enforces a TLS 1.2 floor instead.
 - `install.sh` executes only after the full script is downloaded and parsed, supports `wget` when `curl` is missing, honors `GOS_REQUIRE_CHECKSUM=1`, and fails with a clear message when sudo is unavailable.
 - `gos list --json` no longer emits a truncated JSON document when the feed request fails.
 - Sudo retry detection now works on non-English locales.
