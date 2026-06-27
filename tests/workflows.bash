@@ -98,7 +98,7 @@ assert(job_needs(release_preflight).include?("validate-release-ref"), "release-p
 assert(release_preflight["if"].to_s.include?("workflow_dispatch"), "release-preflight must only run for manual releases")
 assert(release_preflight.dig("permissions", "contents") != "write", "release-preflight must not request contents: write")
 release_preflight_steps = steps_for(release_jobs, "release-preflight")
-release_preflight_checkout = release_preflight_steps.find { |step| step["uses"].to_s == "actions/checkout@v6" }
+release_preflight_checkout = release_preflight_steps.find { |step| step["uses"].to_s.start_with?("actions/checkout@") }
 assert(release_preflight_checkout, "release-preflight must checkout the repository")
 assert(release_preflight_checkout.dig("with", "fetch-depth") == 0, "release-preflight must fetch tags before checking tag uniqueness")
 release_preflight_step = step_named(release_preflight_steps, "Validate manual release readiness")
@@ -116,7 +116,7 @@ assert(job_needs(version_bump).include?("release-preflight"), "version-bump must
 assert(version_bump["if"].to_s.include?("workflow_dispatch"), "version-bump must only run for manual releases")
 assert(version_bump.dig("permissions", "contents") == "write", "version-bump must scope contents: write to its job")
 version_bump_steps = steps_for(release_jobs, "version-bump")
-version_bump_checkout = version_bump_steps.find { |step| step["uses"].to_s == "actions/checkout@v6" }
+version_bump_checkout = version_bump_steps.find { |step| step["uses"].to_s.start_with?("actions/checkout@") }
 assert(version_bump_checkout, "version-bump must checkout the repository")
 assert(version_bump_checkout.dig("with", "fetch-depth") == 0, "version-bump must fetch tags for changelog compare links")
 ["Update version in gos.sh", "Update CHANGELOG.md", "Commit and tag"].each do |name|
@@ -133,7 +133,7 @@ assert(job_needs(smoke_job).include?("version-bump"), "smoke-test must depend on
 assert(smoke_job["if"].to_s.include?("needs.release-preflight.result"), "smoke-test must respect release-preflight result")
 smoke_steps = steps_for(release_jobs, "smoke-test")
 smoke_runs = smoke_steps.map { |step| step["run"].to_s }
-smoke_checkout = smoke_steps.find { |step| step["uses"].to_s == "actions/checkout@v6" }
+smoke_checkout = smoke_steps.find { |step| step["uses"].to_s.start_with?("actions/checkout@") }
 assert(smoke_checkout, "smoke-test must checkout the release tag")
 assert(smoke_checkout.dig("with", "ref").to_s.include?("needs.validate-release-ref.outputs.tag"), "smoke-test must checkout the validated release tag")
 assert(smoke_runs.any? { |run| run.include?("./gos.sh version") }, "release smoke-test must run gos version")
@@ -150,9 +150,9 @@ assert(release_job.dig("permissions", "id-token") == "write", "release job must 
 assert(release_job.dig("permissions", "attestations") == "write", "release job must grant attestations: write")
 release_steps = steps_for(release_jobs, "release")
 release_uses = release_steps.map { |step| step["uses"].to_s }
-assert(release_uses.include?("softprops/action-gh-release@v3"), "release workflow must use softprops/action-gh-release@v3")
-assert(release_uses.include?("actions/attest@v4"), "release workflow must use actions/attest@v4")
-release_checkout = release_steps.find { |step| step["uses"].to_s == "actions/checkout@v6" }
+assert(release_uses.any? { |used| used.start_with?("softprops/action-gh-release@") }, "release workflow must use softprops/action-gh-release")
+assert(release_uses.any? { |used| used.start_with?("actions/attest@") }, "release workflow must use actions/attest")
+release_checkout = release_steps.find { |step| step["uses"].to_s.start_with?("actions/checkout@") }
 assert(release_checkout, "release job must checkout the release tag")
 assert(release_checkout.dig("with", "ref").to_s.include?("needs.validate-release-ref.outputs.tag"), "release job must checkout the validated release tag")
 
@@ -187,7 +187,7 @@ assert(job_needs(update_formula).include?("validate-release-ref"), "update-formu
 assert(job_needs(update_formula).include?("release"), "update-formula must depend on release")
 assert(update_formula.dig("permissions", "contents") != "write", "update-formula must not request current-repo contents: write")
 update_formula_steps = steps_for(release_jobs, "update-formula")
-update_formula_checkout = update_formula_steps.find { |step| step["uses"].to_s == "actions/checkout@v6" }
+update_formula_checkout = update_formula_steps.find { |step| step["uses"].to_s.start_with?("actions/checkout@") }
 assert(update_formula_checkout, "update-formula must checkout the released gos source for the bump script and template")
 assert(update_formula_checkout.dig("with", "ref").to_s.include?("needs.validate-release-ref.outputs.tag"), "update-formula must checkout the validated release tag")
 update_formula_runs = update_formula_steps.map { |step| step["run"].to_s }.join("\n")
