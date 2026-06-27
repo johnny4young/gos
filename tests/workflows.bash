@@ -187,8 +187,17 @@ assert(job_needs(update_formula).include?("validate-release-ref"), "update-formu
 assert(job_needs(update_formula).include?("release"), "update-formula must depend on release")
 assert(update_formula.dig("permissions", "contents") != "write", "update-formula must not request current-repo contents: write")
 update_formula_steps = steps_for(release_jobs, "update-formula")
+update_formula_checkout = update_formula_steps.find { |step| step["uses"].to_s == "actions/checkout@v6" }
+assert(update_formula_checkout, "update-formula must checkout the released gos source for the bump script and template")
+assert(update_formula_checkout.dig("with", "ref").to_s.include?("needs.validate-release-ref.outputs.tag"), "update-formula must checkout the validated release tag")
 update_formula_runs = update_formula_steps.map { |step| step["run"].to_s }.join("\n")
 assert(update_formula_runs.include?('TAG:?missing release tag'), "update-formula must use the validated release tag")
+assert(update_formula_runs.include?("scripts/update-homebrew-tap.sh"), "update-formula must use the vendored central-tap bump script")
+assert(update_formula_runs.include?("--kind formula"), "update-formula must publish a formula to the tap")
+assert(update_formula_runs.include?("--template packaging/Formula/gos.rb"), "update-formula must regenerate the formula from the in-repo template")
+update_formula_env = update_formula_steps.flat_map { |step| (step["env"] || {}).to_a }
+assert(update_formula_env.any? { |key, value| key == "TAP_DEPLOY_KEY" && value.to_s.include?("secrets.TAP_DEPLOY_KEY") }, "update-formula must push to the central tap over the TAP_DEPLOY_KEY deploy key")
+assert(!update_formula_runs.include?("HOMEBREW_TAP_TOKEN"), "update-formula must not use the deprecated homebrew-gos token")
 
 ci_on = workflow_on(ci)
 assert(ci_on.key?("pull_request"), "CI must run on pull_request")
@@ -202,7 +211,7 @@ ci_jobs = ci.fetch("jobs") { fail!("CI must define jobs") }
 end
 
 shellcheck_runs = ci_jobs.dig("shellcheck", "steps").map { |step| step["run"].to_s }.join("\n")
-assert(shellcheck_runs.include?("shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash tests/*.bash"), "ShellCheck job must cover scripts and tests")
+assert(shellcheck_runs.include?("shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash"), "ShellCheck job must cover scripts and tests")
 
 matrix_os = ci_jobs.dig("smoke", "strategy", "matrix", "os") || []
 %w[ubuntu-latest macos-latest windows-latest].each do |os|
@@ -232,7 +241,7 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
   "bash tests/install-ps1.bash",
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
-  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -248,9 +257,11 @@ packaging_files = Dir.glob("packaging/**/*").select { |path| File.file?(path) }
 packaging_text = packaging_files.map { |path| File.read(path) }.join("\n")
 [
   "packaging/README.md",
+  "packaging/Formula/gos.rb",
   "install.ps1",
   "scripts/build-windows-package.bash",
   "scripts/update-changelog.bash",
+  "scripts/update-homebrew-tap.sh",
   "scripts/update-packaging.bash",
   "packaging/windows/gos.cmd",
   "packaging/windows/uninstall.ps1",
@@ -273,7 +284,11 @@ assert(!packaging_text.include?("PackageVersion: 1.0.0"), "Winget manifest must 
 assert(packaging_text.include?("<version>#{gos_version}</version>"), "Chocolatey manifest must match GOS_VERSION")
 assert(packaging_text.include?("PackageVersion: #{gos_version}"), "Winget manifest must match GOS_VERSION")
 assert(packaging_text.include?("releases/download/v#{gos_version}/gos-windows.zip"), "package metadata must use the current Windows release asset")
-assert(!packaging_text.include?("archive/refs/tags"), "Winget manifest must not point at source archives")
+# The Homebrew formula template legitimately pins a source tarball, so scope the
+# "no source archives" rule to the Windows package-manager manifests it targets.
+winget_manifest = file_text("packaging/winget/johnny4young.gos.yaml")
+choco_install = file_text("packaging/chocolatey/tools/chocolateyInstall.ps1")
+assert(!winget_manifest.include?("archive/refs/tags") && !choco_install.include?("archive/refs/tags"), "Windows package manifests must not point at source archives")
 assert(packaging_text.include?("Get-ChocolateyUnzip"), "Chocolatey install must unpack the Windows release asset")
 assert(packaging_text.include?("-ChecksumType 'sha256'"), "Chocolatey install must verify the release asset checksum")
 assert(packaging_text.include?("Install-BinFile -Name 'gos'"), "Chocolatey install must expose a gos command shim")
@@ -298,7 +313,7 @@ assert(fish_completion_file.include?("-l json"), "Fish completion must include -
 
 [
   "workflow_dispatch",
-  "HOMEBREW_TAP_TOKEN",
+  "TAP_DEPLOY_KEY",
   "CHANGELOG.md",
   "## [Unreleased]",
   "README.md",

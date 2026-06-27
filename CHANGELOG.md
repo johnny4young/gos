@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- Homebrew install now uses the central `johnny4young/homebrew-tap` tap (`brew install johnny4young/tap/gos`). The deprecated `johnny4young/gos` tap re-points existing users automatically via `tap_migrations.json`, so no manual re-tap is needed. Releases now publish `Formula/gos.rb` to the central tap with the vendored `scripts/update-homebrew-tap.sh`.
 - `gos latest` now resolves the version and its checksum from a single downloads-feed request.
 - Version listing and latest-version parsing prefer `python3` before falling back to text scraping when `jq` is missing.
 - `GOS_INSTALL_DIR` must now be an absolute path.
