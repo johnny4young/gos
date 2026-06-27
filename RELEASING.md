@@ -23,7 +23,10 @@ commands, and changelog links aligned.
 2. Pick the SemVer release version, without a `v` prefix.
 3. Confirm the release workflow secrets are available:
    - `GITHUB_TOKEN` is provided by GitHub Actions.
-   - `HOMEBREW_TAP_TOKEN` can push to `johnny4young/homebrew-gos`.
+   - `TAP_DEPLOY_KEY` is a write-enabled SSH deploy key for the central tap
+     `johnny4young/homebrew-tap`. The `update-formula` job uses it to publish
+     `Formula/gos.rb` there. When the secret is absent (for example on a fork),
+     the job warns and skips instead of failing the release.
 4. Verify `CHANGELOG.md` has `## [Unreleased]` immediately after the intro.
    Curated bullets under `Unreleased` are optional: if the section is empty, the
    manual release generates notes from non-merge git commit subjects since the
@@ -51,7 +54,7 @@ bash tests/features.bash
 bash tests/detection.bash
 bash tests/windows-extract.bash
 bash tests/workflows.bash
-bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
+bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
 zsh -n completions/gos.zsh
 ./gos.sh version
 ./gos.sh help
@@ -62,7 +65,7 @@ git diff --check
 If ShellCheck and Fish are installed locally, also run:
 
 ```bash
-shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash tests/*.bash
+shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash
 fish --no-config --no-execute completions/gos.fish
 ```
 
@@ -83,7 +86,10 @@ fish --no-config --no-execute completions/gos.fish
    - `smoke-test` checks the release tag on Linux and macOS.
    - `release` patches installers, builds `gos-windows.zip`, creates checksums,
      publishes attestations, and uploads release assets.
-   - `update-formula` updates the Homebrew tap.
+   - `update-formula` regenerates `Formula/gos.rb` from the in-repo template
+     (`packaging/Formula/gos.rb`) with the released version, source-tarball URL,
+     and checksum, then pushes it to the central tap `johnny4young/homebrew-tap`
+     over `TAP_DEPLOY_KEY` via `scripts/update-homebrew-tap.sh`.
 
 Do not manually create the tag before the normal manual release. That bypasses
 the version-bump step that keeps package metadata aligned.
@@ -117,7 +123,10 @@ irm https://github.com/johnny4young/gos/releases/latest/download/install.ps1 | i
 & "$env:LOCALAPPDATA\Programs\gos\uninstall.ps1"
 ```
 
-6. Verify Homebrew sees the new version:
+6. Verify Homebrew sees the new version from the central tap
+   `johnny4young/homebrew-tap`. Users still on the deprecated `johnny4young/gos`
+   tap are re-pointed automatically by its `tap_migrations.json` on the next
+   `brew update`, so the same commands work before and after migration:
 
 ```bash
 brew update

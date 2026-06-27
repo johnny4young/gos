@@ -266,43 +266,39 @@ jobs:
     needs: [validate-release-ref, release]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout homebrew-gos tap
+      - name: Checkout the released gos source
         uses: actions/checkout@v6
         with:
-          repository: johnny4young/homebrew-gos
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # The vendored bump script and the formula template ship with the
+          # released source, so check out the published tag (not the tap).
+          ref: ${{ needs.validate-release-ref.outputs.tag }}
 
-      - name: Configure git user
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Update Formula/gos.rb with new version and SHA256
+      - name: Publish the formula to the central Homebrew tap
         env:
+          # Write-enabled deploy key for johnny4young/homebrew-tap (a repo secret).
+          # The default GITHUB_TOKEN is scoped to this repository only, so the
+          # cross-repo push uses the deploy key instead. Absent on forks: the
+          # vendored script then warns and exits 0 so the release still succeeds.
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
           TAG: ${{ needs.validate-release-ref.outputs.tag }}
         run: |
           : "${TAG:?missing release tag}"
           VERSION="${TAG#v}"
           ARCHIVE_URL="https://github.com/johnny4young/gos/archive/refs/tags/${TAG}.tar.gz"
 
-          # Download the release archive and compute SHA256
+          # Pin the formula to the published source tarball and its checksum.
           curl -fsSL "$ARCHIVE_URL" -o /tmp/gos-release.tar.gz
           SHA=$(sha256sum /tmp/gos-release.tar.gz | cut -d' ' -f1)
           rm /tmp/gos-release.tar.gz
 
-          # Update formula in the tap repo
-          sed -i "s|url \".*\"|url \"${ARCHIVE_URL}\"|" Formula/gos.rb
-          sed -i "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/gos.rb
-          sed -i "s|version \".*\"|version \"${VERSION}\"|" Formula/gos.rb
-
-          printf 'Updated Formula/gos.rb: version=%s sha256=%s\n' "$VERSION" "$SHA"
-
-      - name: Commit and push to homebrew-gos
-        env:
-          TAG: ${{ needs.validate-release-ref.outputs.tag }}
-        run: |
-          : "${TAG:?missing release tag}"
-          git add Formula/gos.rb
-          git diff --cached --quiet && echo "No changes to commit" && exit 0
-          git commit -m "chore: update formula for ${TAG}"
-          git push origin main
+          # Regenerate Formula/gos.rb in johnny4young/homebrew-tap from the in-repo
+          # template, validate it, and push over the deploy key. The reusable bump
+          # logic lives in scripts/update-homebrew-tap.sh (vendored verbatim from the
+          # same pattern vitrine uses); only the arguments differ per app.
+          ./scripts/update-homebrew-tap.sh \
+            --kind formula \
+            --name gos \
+            --version "${VERSION}" \
+            --sha256 "${SHA}" \
+            --url "${ARCHIVE_URL}" \
+            --template packaging/Formula/gos.rb

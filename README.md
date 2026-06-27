@@ -136,8 +136,7 @@ curl -fsSL https://raw.githubusercontent.com/johnny4young/gos/main/install.sh | 
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew tap johnny4young/gos
-brew install gos
+brew install johnny4young/tap/gos
 ```
 
 To upgrade when a new version is released:
@@ -146,7 +145,7 @@ To upgrade when a new version is released:
 brew upgrade gos
 ```
 
-> The formula lives in [johnny4young/homebrew-gos](https://github.com/johnny4young/homebrew-gos) and is updated automatically on each release.
+> The formula lives in the [johnny4young/homebrew-tap](https://github.com/johnny4young/homebrew-tap) tap and is updated automatically on each release. If you previously installed from the old `johnny4young/gos` tap, Homebrew migrates you to the new tap automatically on your next `brew update` — nothing to do.
 
 ### PowerShell (Windows)
 
@@ -371,7 +370,7 @@ sudo rm /usr/local/bin/gos
 
 ```bash
 brew uninstall gos
-brew untap johnny4young/gos
+brew untap johnny4young/tap
 ```
 
 **If installed via PowerShell on Windows:**

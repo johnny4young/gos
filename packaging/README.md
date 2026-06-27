@@ -11,7 +11,7 @@ release asset.
 | Channel | Status | Notes |
 |---|---|---|
 | GitHub release installer | Active | Canonical `curl | bash` path for stable releases. |
-| Homebrew | Active | Updated by the release workflow through `johnny4young/homebrew-gos`. |
+| Homebrew | Active | Updated by the release workflow through the central `johnny4young/homebrew-tap` tap. |
 | PowerShell | CI-validated | Release workflow publishes `install.ps1` and `gos-windows.zip` as the canonical Windows install path. |
 | Chocolatey | Draft | Metadata wraps the Windows release asset and is updated by release automation. |
 | Winget | Draft | Metadata consumes the Windows release asset and is updated by release automation. |
