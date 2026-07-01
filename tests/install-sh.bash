@@ -213,11 +213,12 @@ run_installer() {
     GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
     GOS_TEST_MKDIR_MODE="$mkdir_mode" \
     GOS_REQUIRE_CHECKSUM="$require_checksum" \
-    bash "$script" 2>&1
+    bash "${script_under_test:-$script}" 2>&1
   )"
   status=$?
   set -e
 }
+script_under_test=""
 
 run_installer "missing_custom_bin" "missing"
 assert_status 0 "$status" "missing custom bin"
@@ -254,3 +255,30 @@ assert_nonzero_status "$status" "unpinned strict"
 assert_contains "$output" "GOS_REQUIRE_CHECKSUM=1 but this installer is not release-pinned" "unpinned strict"
 assert_not_installed "$bin_dir" "unpinned strict"
 pass "GOS_REQUIRE_CHECKSUM=1 fails closed for unpinned installers"
+
+# The release workflow patches GOS_RELEASE_TAG/GOS_EXPECTED_SHA256 the same way
+# these seds do, so this exercises the path every release-asset user runs.
+# The fake sha256sum reports 'unusedsha' for any file.
+pinned_script="${test_root}/install-pinned.sh"
+sed -e 's|^GOS_RELEASE_TAG=.*|GOS_RELEASE_TAG="v9.9.9"|' \
+    -e 's|^GOS_EXPECTED_SHA256=.*|GOS_EXPECTED_SHA256="unusedsha"|' \
+    "$script" >"$pinned_script"
+script_under_test="$pinned_script"
+run_installer "pinned_verified" "existing"
+assert_status 0 "$status" "pinned verified"
+assert_contains "$output" "Checksum verified." "pinned verified"
+assert_installed "$bin_dir" "pinned verified"
+assert_file_contains "$url_log" "https://github.com/johnny4young/gos/releases/download/v9.9.9/gos.sh" "pinned verified"
+pass "release-pinned installer downloads the release asset and verifies its checksum"
+
+pinned_bad_script="${test_root}/install-pinned-bad.sh"
+sed -e 's|^GOS_RELEASE_TAG=.*|GOS_RELEASE_TAG="v9.9.9"|' \
+    -e 's|^GOS_EXPECTED_SHA256=.*|GOS_EXPECTED_SHA256="1111111111111111111111111111111111111111111111111111111111111111"|' \
+    "$script" >"$pinned_bad_script"
+script_under_test="$pinned_bad_script"
+run_installer "pinned_mismatch" "existing"
+assert_nonzero_status "$status" "pinned mismatch"
+assert_contains "$output" "checksum mismatch" "pinned mismatch"
+assert_not_installed "$bin_dir" "pinned mismatch"
+pass "release-pinned installer aborts on checksum mismatch"
+script_under_test=""

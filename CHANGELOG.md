@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- Add `gos check` to report whether a newer stable Go is available, with `--json` support for scripts and CI.
+- Add `gos self-update` to upgrade gos itself from the latest release, verified against the published `checksums.txt` manifest and syntax-checked before activation.
+- Add `GOS_DOWNLOAD_MIRROR` to download Go archives from an HTTPS mirror while still verifying official go.dev checksum metadata; unverifiable mirror downloads fail closed.
+- Add `gos prune --json` machine-readable output.
+- Add `gos install 1.22`-style bare minor versions: they now resolve to the newest matching patch release instead of failing with a 404 (also fixes `gos use` with a `go 1.22` directive in `go.mod`).
 - Add `gos prune [--rollback]` to remove cached Go archives and, optionally, the rollback installation.
 - Add a `.sha256` companion-file checksum fallback so downloads are verified even without `jq`/`python3`.
 - Map `armv7l`/`armv8l` hardware to Go's `armv6l` builds so 32-bit Raspberry Pi OS installs work.
@@ -23,6 +28,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- `gos list` now orders pre-releases semantically: `1.24rc2` sorts before `1.24.0` instead of interleaving with patch releases.
+- A broken `go` binary on `PATH` (wrong architecture, corrupt install) no longer aborts `gos current`, `gos install`, or `gos latest`; gos now treats it as "no Go installed" and can repair it.
+- Trailing slashes in `GOS_INSTALL_DIR` are normalized, so backups and rollbacks are siblings of the install directory instead of failing inside it.
+- `GOS_INSTALL_DIR` values containing `.`/`..` components or control characters are rejected, closing a textual bypass of the system-critical path denylist.
+- `gos latest` on a machine without Go prints `Current: none` instead of `Current: gonone`.
+- `gos doctor` no longer reports a false checksum-tool warning when gos runs from stdin (`curl | bash -s doctor`), resolves symlinked installs when checking completions, and recognizes `go.exe` under the install dir on Windows.
+- `gos platforms` without `jq`/`python3` no longer emits source/installer artifacts (e.g. `go1.x.src.tar.gz`) as bogus platforms, and the last-resort feed parser no longer drops rc/beta versions.
+- `gos install` rejects unexpected trailing arguments instead of silently ignoring them.
+- `.go-version`/`go.mod` lookup now also finds manifests at the filesystem root.
+- The release workflow now verifies installer patching, pushes the release commit and tag atomically, marks `-rc` versions as pre-releases (keeping them out of `releases/latest` and the Homebrew tap), requires tag-push releases to point at commits on `main`, asserts the stamped `GOS_VERSION` matches the tag, and serializes concurrent runs.
+- The Windows release package pins `gos.sh`'s executable bit so the zip checksum cannot drift with checkout file modes.
+- The Homebrew tap publish step retries with a rebase when a concurrent sibling release pushes first.
+- The changelog release helper no longer trips bash 3.2's empty-array handling when no previous tag exists.
 - Interrupted installs no longer leak temporary staging directories; cleanup now runs from an exit trap in `gos.sh` and `install.sh`.
 - The Windows installer no longer downgrades TLS 1.3-capable connections to TLS 1.2; it now enforces a TLS 1.2 floor instead.
 - `install.sh` executes only after the full script is downloaded and parsed, supports `wget` when `curl` is missing, honors `GOS_REQUIRE_CHECKSUM=1`, and fails with a clear message when sudo is unavailable.

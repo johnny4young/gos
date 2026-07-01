@@ -3,17 +3,41 @@
 
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local commands="latest install use pin rollback prune current list platforms doctor version help"
-  local options="--json"
-  local words="$commands"
+  local commands="latest install use pin check rollback prune current list platforms doctor self-update version help"
+  local cmd_index=1 cmd words=""
 
-  if [ "$COMP_CWORD" -gt 1 ]; then
-    words="$options"
-  else
-    words="$commands $options"
+  # A leading --json shifts the command to the next position (gos --json list).
+  if [ "${COMP_WORDS[1]:-}" = "--json" ]; then
+    cmd_index=2
   fi
 
   COMPREPLY=()
+  if [ "$COMP_CWORD" -le "$cmd_index" ]; then
+    words="$commands"
+    if [ "$cmd_index" -eq 1 ]; then
+      words="$words --json"
+    fi
+  else
+    cmd="${COMP_WORDS[$cmd_index]:-}"
+    case "$cmd" in
+      prune)
+        words="--rollback --json"
+        ;;
+      check|current|list|platforms|doctor|version)
+        words="--json"
+        ;;
+      use)
+        while IFS= read -r line; do
+          COMPREPLY+=("$line")
+        done < <(compgen -d -- "$cur")
+        return
+        ;;
+      *)
+        return
+        ;;
+    esac
+  fi
+
   while IFS= read -r line; do
     COMPREPLY+=("$line")
   done < <(compgen -W "$words" -- "$cur")

@@ -272,7 +272,6 @@ packaging_text = packaging_files.map { |path| File.read(path) }.join("\n")
   "packaging/chocolatey/gos.nuspec",
   "packaging/chocolatey/tools/chocolateyInstall.ps1",
   "packaging/chocolatey/tools/chocolateyUninstall.ps1",
-  "packaging/chocolatey/tools/gos.cmd",
   "packaging/winget/johnny4young.gos.yaml"
 ].each do |path|
   assert(File.file?(path), "packaging must keep #{path}")

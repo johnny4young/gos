@@ -71,7 +71,20 @@ For Go toolchain installs:
   the downloaded archive before replacing the active Go installation.
 - When feed metadata cannot be parsed (no `jq`/`python3`) or the feed lookup
   fails, `gos` falls back to the archive's published `.sha256` companion file
-  on the same download host before giving up on verification.
+  on the same download host before giving up on verification. Note that this
+  fallback shares the archive's trust boundary (same origin), so it protects
+  against corruption but not against a compromised download host; the feed
+  metadata path is the stronger, cross-origin check and satisfies
+  `GOS_REQUIRE_CHECKSUM=1` preferentially.
+- `GOS_DOWNLOAD_MIRROR` only changes where archive bytes are downloaded from.
+  Version and checksum metadata always come from `go.dev`, and mirror
+  downloads fail closed when no official checksum is available or no local
+  SHA256 tool exists — a mirror can therefore deny service but cannot serve
+  tampered archives undetected.
+- `gos self-update` downloads the latest released `gos.sh` over HTTPS,
+  verifies it against the release `checksums.txt` manifest, syntax-checks it,
+  and only then replaces the running script. It refuses to overwrite
+  Homebrew-managed or git-checkout installs.
 - Cached archives are reused only after their SHA256 matches Go metadata.
 - `GOS_REQUIRE_CHECKSUM=1` makes checksum metadata and local hash calculation
   mandatory, causing installs to fail closed when verification cannot run.

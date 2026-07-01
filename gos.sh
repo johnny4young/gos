@@ -3,7 +3,17 @@ set -euo pipefail
 
 GOS_VERSION="1.5.0"
 GOS_INSTALL_DIR="${GOS_INSTALL_DIR:-/usr/local/go}"
+# Strip trailing slashes so sibling paths (backup, rollback) are computed as
+# true siblings: /usr/local/go/ would otherwise yield /usr/local/go/.gos-backup.
+while [ "$GOS_INSTALL_DIR" != "/" ] && [ "$GOS_INSTALL_DIR" != "${GOS_INSTALL_DIR%/}" ]; do
+  GOS_INSTALL_DIR="${GOS_INSTALL_DIR%/}"
+done
 GOS_CACHE_DIR="${GOS_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/gos}"
+# Optional HTTPS mirror for Go archive downloads (e.g. https://golang.google.cn/dl).
+# Version/checksum metadata always comes from go.dev, so mirror bytes are still
+# verified against the official checksums before activation.
+GOS_DOWNLOAD_MIRROR="${GOS_DOWNLOAD_MIRROR:-}"
+GOS_RELEASE_BASE_URL="https://github.com/johnny4young/gos/releases/latest/download"
 GOS_OUTPUT_JSON=0
 GOS_TMP_DIR=""
 
@@ -98,6 +108,21 @@ _gos_validate_install_dir() {
       return 1
       ;;
   esac
+  # Reject control characters that make paths ambiguous in logs and commands
+  case "$dir" in
+    *$'\n'*|*$'\r'*|*$'\t'*)
+      echo "Error: GOS_INSTALL_DIR must not contain control characters." >&2
+      return 1
+      ;;
+  esac
+  # Reject . and .. components; without canonicalization they would let a path
+  # like /usr/local/../../etc/go slip past the system-critical denylist below.
+  case "/${dir}/" in
+    *"/../"*|*"/./"*)
+      echo "Error: GOS_INSTALL_DIR='${dir}' must not contain . or .. path components." >&2
+      return 1
+      ;;
+  esac
   # Reject known system-critical roots
   case "$dir" in
     /|/usr|/etc|/home|/var|/bin|/sbin|/lib|/opt|/tmp|/root|/sys|/proc|/dev)
@@ -122,6 +147,30 @@ _gos_validate_install_dir() {
       return 1
       ;;
   esac
+}
+
+# Validate the optional archive download mirror. HTTPS is required because the
+# download helpers refuse plaintext HTTP, and a malformed value should fail
+# fast instead of producing confusing 404s.
+_gos_validate_mirror() {
+  [ -z "$GOS_DOWNLOAD_MIRROR" ] && return 0
+  case "$GOS_DOWNLOAD_MIRROR" in
+    https://*[!/]*) ;;
+    *)
+      echo "Error: GOS_DOWNLOAD_MIRROR='${GOS_DOWNLOAD_MIRROR}' must be an https:// URL." >&2
+      return 1
+      ;;
+  esac
+}
+
+# Base URL that Go archives are downloaded from. The mirror only replaces the
+# archive source; the version feed and checksum metadata still come from go.dev.
+_gos_archive_base_url() {
+  if [ -n "$GOS_DOWNLOAD_MIRROR" ]; then
+    printf '%s' "${GOS_DOWNLOAD_MIRROR%/}"
+  else
+    printf '%s' "https://go.dev/dl"
+  fi
 }
 
 # Download a URL to a file. Supports curl and wget.
@@ -193,10 +242,10 @@ for item in json.load(sys.stdin):
     print(version[2:] if version.startswith("go") else version)
 '
   else
-    # Last-resort text scraping; may truncate rc/beta suffixes.
+    # Last-resort text scraping; the character class keeps rc/beta suffixes.
     printf '%s\n' "$json" \
-      | grep -o '"version": *"go[0-9.]*"' \
-      | grep -o 'go[0-9][0-9.]*' \
+      | grep -o '"version": *"go[0-9][0-9A-Za-z.]*"' \
+      | grep -o 'go[0-9][0-9A-Za-z.]*' \
       | sed 's/^go//'
   fi
 }
@@ -205,6 +254,31 @@ _gos_fetch_latest() {
   local json
   json=$(_gos_feed_json false) || return 1
   _gos_feed_versions "$json" | head -1
+}
+
+# Resolve a bare X.Y version to the newest matching release in the feed.
+# Since Go 1.21 the first release of every minor ships as X.Y.0, so `gos
+# install 1.22` (or a go.mod `go 1.22` directive) has no matching archive.
+# Older minors did ship a bare X.Y release, which the feed also lists, so the
+# newest feed match (feed order is newest-first) is correct for both eras.
+# Prints the input unchanged when it already has a patch or pre-release
+# component, or when the feed is unavailable.
+_gos_resolve_bare_minor() {
+  local version="$1" json resolved escaped
+
+  case "$version" in
+    *rc*|*beta*|*.*.*) printf '%s\n' "$version"; return 0 ;;
+  esac
+
+  json=$(_gos_feed_json true) || { printf '%s\n' "$version"; return 0; }
+  escaped=${version//./\\.}
+  resolved=$(_gos_feed_versions "$json" | grep -E "^${escaped}(\.[0-9]+)?$" | head -1) || resolved=""
+
+  if [ -n "$resolved" ]; then
+    printf '%s\n' "$resolved"
+  else
+    printf '%s\n' "$version"
+  fi
 }
 
 # Compute SHA256 checksum (cross-platform: Linux has sha256sum, macOS has shasum)
@@ -340,8 +414,15 @@ _gos_fetch_checksum_file() {
 }
 
 _gos_current() {
+  local version=""
+  # A broken go binary (wrong arch, corrupt install) must not abort gos under
+  # set -e: gos latest exists precisely to repair such installations.
   if command -v go &>/dev/null; then
-    go version | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' | head -1 | sed 's/go//'
+    version=$(go version 2>/dev/null | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' | head -1 | sed 's/^go//') || version=""
+  fi
+
+  if [ -n "$version" ]; then
+    printf '%s\n' "$version"
   else
     echo "none"
   fi
@@ -635,8 +716,10 @@ _gos_install_version() {
     return 1
   fi
 
+  _gos_validate_mirror || return 1
+
   pkg="go${version}.${os}-${arch}.${ext}"
-  url="https://go.dev/dl/${pkg}"
+  url="$(_gos_archive_base_url)/${pkg}"
 
   # Use a unique temp directory to prevent symlink/TOCTOU attacks.
   # The EXIT/INT/TERM trap removes it on every exit path.
@@ -657,6 +740,13 @@ _gos_install_version() {
   if [ -z "$expected_sha" ]; then
     expected_sha=$(_gos_fetch_checksum_file "$pkg") || expected_sha=""
   fi
+  # Mirror downloads are only trusted when they can be verified against the
+  # official go.dev checksum metadata; never fall back to unverified bytes.
+  if [ -n "$GOS_DOWNLOAD_MIRROR" ] && [ -z "$expected_sha" ]; then
+    echo "Error: GOS_DOWNLOAD_MIRROR is set but no official checksum is available for ${pkg}." >&2
+    echo "Refusing to download unverifiable bytes from a mirror. Install jq or python3, or unset GOS_DOWNLOAD_MIRROR." >&2
+    return 1
+  fi
   cache_hit="false"
 
   if _gos_try_cache "$pkg" "$tmp_file" "$expected_sha"; then
@@ -673,6 +763,11 @@ _gos_install_version() {
   if [ -n "$expected_sha" ]; then
     actual_sha=$(_gos_sha256 "$tmp_file")
     if [ -z "$actual_sha" ]; then
+      if [ -n "$GOS_DOWNLOAD_MIRROR" ]; then
+        echo "Error: GOS_DOWNLOAD_MIRROR is set but no SHA256 tool is available to verify ${pkg}." >&2
+        echo "Install sha256sum or shasum, or unset GOS_DOWNLOAD_MIRROR." >&2
+        return 1
+      fi
       _gos_checksum_unavailable "no SHA256 tool output was available" || return 1
     elif [ "$actual_sha" != "$expected_sha" ]; then
       echo "Error: checksum mismatch! Expected ${expected_sha}, got ${actual_sha}." >&2
@@ -712,14 +807,18 @@ _gos_install_version() {
 }
 
 _gos_find_upward() {
-  local start_dir="$1" filename="$2" dir
+  local start_dir="$1" filename="$2" dir candidate
   dir=$(cd "$start_dir" 2>/dev/null && pwd) || return 1
 
-  while [ "$dir" != "/" ]; do
-    if [ -f "${dir}/${filename}" ]; then
-      printf '%s\n' "${dir}/${filename}"
+  # The loop body runs for "/" too, so a manifest at the filesystem root is
+  # still found.
+  while :; do
+    candidate="${dir%/}/${filename}"
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
       return 0
     fi
+    [ "$dir" = "/" ] && break
     dir=$(dirname "$dir")
   done
 
@@ -782,6 +881,37 @@ _gos_resolve_project_version() {
   return 1
 }
 
+# Sort bare version numbers semantically: beta < rc < release, and pre-releases
+# sort before the final release of the same minor (1.24rc2 < 1.24.0). A plain
+# `sort -t. -kN,Nn` treats 1.24rc2 as 1.24, interleaving pre-releases wrongly.
+_gos_sort_versions() {
+  awk '
+    {
+      v = $0
+      major = v
+      sub(/\..*$/, "", major)
+      rest = substr(v, length(major) + 2)
+      rank = 2
+      pre = 0
+      if (match(rest, /beta[0-9]+$/)) {
+        rank = 0
+        pre = substr(rest, RSTART + 4) + 0
+        rest = substr(rest, 1, RSTART - 1)
+      } else if (match(rest, /rc[0-9]+$/)) {
+        rank = 1
+        pre = substr(rest, RSTART + 2) + 0
+        rest = substr(rest, 1, RSTART - 1)
+      }
+      n = split(rest, parts, ".")
+      minor = (n >= 1) ? parts[1] + 0 : 0
+      patch = (n >= 2) ? parts[2] + 0 : 0
+      printf "%d %d %d %d %d %s\n", major, minor, patch, rank, pre, v
+    }
+  ' \
+    | sort -k1,1n -k2,2n -k3,3n -k4,4n -k5,5n \
+    | cut -d' ' -f6
+}
+
 _gos_list_versions() {
   local json
   json=$(_gos_feed_json true) || {
@@ -790,7 +920,7 @@ _gos_list_versions() {
   }
 
   _gos_feed_versions "$json" \
-    | sort -t. -k1,1n -k2,2n -k3,3n \
+    | _gos_sort_versions \
     | uniq \
     | sed 's/^/go/'
 }
@@ -826,9 +956,13 @@ for platform in sorted(platforms):
     print(platform)
 ' "$go_version"
   else
+    # Filter the scraped filenames to plain os/arch pairs: non-archive entries
+    # (go1.x.src.tar.gz) pass through the sed unchanged and must not leak into
+    # the output as bogus platforms.
     echo "$json" \
       | grep -o "${go_version}\\.[^\"]*" \
       | sed -E "s/^${go_version//./\\.}\\.([^-]+)-([^.]*)\\..*/\\1\\/\\2/" \
+      | grep -E '^[a-z0-9]+/[a-z0-9]+$' \
       | sort -u
   fi
 }
@@ -873,13 +1007,69 @@ cmd_latest() {
     return 0
   fi
 
-  echo "Current: go${current} -> go${latest}"
+  if [ "$current" = "none" ]; then
+    echo "Current: none -> go${latest}"
+  else
+    echo "Current: go${current} -> go${latest}"
+  fi
   _gos_install_version "$latest"
 }
 
+cmd_check() {
+  local latest current up_to_date
+  _gos_set_json_from_args "$@"
+
+  if ! _gos_json_enabled; then
+    echo "Checking for Go updates..."
+  fi
+
+  latest=$(_gos_fetch_latest) || latest=""
+  if [ -z "$latest" ]; then
+    echo "Error: could not fetch latest version. Check your internet connection." >&2
+    return 1
+  fi
+
+  current=$(_gos_current)
+  if [ "$current" = "$latest" ]; then
+    up_to_date="true"
+  else
+    up_to_date="false"
+  fi
+
+  if _gos_json_enabled; then
+    printf '{"current":'
+    if [ "$current" = "none" ]; then
+      printf 'null'
+    else
+      _gos_json_string "go${current}"
+    fi
+    printf ',"latest":'
+    _gos_json_string "go${latest}"
+    printf ',"up_to_date":%s}\n' "$up_to_date"
+    return 0
+  fi
+
+  echo "Latest:  go${latest}"
+  if [ "$current" = "none" ]; then
+    echo "Current: none (no Go installation found)"
+    echo "Install it with: gos latest"
+  elif [ "$up_to_date" = "true" ]; then
+    echo "Current: go${current}"
+    echo "Already up to date."
+  else
+    echo "Current: go${current}"
+    echo "Update available. Install it with: gos latest"
+  fi
+}
+
 cmd_install() {
-  local version=$1
+  local version="${1:-}"
   if [ -z "$version" ]; then
+    echo "Usage: gos install <version>  e.g. gos install 1.26.1" >&2
+    return 1
+  fi
+  if [ "$#" -gt 1 ]; then
+    echo "Error: unexpected argument for gos install: ${2}" >&2
     echo "Usage: gos install <version>  e.g. gos install 1.26.1" >&2
     return 1
   fi
@@ -888,6 +1078,22 @@ cmd_install() {
   version="${version#go}"
 
   _gos_validate_version "$version" || return 1
+
+  # Bare X.Y versions resolve to the newest patch release. Warm the
+  # all-versions feed cache in the parent shell so resolution and the later
+  # checksum lookup share a single request.
+  local resolved
+  case "$version" in
+    *rc*|*beta*|*.*.*) ;;
+    *)
+      _gos_feed_json true >/dev/null 2>&1 || true
+      resolved=$(_gos_resolve_bare_minor "$version")
+      if [ "$resolved" != "$version" ]; then
+        echo "Resolved Go ${version} to go${resolved}."
+        version="$resolved"
+      fi
+      ;;
+  esac
 
   local current
   current=$(_gos_current)
@@ -1017,15 +1223,119 @@ cmd_rollback() {
   _gos_activate_rollback
 }
 
+# Resolve the on-disk path of the running script, following symlinks when the
+# platform allows it (git-clone setups symlink gos -> gos.sh).
+_gos_self_path() {
+  local src="${BASH_SOURCE[0]}"
+
+  if command -v realpath &>/dev/null; then
+    realpath "$src" 2>/dev/null && return 0
+  fi
+
+  printf '%s/%s\n' "$(cd "$(dirname "$src")" && pwd)" "$(basename "$src")"
+}
+
+cmd_self_update() {
+  local script_path script_dir tmp_dir new_script checksums
+  local expected_sha actual_sha new_version
+
+  script_path=$(_gos_self_path) || {
+    echo "Error: could not resolve the path of the running gos script." >&2
+    return 1
+  }
+  script_dir=$(dirname "$script_path")
+
+  # Package-manager installs own this file; self-updating would fight them.
+  case "$script_path" in
+    */Cellar/*|*/homebrew/*|*/linuxbrew/*)
+      echo "Error: this gos was installed with Homebrew. Update it with: brew upgrade gos" >&2
+      return 1
+      ;;
+  esac
+  if [ -e "${script_dir}/.git" ]; then
+    echo "Error: this gos runs from a git checkout. Update it with: git -C '${script_dir}' pull" >&2
+    return 1
+  fi
+
+  echo "Checking for the latest gos release..."
+  tmp_dir=$(mktemp -d) || { echo "Error: failed to create temp directory." >&2; return 1; }
+  GOS_TMP_DIR="$tmp_dir"
+  new_script="${tmp_dir}/gos.sh"
+  checksums="${tmp_dir}/checksums.txt"
+
+  _gos_download "${GOS_RELEASE_BASE_URL}/gos.sh" "$new_script" || {
+    echo "Error: could not download the latest gos release. Check your internet connection." >&2
+    return 1
+  }
+
+  new_version=$(sed -n 's/^GOS_VERSION="\([^"]*\)"$/\1/p' "$new_script" | head -1)
+  if [ -z "$new_version" ]; then
+    echo "Error: the downloaded file does not look like a gos release. Aborting." >&2
+    return 1
+  fi
+
+  if [ "$new_version" = "$GOS_VERSION" ]; then
+    echo "Already on the latest gos (v${GOS_VERSION})."
+    return 0
+  fi
+
+  # Verify against the checksum manifest published with the release.
+  expected_sha=""
+  if _gos_download "${GOS_RELEASE_BASE_URL}/checksums.txt" "$checksums" 2>/dev/null; then
+    expected_sha=$(awk '$2 == "gos.sh" { print $1; exit }' "$checksums")
+  fi
+  if [ -n "$expected_sha" ]; then
+    actual_sha=$(_gos_sha256 "$new_script")
+    if [ -z "$actual_sha" ]; then
+      _gos_checksum_unavailable "no SHA256 tool output was available" || return 1
+    elif [ "$actual_sha" != "$expected_sha" ]; then
+      echo "Error: checksum mismatch for the downloaded gos release." >&2
+      echo "Expected ${expected_sha}, got ${actual_sha}. Aborting." >&2
+      return 1
+    else
+      echo "Checksum verified."
+    fi
+  else
+    _gos_checksum_unavailable "the release checksum manifest was unavailable" || return 1
+  fi
+
+  # A syntax check catches truncated or mangled downloads before activation.
+  if ! bash -n "$new_script" 2>/dev/null; then
+    echo "Error: the downloaded gos release failed a syntax check. Aborting." >&2
+    return 1
+  fi
+
+  chmod +x "$new_script"
+  # Renaming over the running script is safe: bash keeps reading the original
+  # inode. Escalate only when the target directory is not writable.
+  if ! mv -f "$new_script" "$script_path" 2>/dev/null; then
+    if [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null; then
+      sudo mv -f "$new_script" "$script_path" || {
+        echo "Error: failed to replace ${script_path}." >&2
+        return 1
+      }
+    else
+      echo "Error: failed to replace ${script_path}." >&2
+      echo "Re-run the installer instead (see the README installation section)." >&2
+      return 1
+    fi
+  fi
+
+  echo "gos updated: v${GOS_VERSION} -> v${new_version}"
+  rm -rf "$tmp_dir"
+  GOS_TMP_DIR=""
+}
+
 cmd_prune() {
-  local prune_rollback="false" arg rollback_dir removed=0 file
+  local prune_rollback="false" arg rollback_dir removed=0 file rollback_state
 
   for arg in "$@"; do
     case "$arg" in
       --rollback) prune_rollback="true" ;;
+      --json) GOS_OUTPUT_JSON=1 ;;
       *)
         echo "Error: unknown option for gos prune: ${arg}" >&2
-        echo "Usage: gos prune [--rollback]" >&2
+        echo "Usage: gos prune [--rollback] [--json]" >&2
         return 1
         ;;
     esac
@@ -1040,22 +1350,35 @@ cmd_prune() {
       removed=$((removed + 1))
     done
   fi
-  if [ "$removed" -gt 0 ]; then
-    echo "Removed ${removed} cached Go archive(s) from ${GOS_CACHE_DIR}."
-  else
-    echo "No cached Go archives found in ${GOS_CACHE_DIR}."
+  if ! _gos_json_enabled; then
+    if [ "$removed" -gt 0 ]; then
+      echo "Removed ${removed} cached Go archive(s) from ${GOS_CACHE_DIR}."
+    else
+      echo "No cached Go archives found in ${GOS_CACHE_DIR}."
+    fi
   fi
 
   rollback_dir=$(_gos_rollback_dir)
+  rollback_state="none"
   if [ "$prune_rollback" = "true" ]; then
     if [ -d "$rollback_dir" ]; then
       _gos_sudo rm -rf "$rollback_dir" || return 1
-      echo "Removed rollback installation at ${rollback_dir}."
+      rollback_state="removed"
+      _gos_json_enabled || echo "Removed rollback installation at ${rollback_dir}."
     else
-      echo "No rollback installation found at ${rollback_dir}."
+      _gos_json_enabled || echo "No rollback installation found at ${rollback_dir}."
     fi
   elif [ -d "$rollback_dir" ]; then
-    echo "Rollback installation kept at ${rollback_dir} (remove it with: gos prune --rollback)."
+    rollback_state="kept"
+    _gos_json_enabled || echo "Rollback installation kept at ${rollback_dir} (remove it with: gos prune --rollback)."
+  fi
+
+  if _gos_json_enabled; then
+    printf '{"removed_archives":%s,"cache_dir":' "$removed"
+    _gos_json_string "$GOS_CACHE_DIR"
+    printf ',"rollback":'
+    _gos_json_string "$rollback_state"
+    printf '}\n'
   fi
 }
 
@@ -1100,7 +1423,7 @@ _gos_parent_writable_or_sudo() {
 }
 
 cmd_doctor() {
-  local os arch raw_os raw_arch install_error go_path go_version go_bin
+  local os arch raw_os raw_arch install_error mirror_error go_path go_version go_bin
   GOS_DOCTOR_PROBLEMS=0
   GOS_DOCTOR_WARNINGS=0
   GOS_DOCTOR_JSON_ITEMS=""
@@ -1138,7 +1461,7 @@ cmd_doctor() {
   go_bin="${GOS_INSTALL_DIR}/bin"
   if [ -d "$go_bin" ] && go_path=$(command -v go 2>/dev/null); then
     case "$go_path" in
-      "${go_bin}/go"|*"\\${go_bin}\\go.exe")
+      "${go_bin}/go"|"${go_bin}/go.exe")
         _gos_doctor_check "ok" "path-order" "PATH resolves go from ${go_bin}"
         ;;
       *)
@@ -1157,6 +1480,14 @@ cmd_doctor() {
     _gos_doctor_check "problem" "download" "neither curl nor wget is available" "Install curl or wget."
   fi
 
+  if [ -n "$GOS_DOWNLOAD_MIRROR" ]; then
+    if mirror_error=$(_gos_validate_mirror 2>&1); then
+      _gos_doctor_check "ok" "mirror" "archive downloads use ${GOS_DOWNLOAD_MIRROR}"
+    else
+      _gos_doctor_check "problem" "mirror" "$mirror_error" "Set GOS_DOWNLOAD_MIRROR to an https:// URL or unset it."
+    fi
+  fi
+
   if _gos_has_checksum_parser; then
     _gos_doctor_check "ok" "checksum-metadata" "jq or python3 is available"
   elif _gos_require_checksum; then
@@ -1165,7 +1496,9 @@ cmd_doctor() {
     _gos_doctor_check "warn" "checksum-metadata" "jq/python3 is missing; checksum metadata cannot be parsed"
   fi
 
-  if [ -n "$(_gos_sha256 "$0")" ]; then
+  # Check tool presence directly: hashing "$0" breaks when gos runs from
+  # stdin (curl | bash -s doctor), where $0 is "bash".
+  if command -v sha256sum &>/dev/null || command -v shasum &>/dev/null; then
     _gos_doctor_check "ok" "checksum-hash" "SHA256 hash tool is available"
   elif _gos_require_checksum; then
     _gos_doctor_check "problem" "checksum-hash" "GOS_REQUIRE_CHECKSUM=1 but no SHA256 tool is available" "Install sha256sum or shasum."
@@ -1186,9 +1519,9 @@ cmd_doctor() {
   fi
 
   local script_dir
-  # dirname handles bare invocations like `bash gos.sh`, where
-  # ${BASH_SOURCE[0]%/*} would leave the filename unchanged.
-  script_dir=$(dirname "${BASH_SOURCE[0]}")
+  # Resolve symlinks (a symlinked gos on PATH is common for git-clone
+  # installs) so the completions check looks next to the real script.
+  script_dir=$(dirname "$(_gos_self_path)")
   if [ -f "${script_dir}/completions/gos.bash" ] && [ -f "${script_dir}/completions/gos.zsh" ] && [ -f "${script_dir}/completions/gos.fish" ]; then
     _gos_doctor_check "ok" "completions" "Bash, Zsh, and Fish completion files are present"
   else
@@ -1232,24 +1565,27 @@ COMMANDS:
   install <version>   Install a specific Go version (e.g. gos install 1.26.1)
   use [path]          Install the Go version requested by .go-version or go.mod
   pin <version>       Write .go-version in the current directory
+  check               Check whether a newer stable Go is available
   rollback            Restore the previous Go installation, if available
   prune [--rollback]  Remove cached Go archives (and the rollback copy with --rollback)
   current             Show the currently active Go version
   list                List all available Go versions
   platforms [version] List supported OS/arch archives for a Go version
   doctor              Diagnose gos, Go, PATH, and tool dependencies
+  self-update         Update gos itself to the latest release
   version             Show gos version
   help                Show this help message
 
 OPTIONS:
-  --json              Machine-readable output for current, list, platforms,
-                      doctor, and version
+  --json              Machine-readable output for check, current, list,
+                      platforms, doctor, prune, and version
 
 EXAMPLES:
   gos latest
   gos install 1.24.0
   gos use
   gos pin 1.24.0
+  gos check --json
   gos doctor
   gos current
   gos list --json
@@ -1275,7 +1611,7 @@ main() {
       ;;
     install)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      cmd_install "${1:-}"
+      cmd_install "$@"
       ;;
     use)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
@@ -1290,6 +1626,8 @@ main() {
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       cmd_prune "$@"
       ;;
+    check)     cmd_check "$@" ;;
+    self-update|selfupdate) cmd_self_update ;;
     current)   cmd_current "$@" ;;
     list)      cmd_list "$@" ;;
     platforms) cmd_platforms "$@" ;;

@@ -75,11 +75,14 @@ Done. That's the whole setup.
 ## Features
 
 - **One command to latest Go** — `gos latest` fetches and installs the newest stable release
-- **Pin any version** — `gos install 1.21.6` gets exactly what you need
+- **Pin any version** — `gos install 1.21.6` gets exactly what you need; `gos install 1.21` resolves to the newest patch release
 - **Project-aware switching** — `gos use` reads `.go-version`, `toolchain`, or `go` directives
+- **Update checks** — `gos check` reports whether a newer stable Go is available without installing anything
 - **Doctor diagnostics** — `gos doctor` checks Go, PATH, permissions, checksum tools, and extraction tools
 - **Cache and rollback** — verified archives are cached, `gos rollback` restores the previous install, and `gos prune` reclaims the disk space
-- **Machine-readable output** — `--json` is available for `current`, `list`, `platforms`, `doctor`, and `version`
+- **Self-updating** — `gos self-update` upgrades gos itself from the latest verified release
+- **Mirror support** — `GOS_DOWNLOAD_MIRROR` downloads archives from an HTTPS mirror while still verifying official go.dev checksums
+- **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `doctor`, `prune`, and `version`
 - **Auto-detects everything** — OS (`darwin`, `linux`, `windows`) and architecture (`amd64`, `arm64`, `armv6l`, `386`)
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)
 - **Zero dependencies** — just `curl` and `bash`, both pre-installed on most systems
@@ -241,12 +244,14 @@ exec fish          # for Fish
 | `gos install <version>` | Install a specific Go version |
 | `gos use [path]` | Install the Go version requested by `.go-version` or `go.mod` |
 | `gos pin <version>` | Write `.go-version` in the current directory |
+| `gos check` | Check whether a newer stable Go is available (no install) |
 | `gos rollback` | Restore the previous Go installation, if available |
 | `gos prune [--rollback]` | Remove cached Go archives; `--rollback` also removes the rollback copy |
 | `gos current` | Show the currently active Go version |
 | `gos list` | List all available Go versions |
 | `gos platforms [version]` | List supported OS/arch archives for a Go version |
 | `gos doctor` | Diagnose gos, Go, PATH, and local tool dependencies |
+| `gos self-update` | Update gos itself to the latest verified release |
 | `gos version` | Show gos version |
 | `gos help` | Show help message |
 
@@ -295,8 +300,22 @@ ok - install-dir: /usr/local/go can be created or updated
 ok - go: /usr/local/go/bin/go reports: go version go1.24.1 darwin/arm64
 ...
 
+$ gos check
+Checking for Go updates...
+Latest:  go1.24.1
+Current: go1.24.0
+Update available. Install it with: gos latest
+
+$ gos check --json
+{"current":"go1.24.0","latest":"go1.24.1","up_to_date":false}
+
 $ gos current --json
 {"found":true,"version":"1.24.1","current":"go1.24.1"}
+
+$ gos self-update
+Checking for the latest gos release...
+Checksum verified.
+gos updated: v1.5.0 -> v1.6.0
 ```
 
 ### Project-aware versions
@@ -326,6 +345,7 @@ To manually enable them, see the [Manual Shell Configuration](#manual-shell-conf
 | `GOS_BIN_DIR` | `/usr/local/bin` | Where the `gos` command is installed by `install.sh`. Missing custom directories are created when possible. |
 | `GOS_CACHE_DIR` | `$XDG_CACHE_HOME/gos` or `$HOME/.cache/gos` | Where verified Go archives are cached for reuse. Clear it with `gos prune`. |
 | `GOS_INSTALL_DIR` | `/usr/local/go` | Where Go gets installed. Override to install without `sudo`. Path basename must contain "go". |
+| `GOS_DOWNLOAD_MIRROR` | unset | HTTPS base URL to download Go archives from (e.g. `https://golang.google.cn/dl` behind restrictive networks). Checksums are still resolved from go.dev, and mirror downloads fail closed when they cannot be verified. |
 | `GOS_REQUIRE_CHECKSUM` | unset | Set to `1` to abort installs when checksum metadata or local SHA256 calculation is unavailable. Honored by both `gos` and `install.sh`. |
 
 Example — install Go in your home directory (no sudo needed):

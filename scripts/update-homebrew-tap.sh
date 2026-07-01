@@ -79,7 +79,7 @@ fi
 cleanup_key=""
 if [ -z "$key_file" ]; then
   if [ -z "${TAP_DEPLOY_KEY:-}" ]; then
-    echo "::warning::TAP_DEPLOY_KEY is not configured; update ${tap_repo} manually (docs/RELEASING.md)."
+    echo "::warning::TAP_DEPLOY_KEY is not configured; update ${tap_repo} manually (RELEASING.md)."
     exit 0
   fi
   key_file="$(mktemp)"
@@ -137,7 +137,18 @@ if git diff --cached --quiet; then
   exit 0
 fi
 git commit -m "chore(${name}): publish ${kind} v${version}"
-git push origin HEAD:main
+# Sibling repos can bump the shared tap concurrently; rebase and retry so a
+# lost push race does not fail the whole release.
+push_attempt=1
+until git push origin HEAD:main; do
+  if [ "$push_attempt" -ge 3 ]; then
+    echo "::error::failed to push to ${tap_repo} after ${push_attempt} attempts" >&2
+    exit 1
+  fi
+  push_attempt=$((push_attempt + 1))
+  sleep 2
+  git pull --rebase origin main
+done
 
 echo "Updated ${tap_repo} → ${name} ${version}."
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then

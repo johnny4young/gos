@@ -67,7 +67,7 @@ function Assert-Sha256 {
 
   if ([string]::IsNullOrWhiteSpace($ExpectedSha256) -or $ExpectedSha256 -eq 'UPDATE_ON_RELEASE') {
     Write-Warning 'No release checksum configured, skipping integrity check.'
-    Write-Warning 'For a pinned, verified install use the GitHub release install.ps1 asset.'
+    Write-Warning 'For a verified install use the GitHub release install.ps1 asset, or pass -ExpectedSha256 when installing from -PackagePath.'
     return
   }
 
