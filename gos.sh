@@ -169,6 +169,12 @@ _gos_validate_install_dir() {
 # Validate the optional side-by-side versions directory.
 _gos_validate_versions_dir() {
   [ -z "$GOS_VERSIONS_DIR" ] && return 0
+  # Git Bash's ln -s copies instead of linking, which would silently turn
+  # "instant switching" into full copies with broken uninstall semantics.
+  if [ "$(_gos_os)" = "windows" ]; then
+    echo "Error: GOS_VERSIONS_DIR (side-by-side mode) requires real symlinks and is not supported on Git Bash. Use WSL, or unset GOS_VERSIONS_DIR." >&2
+    return 1
+  fi
   case "$GOS_VERSIONS_DIR" in
     /*) ;;
     *)

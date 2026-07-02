@@ -631,6 +631,12 @@ run_gos "$case_dir" bash "$script" env --bogus
 [ "$status" -ne 0 ] || fail "env with unknown option should fail"
 pass "env prints PATH setup for POSIX shells, fish, and JSON"
 
+# Side-by-side mode needs real symlinks; Git Bash's ln -s copies, so probe
+# the filesystem capability instead of sniffing the OS.
+symlink_probe="${test_root}/symlink-probe"
+if ln -s "$test_root" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
+  rm -f "$symlink_probe"
+
 case_dir="${test_root}/versions-mode"
 versions_dir="${case_dir}/versions"
 GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
@@ -673,6 +679,11 @@ GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninsta
 [ "$status" -ne 0 ] || fail "uninstalling a missing version should fail"
 assert_contains "$output" "is not installed" "uninstall missing version"
 pass "side-by-side mode installs, switches instantly, lists, and uninstalls versions"
+
+else
+  rm -f "$symlink_probe"
+  pass "side-by-side mode tests skipped (filesystem lacks symlink support)"
+fi
 
 case_dir="${test_root}/uninstall-flat"
 run_gos "$case_dir" bash "$script" uninstall 1.21.6
