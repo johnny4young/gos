@@ -205,6 +205,13 @@ awk '
 ' "$raw_notes" > "$release_notes"
 
 if ! grep -Eq '^[[:space:]]*[-*] ' "$release_notes"; then
+  # A non-empty section without bullets (e.g. leftover "### Added" headings)
+  # is a half-edited changelog; falling back to git would silently discard
+  # the curated headings.
+  if [[ -s "$release_notes" ]]; then
+    printf 'error: ## [Unreleased] contains content but no "- " bullet items; add bullets or remove the leftover headings\n' >&2
+    exit 1
+  fi
   generate_release_notes_from_git "$release_notes" || {
     printf 'hint: add at least one bullet line (e.g. "- ...") under "## [Unreleased]" in %s or use conventional commit subjects before releasing\n' "$changelog_file" >&2
     exit 1

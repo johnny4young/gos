@@ -12,10 +12,12 @@ _gos() {
     'pin:Write .go-version in the current directory'
     'check:Check whether a newer stable Go is available'
     'rollback:Restore the previous Go installation'
+    'uninstall:Remove an installed version (side-by-side mode)'
     'prune:Remove cached Go archives and optionally the rollback copy'
     'current:Show the currently active Go version'
-    'list:List all available Go versions'
+    'list:List available Go versions (or installed ones with --installed)'
     'platforms:List supported OS/arch archives for a Go version'
+    'env:Print the PATH setup line for your shell'
     'doctor:Diagnose gos, Go, PATH, and tool dependencies'
     'self-update:Update gos itself to the latest release'
     'version:Show gos version'
@@ -33,7 +35,13 @@ _gos() {
         prune)
           _arguments '--rollback[Also remove the rollback installation]' '--json[Output machine-readable JSON]'
           ;;
-        check|current|list|platforms|doctor|version)
+        list)
+          _arguments '--installed[List locally installed versions]' '--json[Output machine-readable JSON]'
+          ;;
+        env)
+          _arguments '--fish[Emit fish shell syntax]' '--json[Output machine-readable JSON]'
+          ;;
+        check|current|platforms|doctor|version)
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)

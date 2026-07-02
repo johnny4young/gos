@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- Add opt-in side-by-side version management: with `GOS_VERSIONS_DIR` set, every Go version stays installed under its own directory, `GOS_INSTALL_DIR` becomes a symlink to the active one, switching is an instant re-link, and `gos uninstall <version>` plus `gos list --installed` manage the set.
+- Add `gos env [--fish] [--json]` to print the PATH setup line for the managed Go (`eval "$(gos env)"`).
+- Add `GOS_REQUIRE_CHECKSUM=feed` to require the archive digest to come from the go.dev downloads feed (cross-origin), rejecting the same-origin `.sha256` fallback.
+- Add a nightly canary workflow that exercises `check`, `install`, `latest`, `rollback`, and side-by-side mode against the live go.dev feed on Linux, macOS, and Windows.
+- Add functional tests for the Homebrew tap publish script against a local tap repository (which caught and fixed a first-publish bug: the tap's `Formula/` directory is now created when missing).
 - Add `gos check` to report whether a newer stable Go is available, with `--json` support for scripts and CI.
 - Add `gos self-update` to upgrade gos itself from the latest release, verified against the published `checksums.txt` manifest and syntax-checked before activation.
 - Add `GOS_DOWNLOAD_MIRROR` to download Go archives from an HTTPS mirror while still verifying official go.dev checksum metadata; unverifiable mirror downloads fail closed.
@@ -28,6 +33,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Interrupted activations now restore the previous installation from an exit trap, and `gos prune` reports (and `--rollback` removes) orphaned crash-residue backups.
+- `gos install`/`gos latest` no longer skip installing when a matching `go` elsewhere on `PATH` masks a missing or stale managed install.
+- `_gos_sudo` keeps command stdout and stderr separate, so tool warnings no longer leak into data output.
+- The Homebrew tap publish pins GitHub's SSH host keys (fetched over TLS from the GitHub meta API) instead of trust-on-first-use.
+- The Windows installer and uninstaller edit the user `PATH` through the registry API, preserving `REG_EXPAND_SZ` values and broadcasting the environment change.
+- The changelog release helper now fails on a heading-only `Unreleased` section instead of silently discarding curated headings.
 - `gos list` now orders pre-releases semantically: `1.24rc2` sorts before `1.24.0` instead of interleaving with patch releases.
 - A broken `go` binary on `PATH` (wrong architecture, corrupt install) no longer aborts `gos current`, `gos install`, or `gos latest`; gos now treats it as "no Go installed" and can repair it.
 - Trailing slashes in `GOS_INSTALL_DIR` are normalized, so backups and rollbacks are siblings of the install directory instead of failing inside it.

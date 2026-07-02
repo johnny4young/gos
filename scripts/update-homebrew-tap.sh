@@ -90,19 +90,46 @@ fi
 # Remove the key we created on exit. The hosted runner is ephemeral, but this keeps
 # the private key off disk the moment the script ends and stays correct on a
 # self-hosted runner. A caller-provided key file is left untouched.
-cleanup() { if [ -n "$cleanup_key" ]; then rm -f "$key_file"; fi; }
+cleanup() {
+  if [ -n "$cleanup_key" ]; then rm -f "$key_file"; fi
+  rm -f "${known_hosts_file:-}"
+}
 trap cleanup EXIT
 
+# --- pin GitHub's SSH host keys ---------------------------------------------------
+# accept-new is trust-on-first-use, and every hosted runner is a first use. The
+# GitHub meta API serves the current host keys over TLS (CA-validated — an
+# independent trust channel from the SSH connection it protects), so build a
+# known_hosts from it and require a match. If the API is unreachable, fall back
+# to accept-new with a warning rather than failing the release.
+known_hosts_file="$(mktemp)"
+host_key_policy="accept-new"
+if [ -n "${GOS_TAP_REMOTE:-}" ]; then
+  : # local test remote: SSH is never used, skip the host-key fetch
+elif command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
+  && curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 https://api.github.com/meta 2>/dev/null \
+     | jq -r '.ssh_keys[] | "github.com \(.)"' > "$known_hosts_file" 2>/dev/null \
+  && [ -s "$known_hosts_file" ]; then
+  host_key_policy="yes"
+else
+  echo "::warning::could not fetch GitHub SSH host keys from the meta API; falling back to accept-new."
+fi
+
 # --- clone the tap ---------------------------------------------------------------
-export GIT_SSH_COMMAND="ssh -i ${key_file} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+# GOS_TAP_REMOTE is a test hook: the suite points it at a local bare repo so the
+# publish flow can run without network or SSH.
+tap_remote="${GOS_TAP_REMOTE:-git@github.com:${tap_repo}.git}"
+export GIT_SSH_COMMAND="ssh -i ${key_file} -o IdentitiesOnly=yes -o UserKnownHostsFile=${known_hosts_file} -o StrictHostKeyChecking=${host_key_policy}"
 tap_dir="$(mktemp -d)"
-git clone --depth 1 "git@github.com:${tap_repo}.git" "$tap_dir"
+git clone --depth 1 "$tap_remote" "$tap_dir"
 
 # --- regenerate the tap file from the in-repo template ---------------------------
 # Start at the cask/class line so the template's repo-only header comment is dropped,
 # then substitute the published version + checksum (+ url for a formula). The 2-space
 # indent matches `brew style`'s canonical formatting.
 tap_file="${tap_dir}/${subdir}/${name}.rb"
+# First-time publish to a tap that never shipped this kind before.
+mkdir -p "${tap_dir}/${subdir}"
 sed_args=(-e "s|^  version \".*\"|  version \"${version}\"|" \
           -e "s|^  sha256 \".*\"|  sha256 \"${sha256}\"|")
 if [ -n "$url" ]; then

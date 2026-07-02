@@ -88,6 +88,9 @@ For Go toolchain installs:
 - Cached archives are reused only after their SHA256 matches Go metadata.
 - `GOS_REQUIRE_CHECKSUM=1` makes checksum metadata and local hash calculation
   mandatory, causing installs to fail closed when verification cannot run.
+  `GOS_REQUIRE_CHECKSUM=feed` is stricter: the digest must come from the
+  go.dev downloads feed (cross-origin from the archive host), and the
+  same-origin `.sha256` fallback is rejected.
   `install.sh` honors the same variable for its own release-pinned check.
 - Go replacement is transactional: the new archive is staged, verified,
   activated, and rolled back if activation fails.
@@ -103,6 +106,9 @@ For `gos` installer assets:
 - `checksums.txt` is published with `gos.sh`, `install.sh`, `install.ps1`, and
   `gos-windows.zip`.
 - Release assets and `checksums.txt` receive GitHub artifact attestations.
+- The Homebrew tap publish step pins GitHub's SSH host keys, fetched over
+  TLS from the GitHub meta API (an independent trust channel), instead of
+  trusting the first key the SSH connection presents.
 
 Raw `main` installer URLs are a development channel. They are useful for testing
 unreleased changes, but they intentionally do not provide the same

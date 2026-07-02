@@ -80,6 +80,8 @@ Done. That's the whole setup.
 - **Update checks** — `gos check` reports whether a newer stable Go is available without installing anything
 - **Doctor diagnostics** — `gos doctor` checks Go, PATH, permissions, checksum tools, and extraction tools
 - **Cache and rollback** — verified archives are cached, `gos rollback` restores the previous install, and `gos prune` reclaims the disk space
+- **Side-by-side versions (opt-in)** — set `GOS_VERSIONS_DIR` and every version stays installed; switching becomes an instant symlink flip, with `gos list --installed` and `gos uninstall`
+- **Shell setup in one line** — `eval "$(gos env)"` puts the managed Go on PATH
 - **Self-updating** — `gos self-update` upgrades gos itself from the latest verified release
 - **Mirror support** — `GOS_DOWNLOAD_MIRROR` downloads archives from an HTTPS mirror while still verifying official go.dev checksums
 - **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `doctor`, `prune`, and `version`
@@ -246,10 +248,12 @@ exec fish          # for Fish
 | `gos pin <version>` | Write `.go-version` in the current directory |
 | `gos check` | Check whether a newer stable Go is available (no install) |
 | `gos rollback` | Restore the previous Go installation, if available |
+| `gos uninstall <version>` | Remove an installed version (side-by-side mode) |
 | `gos prune [--rollback]` | Remove cached Go archives; `--rollback` also removes the rollback copy |
 | `gos current` | Show the currently active Go version |
-| `gos list` | List all available Go versions |
+| `gos list [--installed]` | List available Go versions, or locally installed ones |
 | `gos platforms [version]` | List supported OS/arch archives for a Go version |
+| `gos env [--fish]` | Print the PATH setup line for your shell |
 | `gos doctor` | Diagnose gos, Go, PATH, and local tool dependencies |
 | `gos self-update` | Update gos itself to the latest verified release |
 | `gos version` | Show gos version |
@@ -346,7 +350,8 @@ To manually enable them, see the [Manual Shell Configuration](#manual-shell-conf
 | `GOS_CACHE_DIR` | `$XDG_CACHE_HOME/gos` or `$HOME/.cache/gos` | Where verified Go archives are cached for reuse. Clear it with `gos prune`. |
 | `GOS_INSTALL_DIR` | `/usr/local/go` | Where Go gets installed. Override to install without `sudo`. Path basename must contain "go". |
 | `GOS_DOWNLOAD_MIRROR` | unset | HTTPS base URL to download Go archives from (e.g. `https://golang.google.cn/dl` behind restrictive networks). Checksums are still resolved from go.dev, and mirror downloads fail closed when they cannot be verified. |
-| `GOS_REQUIRE_CHECKSUM` | unset | Set to `1` to abort installs when checksum metadata or local SHA256 calculation is unavailable. Honored by both `gos` and `install.sh`. |
+| `GOS_VERSIONS_DIR` | unset | Opt-in side-by-side layout (e.g. `$HOME/.gos/versions`). Each version installs to `$GOS_VERSIONS_DIR/go<version>` and `GOS_INSTALL_DIR` becomes a symlink to the active one, so switching is instant. Requires symlink support (macOS, Linux, WSL). |
+| `GOS_REQUIRE_CHECKSUM` | unset | Set to `1` to abort installs when checksum metadata or local SHA256 calculation is unavailable. Set to `feed` to additionally require the digest to come from the go.dev downloads feed (cross-origin), rejecting the same-origin `.sha256` fallback. Honored by both `gos` and `install.sh` (`install.sh` treats `feed` like `1`). |
 
 Example — install Go in your home directory (no sudo needed):
 
@@ -355,9 +360,37 @@ export GOS_INSTALL_DIR="$HOME/.go"
 gos latest
 ```
 
-Add the export to your shell profile to make it permanent.
+Add the export to your shell profile to make it permanent, or generate the
+PATH line with `gos env`:
+
+```bash
+eval "$(gos env)"          # bash / zsh
+gos env --fish | source    # fish
+```
 
 > **Note:** For safety, `GOS_INSTALL_DIR` must have at least 2 path components and the basename must contain "go" (e.g. `mygo`, `golang`, `.go` all work). System-critical paths like `/usr` or `/etc` are rejected.
+
+### Side-by-side versions
+
+By default gos keeps exactly one Go under `GOS_INSTALL_DIR` and swaps it in
+place. Set `GOS_VERSIONS_DIR` to keep every installed version and switch
+instantly:
+
+```bash
+export GOS_INSTALL_DIR="$HOME/.gos/go"
+export GOS_VERSIONS_DIR="$HOME/.gos/versions"
+
+gos install 1.24.0    # installs to ~/.gos/versions/go1.24.0, links ~/.gos/go
+gos latest            # installs the newest release side by side and re-links
+gos install 1.24.0    # instant: just repoints the symlink, no download
+gos list --installed  # go1.24.0, go1.25.1, ...
+gos uninstall 1.24.0  # removes an inactive version
+```
+
+`GOS_INSTALL_DIR` becomes a symlink to the active version, so your PATH entry
+(`$GOS_INSTALL_DIR/bin`) never changes. `gos use` gains the same instant
+switching for project versions that are already installed. Requires a
+filesystem with symlinks (macOS, Linux, WSL — not Git Bash).
 
 ---
 

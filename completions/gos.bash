@@ -3,7 +3,7 @@
 
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local commands="latest install use pin check rollback prune current list platforms doctor self-update version help"
+  local commands="latest install use pin check rollback uninstall prune current list platforms env doctor self-update version help"
   local cmd_index=1 cmd words=""
 
   # A leading --json shifts the command to the next position (gos --json list).
@@ -23,7 +23,13 @@ _gos_completions() {
       prune)
         words="--rollback --json"
         ;;
-      check|current|list|platforms|doctor|version)
+      list)
+        words="--installed --json"
+        ;;
+      env)
+        words="--fish --json"
+        ;;
+      check|current|platforms|doctor|version)
         words="--json"
         ;;
       use)

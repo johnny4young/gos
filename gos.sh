@@ -13,15 +13,32 @@ GOS_CACHE_DIR="${GOS_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/gos}"
 # Version/checksum metadata always comes from go.dev, so mirror bytes are still
 # verified against the official checksums before activation.
 GOS_DOWNLOAD_MIRROR="${GOS_DOWNLOAD_MIRROR:-}"
+# Opt-in side-by-side layout: when set, each Go version is installed under
+# $GOS_VERSIONS_DIR/go<version> and GOS_INSTALL_DIR becomes a symlink to the
+# active one, making version switches instant and enabling gos uninstall.
+GOS_VERSIONS_DIR="${GOS_VERSIONS_DIR:-}"
+while [ -n "$GOS_VERSIONS_DIR" ] && [ "$GOS_VERSIONS_DIR" != "/" ] && [ "$GOS_VERSIONS_DIR" != "${GOS_VERSIONS_DIR%/}" ]; do
+  GOS_VERSIONS_DIR="${GOS_VERSIONS_DIR%/}"
+done
 GOS_RELEASE_BASE_URL="https://github.com/johnny4young/gos/releases/latest/download"
 GOS_OUTPUT_JSON=0
 GOS_TMP_DIR=""
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+# Set while the previous installation sits in a backup dir during activation.
+# The EXIT trap restores it if gos dies between the backup mv and the
+# activation mv, so an interrupt cannot leave the machine with no Go at all.
+GOS_ACTIVATION_BACKUP=""
+
 # Temp staging is cleaned from a trap so interrupted installs (Ctrl-C, kill)
 # do not leak partially extracted archives.
 _gos_cleanup_tmp() {
+  if [ -n "$GOS_ACTIVATION_BACKUP" ] && [ -d "$GOS_ACTIVATION_BACKUP" ] && [ ! -e "$GOS_INSTALL_DIR" ]; then
+    echo "Interrupted during activation; restoring the previous Go installation..." >&2
+    mv "$GOS_ACTIVATION_BACKUP" "$GOS_INSTALL_DIR" 2>/dev/null \
+      || echo "Warning: could not restore ${GOS_ACTIVATION_BACKUP}; move it back to ${GOS_INSTALL_DIR} manually." >&2
+  fi
   if [ -n "$GOS_TMP_DIR" ] && [ -d "$GOS_TMP_DIR" ]; then
     rm -rf "$GOS_TMP_DIR"
   fi
@@ -147,6 +164,38 @@ _gos_validate_install_dir() {
       return 1
       ;;
   esac
+}
+
+# Validate the optional side-by-side versions directory.
+_gos_validate_versions_dir() {
+  [ -z "$GOS_VERSIONS_DIR" ] && return 0
+  case "$GOS_VERSIONS_DIR" in
+    /*) ;;
+    *)
+      echo "Error: GOS_VERSIONS_DIR='${GOS_VERSIONS_DIR}' must be an absolute path." >&2
+      return 1
+      ;;
+  esac
+  case "$GOS_VERSIONS_DIR" in
+    *$'\n'*|*$'\r'*|*$'\t'*)
+      echo "Error: GOS_VERSIONS_DIR must not contain control characters." >&2
+      return 1
+      ;;
+  esac
+  case "/${GOS_VERSIONS_DIR}/" in
+    *"/../"*|*"/./"*)
+      echo "Error: GOS_VERSIONS_DIR='${GOS_VERSIONS_DIR}' must not contain . or .. path components." >&2
+      return 1
+      ;;
+  esac
+}
+
+_gos_versions_mode() {
+  [ -n "$GOS_VERSIONS_DIR" ]
+}
+
+_gos_version_dir_for() {
+  printf '%s/go%s' "$GOS_VERSIONS_DIR" "$1"
 }
 
 # Validate the optional archive download mirror. HTTPS is required because the
@@ -348,8 +397,16 @@ _gos_has_checksum_parser() {
   command -v jq &>/dev/null || command -v python3 &>/dev/null
 }
 
+# GOS_REQUIRE_CHECKSUM=1    -> fail closed when no checksum can be verified.
+# GOS_REQUIRE_CHECKSUM=feed -> additionally require the digest to come from
+#   the go.dev downloads feed (cross-origin from the archive host), rejecting
+#   the same-origin .sha256 companion-file fallback.
 _gos_require_checksum() {
-  [ "${GOS_REQUIRE_CHECKSUM:-}" = "1" ]
+  [ "${GOS_REQUIRE_CHECKSUM:-}" = "1" ] || [ "${GOS_REQUIRE_CHECKSUM:-}" = "feed" ]
+}
+
+_gos_require_feed_checksum() {
+  [ "${GOS_REQUIRE_CHECKSUM:-}" = "feed" ]
 }
 
 _gos_checksum_unavailable() {
@@ -428,6 +485,24 @@ _gos_current() {
   fi
 }
 
+# True when the requested version is genuinely served by the managed install:
+# either PATH's go resolves from inside GOS_INSTALL_DIR, or GOS_INSTALL_DIR's
+# own go reports that version. Prevents a matching go elsewhere on PATH
+# (e.g. Homebrew's) from masking a missing or stale managed install.
+_gos_active_install_matches() {
+  local version="$1" go_path installed_go installed_version
+
+  go_path=$(command -v go 2>/dev/null) || go_path=""
+  case "$go_path" in
+    "${GOS_INSTALL_DIR}/"*) return 0 ;;
+  esac
+
+  installed_go="${GOS_INSTALL_DIR}/bin/go"
+  [ -x "$installed_go" ] || return 1
+  installed_version=$("$installed_go" version 2>/dev/null | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' | head -1 | sed 's/^go//') || installed_version=""
+  [ "$installed_version" = "$version" ]
+}
+
 _gos_existing_parent_for() {
   local dir="$1" parent
   parent=$(dirname "$dir")
@@ -455,25 +530,37 @@ _gos_needs_sudo() {
   return 0
 }
 
-# Run a command with sudo only if needed
+# Run a command with sudo only if needed. The command's stdout and stderr are
+# kept separate so tool warnings never leak into data output.
 _gos_sudo() {
-  local output status sudo_output sudo_status
+  local output status err err_file sudo_output sudo_status sudo_err
 
   if _gos_needs_sudo; then
     sudo "$@"
     return
   fi
 
+  err_file=$(mktemp) || {
+    # No temp file for stderr capture; run the command directly.
+    LC_ALL=C "$@"
+    return
+  }
+
   # LC_ALL=C keeps failure messages in English so the permission-error
   # detection below works regardless of the user's locale.
   set +e
-  output=$(LC_ALL=C "$@" 2>&1)
+  output=$(LC_ALL=C "$@" 2>"$err_file")
   status=$?
   set -e
+  err=$(<"$err_file")
 
   if [ "$status" -eq 0 ]; then
+    rm -f "$err_file"
     if [ -n "$output" ]; then
       printf '%s' "$output"
+    fi
+    if [ -n "$err" ]; then
+      printf '%s' "$err" >&2
     fi
     return 0
   fi
@@ -482,28 +569,37 @@ _gos_sudo() {
   # writable even when operations like sibling renames fail with a permissions error.
   # Retry with sudo when available and the error looks permission-related.
   if [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null; then
-    case "$output" in
+    case "${err}${output}" in
       *"Permission denied"*|*"permission denied"*|*"Operation not permitted"*|*"operation not permitted"*|*"Access is denied"*|*"access denied"*)
         set +e
-        sudo_output=$(LC_ALL=C sudo "$@" 2>&1)
+        sudo_output=$(LC_ALL=C sudo "$@" 2>"$err_file")
         sudo_status=$?
         set -e
+        sudo_err=$(<"$err_file")
+        rm -f "$err_file"
         if [ "$sudo_status" -eq 0 ]; then
           if [ -n "$sudo_output" ]; then
             printf '%s' "$sudo_output"
           fi
+          if [ -n "$sudo_err" ]; then
+            printf '%s' "$sudo_err" >&2
+          fi
           return 0
         fi
-        printf '%s' "$output" >&2
-        if [ -n "$sudo_output" ]; then
-          printf '%s' "$sudo_output" >&2
+        printf '%s' "$err" >&2
+        if [ -n "$sudo_err" ]; then
+          printf '%s' "$sudo_err" >&2
         fi
         return "$sudo_status"
         ;;
     esac
   fi
 
-  printf '%s' "$output" >&2
+  rm -f "$err_file"
+  if [ -n "$output" ]; then
+    printf '%s' "$output"
+  fi
+  printf '%s' "$err" >&2
   return "$status"
 }
 
@@ -627,16 +723,71 @@ _gos_activate_staged_install() {
 
     echo "Backing up existing Go installation..."
     _gos_sudo mv "$GOS_INSTALL_DIR" "$backup_dir" || return 1
+    GOS_ACTIVATION_BACKUP="$backup_dir"
   fi
 
   echo "Activating new Go installation..."
   if ! _gos_sudo mv "$staged_go_dir" "$GOS_INSTALL_DIR"; then
     echo "Error: failed to move new Go installation into place." >&2
     _gos_restore_backup "$backup_dir" || true
+    GOS_ACTIVATION_BACKUP=""
+    return 1
+  fi
+  # The install dir exists again; the interrupt trap no longer needs to act.
+  GOS_ACTIVATION_BACKUP=""
+
+  local go_bin="${GOS_INSTALL_DIR}/bin/go"
+  if [ ! -x "$go_bin" ]; then
+    echo "Error: activated Go installation is missing bin/go." >&2
+    _gos_restore_backup "$backup_dir" || true
     return 1
   fi
 
-  local go_bin="${GOS_INSTALL_DIR}/bin/go"
+  if ! version_output=$("$go_bin" version 2>&1); then
+    echo "Error: activated Go failed validation: ${version_output}" >&2
+    _gos_restore_backup "$backup_dir" || true
+    return 1
+  fi
+
+  if [ -n "$backup_dir" ]; then
+    _gos_save_rollback_backup "$backup_dir"
+  fi
+
+  echo "Done! ${version_output}"
+}
+
+# Side-by-side activation: point GOS_INSTALL_DIR (a symlink in versions mode)
+# at the requested version directory. The displaced install — a real directory
+# from a previous flat-mode install, or the previous version's symlink — is
+# preserved through the same rollback flow as flat mode.
+_gos_activate_version_dir() {
+  local version_dir="$1"
+  local backup_dir="" version_output go_bin
+
+  if [ -e "$GOS_INSTALL_DIR" ] || [ -L "$GOS_INSTALL_DIR" ]; then
+    backup_dir="${GOS_INSTALL_DIR}.gos-backup.$$"
+    if [ -e "$backup_dir" ] || [ -L "$backup_dir" ]; then
+      echo "Error: backup path already exists: ${backup_dir}" >&2
+      return 1
+    fi
+    if [ ! -L "$GOS_INSTALL_DIR" ]; then
+      echo "Backing up existing Go installation..."
+    fi
+    # Moving a symlink moves the link itself, so the previous target survives.
+    _gos_sudo mv "$GOS_INSTALL_DIR" "$backup_dir" || return 1
+    GOS_ACTIVATION_BACKUP="$backup_dir"
+  fi
+
+  echo "Activating go from ${version_dir}..."
+  if ! _gos_sudo ln -s "$version_dir" "$GOS_INSTALL_DIR"; then
+    echo "Error: failed to link new Go installation into place." >&2
+    _gos_restore_backup "$backup_dir" || true
+    GOS_ACTIVATION_BACKUP=""
+    return 1
+  fi
+  GOS_ACTIVATION_BACKUP=""
+
+  go_bin="${GOS_INSTALL_DIR}/bin/go"
   if [ ! -x "$go_bin" ]; then
     echo "Error: activated Go installation is missing bin/go." >&2
     _gos_restore_backup "$backup_dir" || true
@@ -703,9 +854,22 @@ _gos_activate_rollback() {
 _gos_install_version() {
   local version=$1
   local include_all_checksums="${2:-false}"
-  local os arch ext pkg url tmp_dir tmp_file stage_dir staged_go_dir
+  local os arch ext pkg url tmp_dir tmp_file stage_dir staged_go_dir version_dir
 
   _gos_validate_version "$version" || return 1
+
+  # Side-by-side fast path: the requested version is already installed, so
+  # switching is just a symlink flip — no network, no extraction.
+  if _gos_versions_mode; then
+    _gos_validate_versions_dir || return 1
+    version_dir=$(_gos_version_dir_for "$version")
+    if [ -x "${version_dir}/bin/go" ]; then
+      echo "Using installed go${version} from ${version_dir}."
+      _gos_prepare_install_parent || return 1
+      _gos_activate_version_dir "$version_dir" || return 1
+      return 0
+    fi
+  fi
 
   os=$(_gos_os)
   arch=$(_gos_arch)
@@ -732,13 +896,21 @@ _gos_install_version() {
   # Resolve checksum metadata before consulting the local archive cache.
   # The feed cache is warmed here, in the parent shell, so the command
   # substitution below reuses it instead of re-downloading the feed.
-  local expected_sha actual_sha cache_hit
+  local expected_sha actual_sha cache_hit sha_source
   expected_sha=""
+  sha_source=""
   if _gos_has_checksum_parser && _gos_feed_json "$include_all_checksums" >/dev/null; then
     expected_sha=$(_gos_fetch_checksum "$pkg" "$include_all_checksums") || expected_sha=""
+    [ -n "$expected_sha" ] && sha_source="feed"
+  fi
+  if _gos_require_feed_checksum && [ "$sha_source" != "feed" ]; then
+    echo "Error: GOS_REQUIRE_CHECKSUM=feed but no checksum was found in the go.dev downloads feed for ${pkg}." >&2
+    echo "Install jq or python3 so feed metadata can be parsed, or use GOS_REQUIRE_CHECKSUM=1 to accept the .sha256 fallback." >&2
+    return 1
   fi
   if [ -z "$expected_sha" ]; then
     expected_sha=$(_gos_fetch_checksum_file "$pkg") || expected_sha=""
+    [ -n "$expected_sha" ] && sha_source="file"
   fi
   # Mirror downloads are only trusted when they can be verified against the
   # official go.dev checksum metadata; never fall back to unverified bytes.
@@ -800,7 +972,25 @@ _gos_install_version() {
 
   _gos_prepare_install_parent || return 1
 
-  _gos_activate_staged_install "$staged_go_dir" || return 1
+  if _gos_versions_mode; then
+    version_dir=$(_gos_version_dir_for "$version")
+    if ! mkdir -p "$GOS_VERSIONS_DIR" 2>/dev/null && ! _gos_sudo mkdir -p "$GOS_VERSIONS_DIR"; then
+      echo "Error: failed to create GOS_VERSIONS_DIR: ${GOS_VERSIONS_DIR}" >&2
+      return 1
+    fi
+    # A partial or broken previous copy (no executable bin/go) is replaced.
+    if [ -e "$version_dir" ] && ! _gos_sudo rm -rf "$version_dir"; then
+      echo "Error: failed to replace existing ${version_dir}." >&2
+      return 1
+    fi
+    if ! _gos_sudo mv "$staged_go_dir" "$version_dir"; then
+      echo "Error: failed to move new Go installation into ${GOS_VERSIONS_DIR}." >&2
+      return 1
+    fi
+    _gos_activate_version_dir "$version_dir" || return 1
+  else
+    _gos_activate_staged_install "$staged_go_dir" || return 1
+  fi
 
   rm -rf "$tmp_dir"
   GOS_TMP_DIR=""
@@ -1003,8 +1193,11 @@ cmd_latest() {
   echo "Latest: go${latest}"
 
   if [ "$current" = "$latest" ]; then
-    echo "Already on Go ${latest}, nothing to do."
-    return 0
+    if _gos_active_install_matches "$latest"; then
+      echo "Already on Go ${latest}, nothing to do."
+      return 0
+    fi
+    echo "Go ${latest} is active on PATH, but ${GOS_INSTALL_DIR} does not provide it; installing."
   fi
 
   if [ "$current" = "none" ]; then
@@ -1098,8 +1291,11 @@ cmd_install() {
   local current
   current=$(_gos_current)
   if [ "$current" = "$version" ]; then
-    echo "Already on Go ${version}, nothing to do."
-    return 0
+    if _gos_active_install_matches "$version"; then
+      echo "Already on Go ${version}, nothing to do."
+      return 0
+    fi
+    echo "Go ${version} is active on PATH, but ${GOS_INSTALL_DIR} does not provide it; installing."
   fi
 
   _gos_install_version "$version" true
@@ -1129,9 +1325,64 @@ cmd_current() {
   fi
 }
 
+# Bare version numbers of locally installed Go versions, one per line.
+_gos_installed_versions() {
+  local entry base version installed_go
+
+  if _gos_versions_mode; then
+    [ -d "$GOS_VERSIONS_DIR" ] || return 0
+    for entry in "$GOS_VERSIONS_DIR"/go*/; do
+      entry="${entry%/}"
+      [ -x "${entry}/bin/go" ] || continue
+      base=$(basename "$entry")
+      printf '%s\n' "${base#go}"
+    done
+    return 0
+  fi
+
+  installed_go="${GOS_INSTALL_DIR}/bin/go"
+  if [ -x "$installed_go" ]; then
+    version=$("$installed_go" version 2>/dev/null | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' | head -1 | sed 's/^go//') || version=""
+    [ -n "$version" ] && printf '%s\n' "$version"
+  fi
+  return 0
+}
+
 cmd_list() {
-  local versions
-  _gos_set_json_from_args "$@"
+  local versions installed="false" current arg
+  for arg in "$@"; do
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      --installed) installed="true" ;;
+      *)
+        echo "Error: unknown option for gos list: ${arg}" >&2
+        echo "Usage: gos list [--installed] [--json]" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  if [ "$installed" = "true" ]; then
+    versions=$(_gos_installed_versions | _gos_sort_versions | sed 's/^/go/')
+    if _gos_json_enabled; then
+      current=$(_gos_current)
+      printf '{"installed":'
+      printf '%s\n' "$versions" | _gos_json_array_from_lines
+      printf ',"active":'
+      if [ "$current" = "none" ]; then
+        printf 'null'
+      else
+        _gos_json_string "go${current}"
+      fi
+      printf '}\n'
+    elif [ -z "$versions" ]; then
+      echo "No Go versions installed."
+    else
+      printf '%s\n' "$versions"
+    fi
+    return 0
+  fi
+
   if _gos_json_enabled; then
     # Resolve the list before emitting JSON so failures never print a
     # truncated document.
@@ -1221,6 +1472,83 @@ cmd_pin() {
 
 cmd_rollback() {
   _gos_activate_rollback
+}
+
+cmd_uninstall() {
+  local version="${1:-}" version_dir target rollback_dir
+
+  if [ -z "$version" ]; then
+    echo "Usage: gos uninstall <version>  e.g. gos uninstall 1.24.0" >&2
+    return 1
+  fi
+  version="${version#go}"
+  _gos_validate_version "$version" || return 1
+
+  if ! _gos_versions_mode; then
+    echo "Error: gos uninstall requires side-by-side mode (set GOS_VERSIONS_DIR)." >&2
+    echo "In the classic layout there is only one install; replace it with gos install/latest." >&2
+    return 1
+  fi
+  _gos_validate_versions_dir || return 1
+
+  version_dir=$(_gos_version_dir_for "$version")
+  if [ ! -d "$version_dir" ]; then
+    echo "Error: go${version} is not installed under ${GOS_VERSIONS_DIR}." >&2
+    return 1
+  fi
+
+  if [ -L "$GOS_INSTALL_DIR" ]; then
+    target=$(readlink "$GOS_INSTALL_DIR") || target=""
+    if [ "$target" = "$version_dir" ]; then
+      echo "Error: go${version} is the active version. Switch to another version first." >&2
+      return 1
+    fi
+  fi
+
+  rollback_dir=$(_gos_rollback_dir)
+  if [ -L "$rollback_dir" ] && [ "$(readlink "$rollback_dir")" = "$version_dir" ]; then
+    echo "Warning: the rollback link points at go${version}; gos rollback will not work until the next install." >&2
+  fi
+
+  _gos_sudo rm -rf "$version_dir" || return 1
+  echo "Uninstalled go${version} from ${version_dir}."
+}
+
+# Print the shell configuration needed to put the managed Go on PATH.
+# Usage: eval "$(gos env)"    or    gos env --fish | source
+cmd_env() {
+  local arg shell_kind="posix" go_bin
+
+  for arg in "$@"; do
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      --fish) shell_kind="fish" ;;
+      *)
+        echo "Error: unknown option for gos env: ${arg}" >&2
+        echo "Usage: gos env [--fish] [--json]" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  go_bin="${GOS_INSTALL_DIR}/bin"
+
+  if _gos_json_enabled; then
+    printf '{"install_dir":'
+    _gos_json_string "$GOS_INSTALL_DIR"
+    printf ',"bin_dir":'
+    _gos_json_string "$go_bin"
+    printf '}\n'
+    return 0
+  fi
+
+  if [ "$shell_kind" = "fish" ]; then
+    printf "fish_add_path --path '%s'\n" "$go_bin"
+  else
+    # $PATH is intentionally literal: it must expand in the user's shell.
+    # shellcheck disable=SC2016
+    printf 'export PATH="%s:$PATH"\n' "$go_bin"
+  fi
 }
 
 # Resolve the on-disk path of the running script, following symlinks when the
@@ -1373,12 +1701,29 @@ cmd_prune() {
     _gos_json_enabled || echo "Rollback installation kept at ${rollback_dir} (remove it with: gos prune --rollback)."
   fi
 
+  # Crash residue: interrupted activations can strand *.gos-backup.<pid> /
+  # *.gos-current.<pid> siblings. Only remove them when the active install is
+  # healthy (they may be the sole surviving copy otherwise), and only with
+  # --rollback, which already means "discard my safety copies".
+  local orphan orphans_removed=0 orphans_found=0
+  for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
+    [ -d "$orphan" ] || continue
+    orphans_found=$((orphans_found + 1))
+    if [ "$prune_rollback" = "true" ] && [ -x "${GOS_INSTALL_DIR}/bin/go" ]; then
+      _gos_sudo rm -rf "$orphan" || return 1
+      orphans_removed=$((orphans_removed + 1))
+      _gos_json_enabled || echo "Removed orphaned backup at ${orphan}."
+    else
+      _gos_json_enabled || echo "Orphaned backup found at ${orphan} (remove it with: gos prune --rollback)."
+    fi
+  done
+
   if _gos_json_enabled; then
     printf '{"removed_archives":%s,"cache_dir":' "$removed"
     _gos_json_string "$GOS_CACHE_DIR"
     printf ',"rollback":'
     _gos_json_string "$rollback_state"
-    printf '}\n'
+    printf ',"orphaned_backups_found":%s,"orphaned_backups_removed":%s}\n' "$orphans_found" "$orphans_removed"
   fi
 }
 
@@ -1423,7 +1768,7 @@ _gos_parent_writable_or_sudo() {
 }
 
 cmd_doctor() {
-  local os arch raw_os raw_arch install_error mirror_error go_path go_version go_bin
+  local os arch raw_os raw_arch install_error mirror_error versions_error go_path go_version go_bin
   GOS_DOCTOR_PROBLEMS=0
   GOS_DOCTOR_WARNINGS=0
   GOS_DOCTOR_JSON_ITEMS=""
@@ -1485,6 +1830,14 @@ cmd_doctor() {
       _gos_doctor_check "ok" "mirror" "archive downloads use ${GOS_DOWNLOAD_MIRROR}"
     else
       _gos_doctor_check "problem" "mirror" "$mirror_error" "Set GOS_DOWNLOAD_MIRROR to an https:// URL or unset it."
+    fi
+  fi
+
+  if _gos_versions_mode; then
+    if versions_error=$(_gos_validate_versions_dir 2>&1); then
+      _gos_doctor_check "ok" "versions-dir" "side-by-side installs under ${GOS_VERSIONS_DIR}"
+    else
+      _gos_doctor_check "problem" "versions-dir" "$versions_error" "Set GOS_VERSIONS_DIR to a safe absolute path or unset it."
     fi
   fi
 
@@ -1567,10 +1920,12 @@ COMMANDS:
   pin <version>       Write .go-version in the current directory
   check               Check whether a newer stable Go is available
   rollback            Restore the previous Go installation, if available
+  uninstall <version> Remove an installed version (side-by-side mode only)
   prune [--rollback]  Remove cached Go archives (and the rollback copy with --rollback)
   current             Show the currently active Go version
-  list                List all available Go versions
+  list [--installed]  List available Go versions (or locally installed ones)
   platforms [version] List supported OS/arch archives for a Go version
+  env [--fish]        Print the PATH setup line for your shell
   doctor              Diagnose gos, Go, PATH, and tool dependencies
   self-update         Update gos itself to the latest release
   version             Show gos version
@@ -1628,6 +1983,14 @@ main() {
       ;;
     check)     cmd_check "$@" ;;
     self-update|selfupdate) cmd_self_update ;;
+    uninstall)
+      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      cmd_uninstall "${1:-}"
+      ;;
+    env)
+      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      cmd_env "$@"
+      ;;
     current)   cmd_current "$@" ;;
     list)      cmd_list "$@" ;;
     platforms) cmd_platforms "$@" ;;
