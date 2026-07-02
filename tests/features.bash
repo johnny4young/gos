@@ -632,9 +632,10 @@ run_gos "$case_dir" bash "$script" env --bogus
 pass "env prints PATH setup for POSIX shells, fish, and JSON"
 
 # Side-by-side mode needs real symlinks; Git Bash's ln -s copies, so probe
-# the filesystem capability instead of sniffing the OS.
+# the filesystem capability instead of sniffing the OS. Probe with a file
+# target: a directory target would make Git Bash deep-copy it.
 symlink_probe="${test_root}/symlink-probe"
-if ln -s "$test_root" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
+if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
   rm -f "$symlink_probe"
 
 case_dir="${test_root}/versions-mode"
