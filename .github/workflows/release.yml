@@ -30,8 +30,12 @@ jobs:
     outputs:
       version: ${{ steps.release-ref.outputs.version }}
       tag: ${{ steps.release-ref.outputs.tag }}
+      is_prerelease: ${{ steps.release-ref.outputs.is_prerelease }}
     steps:
+      # Only the tag-push ancestry check below needs the repository; a manual
+      # (workflow_dispatch) run validates its inputs from env alone.
       - uses: actions/checkout@v7
+        if: github.event_name == 'push'
         with:
           fetch-depth: 0
 
@@ -86,9 +90,18 @@ jobs:
             fi
           fi
 
+          # A semver pre-release (1.2.3-rc1) carries a '-'. Compute the flag once
+          # here so every downstream job (gh-release prerelease flag, tap gating)
+          # reads one authoritative output instead of re-inlining contains().
+          IS_PRERELEASE=false
+          case "$VERSION" in
+            *-*) IS_PRERELEASE=true ;;
+          esac
+
           {
             printf 'version=%s\n' "$VERSION"
             printf 'tag=%s\n' "$TAG"
+            printf 'is_prerelease=%s\n' "$IS_PRERELEASE"
           } >> "$GITHUB_OUTPUT"
 
   release-preflight:
@@ -200,9 +213,10 @@ jobs:
           VERSION: ${{ needs.validate-release-ref.outputs.version }}
         run: |
           : "${VERSION:?missing release version}"
-          ./gos.sh version
-          # The released script must report the version being tagged.
-          test "$(./gos.sh version)" = "gos v${VERSION}"
+          # Invoke once and reuse; the released script must report the tagged version.
+          reported=$(./gos.sh version)
+          echo "$reported"
+          test "$reported" = "gos v${VERSION}"
 
       - name: Run help check
         run: ./gos.sh help
@@ -295,7 +309,7 @@ jobs:
           tag_name: ${{ needs.validate-release-ref.outputs.tag }}
           # Pre-release tags (v1.2.3-rc1) must never become the release served
           # by releases/latest/download/, which stable installer users consume.
-          prerelease: ${{ contains(needs.validate-release-ref.outputs.version, '-') }}
+          prerelease: ${{ needs.validate-release-ref.outputs.is_prerelease == 'true' }}
           files: |
             gos.sh
             install.sh
@@ -308,7 +322,7 @@ jobs:
     name: Update Homebrew Formula
     needs: [validate-release-ref, release]
     # Pre-releases must not reach the Homebrew tap; brew serves one version.
-    if: ${{ !contains(needs.validate-release-ref.outputs.version, '-') }}
+    if: ${{ needs.validate-release-ref.outputs.is_prerelease != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the released gos source

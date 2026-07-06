@@ -522,6 +522,10 @@ assert_contains "$output" '"latest":"go1.21.6"' "check json latest"
 assert_contains "$output" '"up_to_date":false' "check json outdated"
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --json
 assert_contains "$output" '"up_to_date":true' "check json up to date"
+# Unknown flags are rejected, not silently ignored (shared [--json] parser).
+GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --bogus
+[ "$status" -ne 0 ] || fail "check should reject an unknown flag"
+assert_contains "$output" "unexpected argument: --bogus" "check rejects unknown flag"
 pass "check reports update availability without installing"
 
 case_dir="${test_root}/mirror"
