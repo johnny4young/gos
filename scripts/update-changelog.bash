@@ -22,18 +22,15 @@ trim_trailing_blank_lines() {
 
 generate_release_notes_from_git() {
   local output_file="$1"
-  local range_args=()
-
-  if [[ -n "$previous_tag" ]]; then
-    range_args=("${previous_tag}..HEAD")
-  fi
 
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     printf 'error: ## [Unreleased] has no release-note list items and git history is unavailable\n' >&2
     return 1
   fi
 
-  if ! git log --no-merges --reverse --format='%s' "${range_args[@]}" > "$commit_subjects"; then
+  # ${previous_tag:+...} keeps this bash 3.2-safe: expanding an empty array
+  # with "${range_args[@]}" is an unbound-variable error under set -u there.
+  if ! git log --no-merges --reverse --format='%s' ${previous_tag:+"${previous_tag}..HEAD"} > "$commit_subjects"; then
     printf 'error: failed to read git commit subjects for changelog generation\n' >&2
     return 1
   fi
@@ -208,6 +205,13 @@ awk '
 ' "$raw_notes" > "$release_notes"
 
 if ! grep -Eq '^[[:space:]]*[-*] ' "$release_notes"; then
+  # A non-empty section without bullets (e.g. leftover "### Added" headings)
+  # is a half-edited changelog; falling back to git would silently discard
+  # the curated headings.
+  if [[ -s "$release_notes" ]]; then
+    printf 'error: ## [Unreleased] contains content but no "- " bullet items; add bullets or remove the leftover headings\n' >&2
+    exit 1
+  fi
   generate_release_notes_from_git "$release_notes" || {
     printf 'hint: add at least one bullet line (e.g. "- ...") under "## [Unreleased]" in %s or use conventional commit subjects before releasing\n' "$changelog_file" >&2
     exit 1

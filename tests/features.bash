@@ -66,7 +66,20 @@ if [ "${GOS_TEST_DOWNLOAD_MODE:-ok}" = "fail-all" ]; then
 fi
 
 case "$url" in
-  'https://go.dev/dl/?mode=json'|'https://go.dev/dl/?mode=json&include=all')
+  https://mirror.test.invalid/dl/go*)
+    if [ "${GOS_TEST_DOWNLOAD_MODE:-ok}" = "fail-archives" ]; then
+      echo "archive download disabled" >&2
+      exit 1
+    fi
+    printf 'fake archive for %s\n' "$url" >"$output"
+    ;;
+  https://github.com/johnny4young/gos/releases/latest/download/gos.sh)
+    cat "$GOS_TEST_SELFUPDATE_SCRIPT" >"$output"
+    ;;
+  https://github.com/johnny4young/gos/releases/latest/download/checksums.txt)
+    printf 'expectedsha  gos.sh\n' >"$output"
+    ;;
+  'https://go.dev/dl/?mode=json')
     cat <<'JSON'
 [
   {
@@ -75,6 +88,33 @@ case "$url" in
       {"filename": "go1.21.6.darwin-arm64.tar.gz", "os": "darwin", "arch": "arm64", "kind": "archive", "sha256": "expectedsha"},
       {"filename": "go1.21.6.linux-amd64.tar.gz", "os": "linux", "arch": "amd64", "kind": "archive", "sha256": "linuxsha"}
     ]
+  },
+  {
+    "version": "go1.20.0",
+    "files": [
+      {"filename": "go1.20.0.darwin-arm64.tar.gz", "os": "darwin", "arch": "arm64", "kind": "archive", "sha256": "oldsha"}
+    ]
+  }
+]
+JSON
+    ;;
+  'https://go.dev/dl/?mode=json&include=all')
+    cat <<'JSON'
+[
+  {
+    "version": "go1.22rc1",
+    "files": []
+  },
+  {
+    "version": "go1.21.6",
+    "files": [
+      {"filename": "go1.21.6.darwin-arm64.tar.gz", "os": "darwin", "arch": "arm64", "kind": "archive", "sha256": "expectedsha"},
+      {"filename": "go1.21.6.linux-amd64.tar.gz", "os": "linux", "arch": "amd64", "kind": "archive", "sha256": "linuxsha"}
+    ]
+  },
+  {
+    "version": "go1.21rc1",
+    "files": []
   },
   {
     "version": "go1.20.0",
@@ -107,6 +147,11 @@ FAKE_CURL
 cat >"${fake_bin}/sha256sum" <<'FAKE_SHA256SUM'
 #!/usr/bin/env bash
 set -euo pipefail
+
+if grep -q GOS-TEST-CORRUPT "$1" 2>/dev/null; then
+  printf 'corruptsha  %s\n' "$1"
+  exit 0
+fi
 
 case "$1" in
   *go1.20.0.darwin-arm64.tar.gz)
@@ -157,6 +202,10 @@ FAKE_TAR
 
 cat >"${fake_bin}/go" <<'FAKE_GO'
 #!/usr/bin/env bash
+if [ "${GOS_TEST_GO_BROKEN:-0}" = "1" ]; then
+  echo "go: exec format error" >&2
+  exit 126
+fi
 echo "go version go${GOS_TEST_GO_VERSION:-1.20rc1} darwin/arm64"
 FAKE_GO
 
@@ -193,10 +242,14 @@ run_gos() {
     PATH="${fake_bin}:${original_path}" \
     GOS_INSTALL_DIR="${GOS_TEST_INSTALL_DIR:-${case_dir}/go}" \
     GOS_CACHE_DIR="${case_dir}/cache" \
+    GOS_DOWNLOAD_MIRROR="${GOS_TEST_MIRROR:-}" \
+    GOS_VERSIONS_DIR="${GOS_TEST_VERSIONS_DIR:-}" \
     GOS_TEST_URL_LOG="${case_dir}/urls.log" \
     GOS_TEST_DOWNLOAD_MODE="${GOS_TEST_DOWNLOAD_MODE:-ok}" \
     GOS_TEST_UNSUPPORTED_PLATFORM="${GOS_TEST_UNSUPPORTED_PLATFORM:-0}" \
     GOS_TEST_GO_VERSION="${GOS_TEST_GO_VERSION:-}" \
+    GOS_TEST_GO_BROKEN="${GOS_TEST_GO_BROKEN:-0}" \
+    GOS_TEST_SELFUPDATE_SCRIPT="${GOS_TEST_SELFUPDATE_SCRIPT:-}" \
     "$@" 2>&1
   )"
   status=$?
@@ -204,14 +257,14 @@ run_gos() {
 }
 
 create_old_install() {
-  local install_dir="$1"
+  local install_dir="$1" version="${2:-1.20.0}" marker="${3:-old}"
   mkdir -p "${install_dir}/bin"
-  cat >"${install_dir}/bin/go" <<'OLD_GO'
+  cat >"${install_dir}/bin/go" <<FAKE_INSTALLED_GO
 #!/usr/bin/env bash
-echo "go version go1.20.0 darwin/arm64"
-OLD_GO
+echo "go version go${version} darwin/arm64"
+FAKE_INSTALLED_GO
   chmod +x "${install_dir}/bin/go"
-  printf 'old\n' >"${install_dir}/VERSION_MARKER"
+  printf '%s\n' "$marker" >"${install_dir}/VERSION_MARKER"
 }
 
 case_dir="${test_root}/json"
@@ -225,7 +278,7 @@ assert_contains "$output" '"version":"1.20rc1"' "current json preserves rc"
 
 run_gos "$case_dir" bash "$script" list --json
 [ "$status" -eq 0 ] || fail "list --json failed: ${output}"
-assert_contains "$output" '"versions":["go1.20.0","go1.21.6"]' "list json"
+assert_contains "$output" '"versions":["go1.20.0","go1.21rc1","go1.21.6","go1.22rc1"]' "list json orders rc before its release"
 
 run_gos "$case_dir" bash "$script" platforms 1.21.6 --json
 [ "$status" -eq 0 ] || fail "platforms --json failed: ${output}"
@@ -332,12 +385,45 @@ assert_contains "$output" "too shallow" "install dir shallow path"
 GOS_TEST_INSTALL_DIR="${case_dir}/payload" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -ne 0 ] || fail "install dir without go basename should fail"
 assert_contains "$output" "does not contain 'go'" "install dir basename"
+GOS_TEST_INSTALL_DIR="/usr/local/../../etc/gogo" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "install dir with .. traversal should fail"
+assert_contains "$output" "must not contain . or .. path components" "install dir dotdot"
+GOS_TEST_INSTALL_DIR="/usr/local/./gogo" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "install dir with . component should fail"
+assert_contains "$output" "must not contain . or .. path components" "install dir dot"
 if [ -s "${case_dir}/urls.log" ]; then
   fail "install dir validation must run before any network access"
 fi
 pass "install dir guardrails refuse dangerous paths before any work"
 
+# `gos env` output is meant to be run with `eval "$(gos env)"`, so a path
+# carrying shell metacharacters must be single-quoted, never interpolated raw,
+# or it becomes command injection.
+case_dir="${test_root}/env-injection"
+mkdir -p "$case_dir"
+# shellcheck disable=SC2016
+evil_dir='/tmp/x";id > '"${case_dir}"'/pwned;"go'
+rm -f "${case_dir}/pwned"
+GOS_TEST_INSTALL_DIR="$evil_dir" run_gos "$case_dir" bash "$script" env
+[ "$status" -eq 0 ] || fail "env with a hostile install dir failed: ${output}"
+env_line="$output"
+# Run the emitted line the way the README tells users to.
+( eval "$env_line" ) >/dev/null 2>&1 || true
+[ -f "${case_dir}/pwned" ] && fail "gos env output executed injected command via eval"
+assert_contains "$env_line" "export PATH='" "env single-quotes the path"
+pass "gos env output is injection-safe under eval"
+
+case_dir="${test_root}/trailing-slash"
+mkdir -p "$case_dir"
+create_old_install "${case_dir}/go"
+GOS_TEST_INSTALL_DIR="${case_dir}/go/" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "trailing-slash install failed: ${output}"
+[ -d "${case_dir}/go.gos-rollback" ] || fail "trailing slash must not nest the rollback inside the install dir"
+pass "trailing slashes in GOS_INSTALL_DIR are normalized"
+
 case_dir="${test_root}/idempotent"
+mkdir -p "$case_dir"
+create_old_install "${case_dir}/go" "1.21.6" "served"
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "idempotent install failed: ${output}"
 assert_contains "$output" "Already on Go 1.21.6, nothing to do." "idempotent install"
@@ -350,7 +436,14 @@ assert_contains "$output" "Already on Go 1.21.6, nothing to do." "idempotent lat
 if grep -q 'dl/go1' "${case_dir}/urls.log"; then
   fail "idempotent latest must not download any archive"
 fi
-pass "installing the active version is a no-op"
+pass "installing the active version is a no-op when the install dir serves it"
+
+case_dir="${test_root}/masked-install"
+GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "masked install failed: ${output}"
+assert_contains "$output" "does not provide it; installing" "masked install proceeds"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "masked install did not populate the install dir"
+pass "a matching go elsewhere on PATH no longer masks a missing managed install"
 
 case_dir="${test_root}/offline"
 GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" latest
@@ -411,3 +504,306 @@ run_gos "$case_dir" bash "$script" pin
 [ "$status" -ne 0 ] || fail "pin without version should fail"
 assert_contains "$output" "Usage: gos pin <version>" "pin without version"
 pass "pin without a version prints usage and fails"
+
+case_dir="${test_root}/check"
+GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check
+[ "$status" -eq 0 ] || fail "check up-to-date failed: ${output}"
+assert_contains "$output" "Already up to date." "check up to date"
+GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
+[ "$status" -eq 0 ] || fail "check outdated failed: ${output}"
+assert_contains "$output" "Update available. Install it with: gos latest" "check outdated"
+if grep -q 'dl/go1' "${case_dir}/urls.log"; then
+  fail "check must never download an archive"
+fi
+GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json
+[ "$status" -eq 0 ] || fail "check --json failed: ${output}"
+assert_contains "$output" '"current":"go1.20.0"' "check json current"
+assert_contains "$output" '"latest":"go1.21.6"' "check json latest"
+assert_contains "$output" '"up_to_date":false' "check json outdated"
+GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --json
+assert_contains "$output" '"up_to_date":true' "check json up to date"
+# Unknown flags are rejected, not silently ignored (shared [--json] parser).
+GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --bogus
+[ "$status" -ne 0 ] || fail "check should reject an unknown flag"
+assert_contains "$output" "unexpected argument: --bogus" "check rejects unknown flag"
+pass "check reports update availability without installing"
+
+case_dir="${test_root}/mirror"
+GOS_TEST_MIRROR="https://mirror.test.invalid/dl" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "mirror install failed: ${output}"
+assert_contains "$output" "Checksum verified." "mirror install verifies checksum"
+grep -q '^https://mirror.test.invalid/dl/go1.21.6.darwin-arm64.tar.gz$' "${case_dir}/urls.log" \
+  || fail "mirror install did not download the archive from the mirror"
+grep -q 'https://go.dev/dl/?mode=json' "${case_dir}/urls.log" \
+  || fail "mirror install must still resolve checksums from go.dev"
+if grep -q '^https://go.dev/dl/go1' "${case_dir}/urls.log"; then
+  fail "mirror install must not download archives from go.dev"
+fi
+pass "mirror installs download archives from the mirror with go.dev checksums"
+
+case_dir="${test_root}/mirror-unverified"
+GOS_TEST_MIRROR="https://mirror.test.invalid/dl" run_gos "$case_dir" bash "$script" install 1.19.0
+[ "$status" -ne 0 ] || fail "mirror install without checksum metadata should fail"
+assert_contains "$output" "no official checksum is available" "mirror requires checksum"
+if grep -q 'mirror.test.invalid/dl/go1.19.0' "${case_dir}/urls.log"; then
+  fail "mirror install without checksum must not download the archive"
+fi
+pass "mirror installs refuse to download unverifiable archives"
+
+case_dir="${test_root}/mirror-invalid"
+GOS_TEST_MIRROR="http://mirror.test.invalid/dl" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "plaintext mirror should fail"
+assert_contains "$output" "must be an https:// URL" "mirror https enforcement"
+pass "plaintext mirrors are rejected"
+
+case_dir="${test_root}/self-update"
+mkdir -p "${case_dir}/app"
+cp "$script" "${case_dir}/app/gos"
+chmod +x "${case_dir}/app/gos"
+sed 's/^GOS_VERSION=.*/GOS_VERSION="9.9.9"/' "$script" >"${case_dir}/release-gos.sh"
+GOS_TEST_SELFUPDATE_SCRIPT="${case_dir}/release-gos.sh" run_gos "$case_dir" bash "${case_dir}/app/gos" self-update
+[ "$status" -eq 0 ] || fail "self-update failed: ${output}"
+assert_contains "$output" "Checksum verified." "self-update checksum"
+assert_contains "$output" "gos updated: v${gos_version} -> v9.9.9" "self-update version change"
+grep -q '^GOS_VERSION="9.9.9"$' "${case_dir}/app/gos" || fail "self-update did not replace the script"
+[ -x "${case_dir}/app/gos" ] || fail "self-update lost the executable bit"
+GOS_TEST_SELFUPDATE_SCRIPT="${case_dir}/release-gos.sh" run_gos "$case_dir" bash "${case_dir}/app/gos" self-update
+[ "$status" -eq 0 ] || fail "idempotent self-update failed: ${output}"
+assert_contains "$output" "Already on the latest gos (v9.9.9)." "self-update idempotent"
+pass "self-update replaces the script after checksum and syntax validation"
+
+case_dir="${test_root}/resolve-minor"
+run_gos "$case_dir" bash "$script" install 1.21
+[ "$status" -eq 0 ] || fail "bare minor install failed: ${output}"
+assert_contains "$output" "Resolved Go 1.21 to go1.21.6." "bare minor resolution"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "bare minor install did not install the newest patch"
+pass "bare X.Y versions resolve to the newest patch release"
+
+case_dir="${test_root}/broken-go"
+GOS_TEST_GO_BROKEN=1 run_gos "$case_dir" bash "$script" current
+[ "$status" -eq 0 ] || fail "current with broken go failed: ${output}"
+assert_contains "$output" "No Go installation found." "current with broken go"
+GOS_TEST_GO_BROKEN=1 run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "install with broken go failed: ${output}"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "install with broken go did not install"
+pass "a broken go binary on PATH does not abort gos"
+
+case_dir="${test_root}/install-extra-arg"
+run_gos "$case_dir" bash "$script" install 1.21.6 --json
+[ "$status" -ne 0 ] || fail "install with trailing argument should fail"
+assert_contains "$output" "unexpected argument for gos install" "install trailing argument"
+pass "install rejects trailing arguments instead of ignoring them"
+
+case_dir="${test_root}/cli-extra-args"
+run_gos "$case_dir" bash "$script" latest extra
+[ "$status" -ne 0 ] || fail "latest with trailing argument should fail"
+assert_contains "$output" "unexpected argument for gos latest" "latest trailing argument"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "latest with a trailing argument must not reach the network"
+fi
+run_gos "$case_dir" bash "$script" platforms 1.21.6 extra
+[ "$status" -ne 0 ] || fail "platforms with trailing argument should fail"
+assert_contains "$output" "unexpected argument for gos platforms" "platforms trailing argument"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "platforms with a trailing argument must not reach the network"
+fi
+run_gos "$case_dir" bash "$script" use "$case_dir" extra
+[ "$status" -ne 0 ] || fail "use with trailing argument should fail"
+assert_contains "$output" "unexpected argument for gos use" "use trailing argument"
+(
+  cd "$case_dir"
+  run_gos "$case_dir" bash "$script" pin 1.21.6 extra
+  [ "$status" -ne 0 ] || fail "pin with trailing argument should fail"
+  assert_contains "$output" "unexpected argument for gos pin" "pin trailing argument"
+  [ ! -f .go-version ] || fail "pin with a trailing argument must not write .go-version"
+)
+run_gos "$case_dir" bash "$script" rollback extra
+[ "$status" -ne 0 ] || fail "rollback with trailing argument should fail"
+assert_contains "$output" "unexpected argument for gos rollback" "rollback trailing argument"
+run_gos "$case_dir" bash "$script" self-update extra
+[ "$status" -ne 0 ] || fail "self-update with trailing argument should fail"
+assert_contains "$output" "unexpected argument for gos self-update" "self-update trailing argument"
+pass "single-purpose commands reject trailing arguments instead of ignoring them"
+
+case_dir="${test_root}/corrupted-cache"
+run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "corrupted-cache setup install failed: ${output}"
+rm -rf "${case_dir}/go"
+printf 'GOS-TEST-CORRUPT\n' >"${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "install with corrupted cache failed: ${output}"
+assert_contains "$output" "checksum mismatch; downloading a fresh archive." "corrupted cache warning"
+assert_contains "$output" "Checksum verified." "corrupted cache re-download"
+pass "corrupted cached archives are discarded and re-downloaded"
+
+case_dir="${test_root}/prune-json"
+mkdir -p "$case_dir"
+create_old_install "${case_dir}/go"
+run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "prune-json setup install failed: ${output}"
+run_gos "$case_dir" bash "$script" prune --json
+[ "$status" -eq 0 ] || fail "prune --json failed: ${output}"
+assert_contains "$output" '"removed_archives":1' "prune json removed count"
+assert_contains "$output" '"rollback":"kept"' "prune json rollback kept"
+run_gos "$case_dir" bash "$script" prune --rollback --json
+[ "$status" -eq 0 ] || fail "prune --rollback --json failed: ${output}"
+assert_contains "$output" '"rollback":"removed"' "prune json rollback removed"
+pass "prune supports machine-readable JSON output"
+
+case_dir="${test_root}/rollback-missing"
+run_gos "$case_dir" bash "$script" rollback
+[ "$status" -ne 0 ] || fail "rollback without a snapshot should fail"
+assert_contains "$output" "no rollback installation found" "rollback missing"
+pass "rollback fails with a clear error when no snapshot exists"
+
+case_dir="${test_root}/roll-forward"
+mkdir -p "$case_dir"
+create_old_install "${case_dir}/go"
+run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "roll-forward setup install failed: ${output}"
+run_gos "$case_dir" bash "$script" rollback
+[ "$status" -eq 0 ] || fail "first rollback failed: ${output}"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "old" ] || fail "first rollback did not restore previous install"
+run_gos "$case_dir" bash "$script" rollback
+[ "$status" -eq 0 ] || fail "second rollback failed: ${output}"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "second rollback did not roll forward"
+pass "rollback twice rolls forward to the displaced installation"
+
+case_dir="${test_root}/env"
+run_gos "$case_dir" bash "$script" env
+[ "$status" -eq 0 ] || fail "env failed: ${output}"
+assert_contains "$output" "export PATH='${case_dir}/go/bin':\"\$PATH\"" "env posix"
+run_gos "$case_dir" bash "$script" env --fish
+[ "$status" -eq 0 ] || fail "env --fish failed: ${output}"
+assert_contains "$output" "fish_add_path --path '${case_dir}/go/bin'" "env fish"
+run_gos "$case_dir" bash "$script" env --json
+[ "$status" -eq 0 ] || fail "env --json failed: ${output}"
+assert_contains "$output" "\"bin_dir\":\"${case_dir}/go/bin\"" "env json"
+run_gos "$case_dir" bash "$script" env --bogus
+[ "$status" -ne 0 ] || fail "env with unknown option should fail"
+pass "env prints PATH setup for POSIX shells, fish, and JSON"
+
+# Side-by-side mode needs real symlinks; Git Bash's ln -s copies, so probe
+# the filesystem capability instead of sniffing the OS. Probe with a file
+# target: a directory target would make Git Bash deep-copy it.
+symlink_probe="${test_root}/symlink-probe"
+if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
+  rm -f "$symlink_probe"
+
+case_dir="${test_root}/versions-mode"
+versions_dir="${case_dir}/versions"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "versions-mode install failed: ${output}"
+[ -x "${versions_dir}/go1.21.6/bin/go" ] || fail "versions-mode did not install under GOS_VERSIONS_DIR"
+[ -L "${case_dir}/go" ] || fail "versions-mode did not create an install-dir symlink"
+[ "$(readlink "${case_dir}/go")" = "${versions_dir}/go1.21.6" ] || fail "install-dir symlink points at the wrong version"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "active symlink does not serve the new version"
+
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.20.0
+[ "$status" -eq 0 ] || fail "versions-mode second install failed: ${output}"
+[ -x "${versions_dir}/go1.21.6/bin/go" ] || fail "previous version was removed by a new install"
+[ "$(readlink "${case_dir}/go")" = "${versions_dir}/go1.20.0" ] || fail "symlink did not switch to the new version"
+
+: >"${case_dir}/urls.log"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "versions-mode switch back failed: ${output}"
+assert_contains "$output" "Using installed go1.21.6" "versions-mode fast path"
+[ "$(readlink "${case_dir}/go")" = "${versions_dir}/go1.21.6" ] || fail "fast path did not repoint the symlink"
+if grep -q 'dl/go1' "${case_dir}/urls.log"; then
+  fail "switching to an installed version must not download anything"
+fi
+
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" list --installed
+[ "$status" -eq 0 ] || fail "list --installed failed: ${output}"
+assert_contains "$output" "go1.20.0" "list installed old"
+assert_contains "$output" "go1.21.6" "list installed new"
+GOS_TEST_VERSIONS_DIR="$versions_dir" GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" list --installed --json
+[ "$status" -eq 0 ] || fail "list --installed --json failed: ${output}"
+assert_contains "$output" '"installed":["go1.20.0","go1.21.6"]' "list installed json"
+assert_contains "$output" '"active":"go1.21.6"' "list installed json active"
+
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.21.6
+[ "$status" -ne 0 ] || fail "uninstalling the active version should fail"
+assert_contains "$output" "is the active version" "uninstall active guard"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.20.0
+[ "$status" -eq 0 ] || fail "uninstall failed: ${output}"
+[ ! -d "${versions_dir}/go1.20.0" ] || fail "uninstall left the version directory"
+[ -L "${case_dir}/go.gos-rollback" ] || fail "rollback link should remain as a dangling symlink after uninstalling its target"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.20.0
+[ "$status" -eq 0 ] || fail "install after dangling rollback failed: ${output}"
+if printf '%s\n' "$output" | grep -q "rollback was not saved"; then
+  fail "dangling rollback symlink should be replaced before saving a new rollback"
+fi
+[ -L "${case_dir}/go.gos-rollback" ] || fail "install after dangling rollback did not save a rollback link"
+[ "$(readlink "${case_dir}/go.gos-rollback")" = "${versions_dir}/go1.21.6" ] || fail "rollback link was not refreshed after replacing a dangling symlink"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "switch back after dangling rollback test failed: ${output}"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.19.0
+[ "$status" -ne 0 ] || fail "uninstalling a missing version should fail"
+assert_contains "$output" "is not installed" "uninstall missing version"
+# uninstall rejects trailing arguments, symmetric with install (the guard runs
+# before the active-version check, so this fails on the extra arg).
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.21.6 extra
+[ "$status" -ne 0 ] || fail "uninstall should reject trailing arguments"
+assert_contains "$output" "unexpected argument for gos uninstall" "uninstall trailing args"
+# a bare X.Y resolves to the matching installed patch release, like install.
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.20.0
+[ "$status" -eq 0 ] || fail "reinstall 1.20.0 failed: ${output}"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "switch back to 1.21.6 failed: ${output}"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.20
+[ "$status" -eq 0 ] || fail "uninstall of a bare minor failed: ${output}"
+[ ! -d "${versions_dir}/go1.20.0" ] || fail "bare-minor uninstall did not remove go1.20.0"
+assert_contains "$output" "Uninstalled go1.20.0" "uninstall resolves bare X.Y to installed patch"
+pass "side-by-side mode installs, switches instantly, lists, and uninstalls versions"
+
+else
+  rm -f "$symlink_probe"
+  pass "side-by-side mode tests skipped (filesystem lacks symlink support)"
+fi
+
+case_dir="${test_root}/uninstall-flat"
+run_gos "$case_dir" bash "$script" uninstall 1.21.6
+[ "$status" -ne 0 ] || fail "uninstall in flat mode should fail"
+assert_contains "$output" "requires side-by-side mode" "uninstall flat mode"
+pass "uninstall explains it needs side-by-side mode"
+
+case_dir="${test_root}/current-json-none"
+GOS_TEST_GO_BROKEN=1 run_gos "$case_dir" bash "$script" current --json
+[ "$status" -eq 0 ] || fail "current --json with broken go failed: ${output}"
+assert_contains "$output" '{"found":false,"version":null,"current":null}' "current json none"
+pass "current --json reports found:false when no working Go exists"
+
+case_dir="${test_root}/cache-write-failure"
+mkdir -p "$case_dir"
+: >"${case_dir}/cache"   # a file where the cache dir should go: mkdir -p fails
+run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "install with unwritable cache failed: ${output}"
+assert_contains "$output" "could not write Go archive cache" "cache write warning"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "install with unwritable cache did not complete"
+pass "an unwritable cache warns but never blocks an install"
+
+case_dir="${test_root}/rollback-validation"
+mkdir -p "$case_dir"
+create_old_install "${case_dir}/go"
+run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "rollback-validation setup install failed: ${output}"
+cat >"${case_dir}/go.gos-rollback/bin/go" <<'BROKEN_GO'
+#!/usr/bin/env bash
+echo "go: exec format error" >&2
+exit 1
+BROKEN_GO
+chmod +x "${case_dir}/go.gos-rollback/bin/go"
+run_gos "$case_dir" bash "$script" rollback
+[ "$status" -ne 0 ] || fail "rollback to a broken installation should fail"
+assert_contains "$output" "rollback Go failed validation" "rollback validation error"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "failed rollback did not restore the current installation"
+pass "a broken rollback snapshot fails validation and restores the current install"
+
+case_dir="${test_root}/self-update-git"
+mkdir -p "${case_dir}/repo/.git"
+cp "$script" "${case_dir}/repo/gos"
+GOS_TEST_SELFUPDATE_SCRIPT="${case_dir}/repo/gos" run_gos "$case_dir" bash "${case_dir}/repo/gos" self-update
+[ "$status" -ne 0 ] || fail "self-update inside a git checkout should fail"
+assert_contains "$output" "runs from a git checkout" "self-update git guard"
+pass "self-update refuses to overwrite a git checkout"

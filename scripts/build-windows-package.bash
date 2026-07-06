@@ -29,6 +29,9 @@ cp LICENSE "$stage_dir/gos/LICENSE"
 # package metadata before the tag is created and reproduce the same asset later.
 find "$stage_dir/gos" -exec touch -t 200001010000 {} +
 chmod -R u=rwX,go=rX "$stage_dir/gos"
+# Pin the exec bit explicitly: u=rwX only preserves an existing bit, so the
+# zip contents (and its checksum) must not depend on the checkout's file mode.
+chmod 755 "$stage_dir/gos/gos.sh"
 
 mkdir -p "$(dirname "$out_path")"
 rm -f "$out_path"

@@ -50,7 +50,7 @@ jobs:
 
       - name: Bash syntax
         run: |
-          bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
+          bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
 
       - name: PowerShell installer syntax
         if: runner.os == 'Windows'
@@ -82,6 +82,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           bash tests/packaging.bash
+
+      - name: Run Homebrew tap automation tests
+        if: runner.os == 'Linux'
+        run: |
+          bash tests/homebrew-tap.bash
 
       - name: Run changelog automation tests
         run: |

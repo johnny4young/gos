@@ -37,16 +37,25 @@ url=""
 tap_repo="johnny4young/homebrew-tap"
 key_file=""
 
+take_value() {
+  local opt="$1" value="${2:-}"
+  if [ -z "$value" ]; then
+    echo "::error::${opt} requires a value" >&2
+    exit 2
+  fi
+  printf '%s\n' "$value"
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --kind) kind="$2"; shift 2 ;;
-    --name) name="$2"; shift 2 ;;
-    --version) version="$2"; shift 2 ;;
-    --sha256) sha256="$2"; shift 2 ;;
-    --template) template="$2"; shift 2 ;;
-    --url) url="$2"; shift 2 ;;
-    --tap-repo) tap_repo="$2"; shift 2 ;;
-    --deploy-key-file) key_file="$2"; shift 2 ;;
+    --kind) kind=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --name) name=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --version) version=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --sha256) sha256=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --template) template=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --url) url=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --tap-repo) tap_repo=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --deploy-key-file) key_file=$(take_value "$1" "${2:-}"); shift 2 ;;
     *) echo "::error::update-homebrew-tap: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
@@ -79,7 +88,7 @@ fi
 cleanup_key=""
 if [ -z "$key_file" ]; then
   if [ -z "${TAP_DEPLOY_KEY:-}" ]; then
-    echo "::warning::TAP_DEPLOY_KEY is not configured; update ${tap_repo} manually (docs/RELEASING.md)."
+    echo "::warning::TAP_DEPLOY_KEY is not configured; update ${tap_repo} manually (RELEASING.md)."
     exit 0
   fi
   key_file="$(mktemp)"
@@ -90,19 +99,46 @@ fi
 # Remove the key we created on exit. The hosted runner is ephemeral, but this keeps
 # the private key off disk the moment the script ends and stays correct on a
 # self-hosted runner. A caller-provided key file is left untouched.
-cleanup() { if [ -n "$cleanup_key" ]; then rm -f "$key_file"; fi; }
+cleanup() {
+  if [ -n "$cleanup_key" ]; then rm -f "$key_file"; fi
+  rm -f "${known_hosts_file:-}"
+}
 trap cleanup EXIT
 
+# --- pin GitHub's SSH host keys ---------------------------------------------------
+# accept-new is trust-on-first-use, and every hosted runner is a first use. The
+# GitHub meta API serves the current host keys over TLS (CA-validated — an
+# independent trust channel from the SSH connection it protects), so build a
+# known_hosts from it and require a match. If the API is unreachable, fall back
+# to accept-new with a warning rather than failing the release.
+known_hosts_file="$(mktemp)"
+host_key_policy="accept-new"
+if [ -n "${GOS_TAP_REMOTE:-}" ]; then
+  : # local test remote: SSH is never used, skip the host-key fetch
+elif command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
+  && curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 https://api.github.com/meta 2>/dev/null \
+     | jq -r '.ssh_keys[] | "github.com \(.)"' > "$known_hosts_file" 2>/dev/null \
+  && [ -s "$known_hosts_file" ]; then
+  host_key_policy="yes"
+else
+  echo "::warning::could not fetch GitHub SSH host keys from the meta API; falling back to accept-new."
+fi
+
 # --- clone the tap ---------------------------------------------------------------
-export GIT_SSH_COMMAND="ssh -i ${key_file} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+# GOS_TAP_REMOTE is a test hook: the suite points it at a local bare repo so the
+# publish flow can run without network or SSH.
+tap_remote="${GOS_TAP_REMOTE:-git@github.com:${tap_repo}.git}"
+export GIT_SSH_COMMAND="ssh -i ${key_file} -o IdentitiesOnly=yes -o UserKnownHostsFile=${known_hosts_file} -o StrictHostKeyChecking=${host_key_policy}"
 tap_dir="$(mktemp -d)"
-git clone --depth 1 "git@github.com:${tap_repo}.git" "$tap_dir"
+git clone --depth 1 "$tap_remote" "$tap_dir"
 
 # --- regenerate the tap file from the in-repo template ---------------------------
 # Start at the cask/class line so the template's repo-only header comment is dropped,
 # then substitute the published version + checksum (+ url for a formula). The 2-space
 # indent matches `brew style`'s canonical formatting.
 tap_file="${tap_dir}/${subdir}/${name}.rb"
+# First-time publish to a tap that never shipped this kind before.
+mkdir -p "${tap_dir}/${subdir}"
 sed_args=(-e "s|^  version \".*\"|  version \"${version}\"|" \
           -e "s|^  sha256 \".*\"|  sha256 \"${sha256}\"|")
 if [ -n "$url" ]; then
@@ -137,7 +173,25 @@ if git diff --cached --quiet; then
   exit 0
 fi
 git commit -m "chore(${name}): publish ${kind} v${version}"
-git push origin HEAD:main
+# Sibling repos can bump the shared tap concurrently; rebase and retry so a
+# lost push race does not fail the whole release.
+push_attempt=1
+until git push origin HEAD:main; do
+  if [ "$push_attempt" -ge 3 ]; then
+    echo "::error::failed to push to ${tap_repo} after ${push_attempt} attempts" >&2
+    exit 1
+  fi
+  push_attempt=$((push_attempt + 1))
+  sleep 2
+  # Under `set -e` a failed rebase (conflict, fetch error) would abort the whole
+  # script before the retry cap is reached, turning a transient race into a hard
+  # failure with a half-finished rebase. Absorb the failure, clean up any
+  # in-progress rebase, and let the loop retry / hit the ::error path cleanly.
+  if ! git pull --rebase origin main; then
+    git rebase --abort 2>/dev/null || true
+    echo "::warning::rebase onto ${tap_repo} main failed on attempt $((push_attempt - 1)); retrying" >&2
+  fi
+done
 
 echo "Updated ${tap_repo} → ${name} ${version}."
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then

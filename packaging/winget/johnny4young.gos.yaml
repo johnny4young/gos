@@ -3,6 +3,7 @@
 # asset and the manifest is validated with winget tooling.
 PackageIdentifier: johnny4young.gos
 PackageVersion: 1.5.0
+PackageLocale: en-US
 PackageName: gos
 Publisher: johnny4young
 License: MIT
@@ -21,6 +22,11 @@ PackageUrl: https://github.com/johnny4young/gos
 Installers:
   - Architecture: neutral
     InstallerType: zip
+    # zip installers must declare what winget should surface from the archive.
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: gos\gos.cmd
+        PortableCommandAlias: gos
     InstallerUrl: https://github.com/johnny4young/gos/releases/download/v1.5.0/gos-windows.zip
     InstallerSha256: 53cc21789fe7d1f093b0806c478ae3a0699e73e16db062f13505df66561572d8
 ManifestType: singleton

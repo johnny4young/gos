@@ -1,0 +1,69 @@
+name: Canary
+
+# The test suite is hermetic by design (fake curl, fake feed), which means
+# drift in the real go.dev feed format or download endpoints would otherwise
+# be discovered by users first. This nightly job exercises gos against the
+# live feed on every supported OS.
+
+on:
+  schedule:
+    - cron: '41 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  live-feed:
+    name: Live feed (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Make script executable
+        run: chmod +x gos.sh
+
+      - name: Query the live feed
+        run: |
+          ./gos.sh check
+          ./gos.sh list | tail -n 5
+          ./gos.sh platforms
+
+      - name: Install a pinned older Go with mandatory verification
+        env:
+          GOS_REQUIRE_CHECKSUM: feed
+        run: |
+          export GOS_INSTALL_DIR="$HOME/canary-go"
+          ./gos.sh install 1.24.0
+          "$GOS_INSTALL_DIR/bin/go" version | grep -F 'go1.24.0'
+
+      - name: Upgrade to latest and roll back
+        env:
+          GOS_REQUIRE_CHECKSUM: feed
+        run: |
+          export GOS_INSTALL_DIR="$HOME/canary-go"
+          ./gos.sh latest
+          "$GOS_INSTALL_DIR/bin/go" version
+          ./gos.sh rollback
+          "$GOS_INSTALL_DIR/bin/go" version | grep -F 'go1.24.0'
+
+      - name: Side-by-side mode against the live feed
+        if: runner.os != 'Windows'
+        env:
+          GOS_REQUIRE_CHECKSUM: feed
+        run: |
+          export GOS_INSTALL_DIR="$HOME/canary-sbs/go"
+          export GOS_VERSIONS_DIR="$HOME/canary-sbs/versions"
+          ./gos.sh install 1.24.0
+          ./gos.sh latest
+          ./gos.sh install 1.24.0   # instant switch, no download
+          ./gos.sh list --installed
+          "$GOS_INSTALL_DIR/bin/go" version | grep -F 'go1.24.0'

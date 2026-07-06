@@ -13,6 +13,12 @@ on:
 permissions:
   contents: read
 
+# Serialize releases: two overlapping runs would race the version-bump push
+# and could tag the wrong commit.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 defaults:
   run:
     shell: bash
@@ -24,7 +30,15 @@ jobs:
     outputs:
       version: ${{ steps.release-ref.outputs.version }}
       tag: ${{ steps.release-ref.outputs.tag }}
+      is_prerelease: ${{ steps.release-ref.outputs.is_prerelease }}
     steps:
+      # Only the tag-push ancestry check below needs the repository; a manual
+      # (workflow_dispatch) run validates its inputs from env alone.
+      - uses: actions/checkout@v7
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 0
+
       - name: Validate release ref
         id: release-ref
         env:
@@ -65,9 +79,29 @@ jobs:
               ;;
           esac
 
+          # Tag-push releases must point at a commit that is on main; manual
+          # releases are already restricted to the main ref above.
+          if [ "$EVENT_NAME" = "push" ]; then
+            git fetch origin main
+            TAG_COMMIT=$(git rev-parse "refs/tags/${TAG}^{commit}")
+            if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
+              printf '::error::Release tag %s does not point at a commit reachable from main\n' "$TAG"
+              exit 1
+            fi
+          fi
+
+          # A semver pre-release (1.2.3-rc1) carries a '-'. Compute the flag once
+          # here so every downstream job (gh-release prerelease flag, tap gating)
+          # reads one authoritative output instead of re-inlining contains().
+          IS_PRERELEASE=false
+          case "$VERSION" in
+            *-*) IS_PRERELEASE=true ;;
+          esac
+
           {
             printf 'version=%s\n' "$VERSION"
             printf 'tag=%s\n' "$TAG"
+            printf 'is_prerelease=%s\n' "$IS_PRERELEASE"
           } >> "$GITHUB_OUTPUT"
 
   release-preflight:
@@ -145,12 +179,17 @@ jobs:
         run: |
           : "${VERSION:?missing release version}"
           : "${TAG:?missing release tag}"
+          # The version stamped into gos.sh must match the tag being released.
+          grep -Fq "GOS_VERSION=\"${VERSION}\"" gos.sh || {
+            printf '::error::gos.sh was not stamped with GOS_VERSION=%s\n' "$VERSION"
+            exit 1
+          }
           git add gos.sh CHANGELOG.md packaging/chocolatey/gos.nuspec packaging/chocolatey/tools/chocolateyInstall.ps1 packaging/winget/johnny4young.gos.yaml
           git commit -m "release: ${TAG}"
           git tag "$TAG"
-          # Push only the new tag (avoid leaking unrelated local tags).
-          git push origin main
-          git push origin "$TAG"
+          # Atomic push of exactly the branch and the new tag: a half-pushed
+          # release (main updated, tag missing) cannot be retried cleanly.
+          git push --atomic origin main "$TAG"
 
   smoke-test:
     name: Smoke Test
@@ -159,7 +198,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -170,7 +209,14 @@ jobs:
         run: chmod +x gos.sh
 
       - name: Run version check
-        run: ./gos.sh version
+        env:
+          VERSION: ${{ needs.validate-release-ref.outputs.version }}
+        run: |
+          : "${VERSION:?missing release version}"
+          # Invoke once and reuse; the released script must report the tagged version.
+          reported=$(./gos.sh version)
+          echo "$reported"
+          test "$reported" = "gos v${VERSION}"
 
       - name: Run help check
         run: ./gos.sh help
@@ -200,6 +246,10 @@ jobs:
           GOS_SHA=$(sha256sum gos.sh | cut -d' ' -f1)
           sed -i "s|^GOS_RELEASE_TAG=.*|GOS_RELEASE_TAG=\"${TAG}\"|" install.sh
           sed -i "s|^GOS_EXPECTED_SHA256=.*|GOS_EXPECTED_SHA256=\"${GOS_SHA}\"|" install.sh
+          # sed exits 0 even when the anchor no longer matches; verify the patch
+          # landed so a release never ships an unpinned installer.
+          grep -Fq "GOS_RELEASE_TAG=\"${TAG}\"" install.sh
+          grep -Fq "GOS_EXPECTED_SHA256=\"${GOS_SHA}\"" install.sh
           printf 'Patched install.sh with TAG=%s and SHA256=%s\n' "$TAG" "$GOS_SHA"
 
       - name: Build Windows package asset
@@ -214,6 +264,10 @@ jobs:
           WINDOWS_SHA=$(sha256sum gos-windows.zip | cut -d' ' -f1)
           sed -i "s|^\$GosReleaseTag = .*|\$GosReleaseTag = '${TAG}'|" install.ps1
           sed -i "s|^\$GosExpectedZipSha256 = .*|\$GosExpectedZipSha256 = '${WINDOWS_SHA}'|" install.ps1
+          # sed exits 0 even when the anchor no longer matches; verify the patch
+          # landed so a release never ships an unpinned installer.
+          grep -Fq "\$GosReleaseTag = '${TAG}'" install.ps1
+          grep -Fq "\$GosExpectedZipSha256 = '${WINDOWS_SHA}'" install.ps1
           printf 'Patched install.ps1 with TAG=%s and SHA256=%s\n' "$TAG" "$WINDOWS_SHA"
 
       - name: Validate package metadata
@@ -253,6 +307,9 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.validate-release-ref.outputs.tag }}
+          # Pre-release tags (v1.2.3-rc1) must never become the release served
+          # by releases/latest/download/, which stable installer users consume.
+          prerelease: ${{ needs.validate-release-ref.outputs.is_prerelease == 'true' }}
           files: |
             gos.sh
             install.sh
@@ -264,6 +321,8 @@ jobs:
   update-formula:
     name: Update Homebrew Formula
     needs: [validate-release-ref, release]
+    # Pre-releases must not reach the Homebrew tap; brew serves one version.
+    if: ${{ needs.validate-release-ref.outputs.is_prerelease != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the released gos source

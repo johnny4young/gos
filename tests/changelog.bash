@@ -269,9 +269,54 @@ test_existing_release_section_fails() {
   printf 'ok - existing release section fails\n'
 }
 
+test_heading_only_unreleased_fails_without_mutation() {
+  local tmp_dir changelog before
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' RETURN
+  changelog="$tmp_dir/CHANGELOG.md"
+
+  cat > "$changelog" <<'CHANGELOG'
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [Unreleased]
+
+### Added
+
+### Fixed
+
+## [1.0.0] - 2025-01-15
+
+### Added
+
+- Initial release.
+
+[Unreleased]: https://github.com/johnny4young/gos/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/johnny4young/gos/releases/tag/v1.0.0
+CHANGELOG
+
+  before="$(<"$changelog")"
+
+  if GOS_CHANGELOG_FILE="$changelog" GOS_RELEASE_DATE="2026-05-07" GOS_PREVIOUS_TAG="v1.0.0" bash "$script" "1.1.0" >"$tmp_dir/out" 2>&1; then
+    printf 'not ok - heading-only Unreleased should fail instead of falling back to git notes\n' >&2
+    exit 1
+  fi
+
+  assert_contains "$tmp_dir/out" 'no "- " bullet items'
+
+  if [[ "$(<"$changelog")" != "$before" ]]; then
+    printf 'not ok - heading-only Unreleased failure should not mutate CHANGELOG.md\n' >&2
+    exit 1
+  fi
+
+  printf 'ok - heading-only Unreleased fails instead of silently discarding headings\n'
+}
+
 test_promotes_unreleased_notes
 test_empty_unreleased_without_commits_fails_without_mutation
 test_empty_unreleased_generates_notes_from_git
 test_check_mode_validates_without_mutation
 test_check_mode_empty_unreleased_fails_without_mutation
 test_existing_release_section_fails
+test_heading_only_unreleased_fails_without_mutation

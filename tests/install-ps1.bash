@@ -47,7 +47,12 @@ assert_contains install.ps1 "releases/download/\$GosReleaseTag/gos-windows.zip"
 assert_contains install.ps1 "raw.githubusercontent.com/\$GosRepo/main"
 assert_contains install.ps1 "Get-FileHash -LiteralPath"
 assert_contains install.ps1 "Expand-Archive -LiteralPath"
-assert_contains install.ps1 "SetEnvironmentVariable('Path'"
+# PATH edits must go through the registry API so REG_EXPAND_SZ values keep
+# their kind; [Environment]::SetEnvironmentVariable would flatten them.
+# shellcheck disable=SC2016
+assert_contains install.ps1 '$envKey.SetValue('"'"'Path'"'"''
+assert_contains install.ps1 "DoNotExpandEnvironmentNames"
+assert_not_contains install.ps1 "SetEnvironmentVariable('Path'"
 assert_contains install.ps1 "Git Bash was not found on PATH"
 assert_not_contains install.ps1 "Invoke-Expression"
 
@@ -55,7 +60,10 @@ assert_contains packaging/windows/gos.cmd 'where bash.exe'
 assert_contains packaging/windows/gos.cmd 'bash.exe "%~dp0gos.sh" %*'
 # shellcheck disable=SC2016
 assert_contains packaging/windows/uninstall.ps1 'Remove-Item -LiteralPath $resolvedInstallDir -Recurse -Force'
-assert_contains packaging/windows/uninstall.ps1 "SetEnvironmentVariable('Path'"
+# shellcheck disable=SC2016
+assert_contains packaging/windows/uninstall.ps1 '$envKey.SetValue('"'"'Path'"'"''
+assert_contains packaging/windows/uninstall.ps1 "DoNotExpandEnvironmentNames"
+assert_not_contains packaging/windows/uninstall.ps1 "SetEnvironmentVariable('Path'"
 assert_file tests/install-ps1.ps1
 
 pass "PowerShell installer files are present and guarded"

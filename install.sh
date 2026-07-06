@@ -45,8 +45,10 @@ _download() {
   fi
 }
 
+# "feed" is gos.sh's stricter variant; for the installer both values mean
+# "fail closed when the download cannot be verified".
 _require_checksum() {
-  [ "${GOS_REQUIRE_CHECKSUM:-}" = "1" ]
+  [ "${GOS_REQUIRE_CHECKSUM:-}" = "1" ] || [ "${GOS_REQUIRE_CHECKSUM:-}" = "feed" ]
 }
 
 # Verify integrity if a checksum is configured and tools are available.

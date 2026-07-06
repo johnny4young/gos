@@ -47,6 +47,7 @@ end
 
 release = workflow(".github/workflows/release.yml")
 ci = workflow(".github/workflows/ci.yml")
+canary = workflow(".github/workflows/canary.yml")
 readme = file_text("README.md")
 releasing = file_text("RELEASING.md")
 security = file_text("SECURITY.md")
@@ -199,6 +200,18 @@ update_formula_env = update_formula_steps.flat_map { |step| (step["env"] || {}).
 assert(update_formula_env.any? { |key, value| key == "TAP_DEPLOY_KEY" && value.to_s.include?("secrets.TAP_DEPLOY_KEY") }, "update-formula must push to the central tap over the TAP_DEPLOY_KEY deploy key")
 assert(!update_formula_runs.include?("HOMEBREW_TAP_TOKEN"), "update-formula must not use the deprecated homebrew-gos token")
 
+canary_on = workflow_on(canary)
+assert(canary_on.key?("schedule"), "canary workflow must run on a schedule")
+assert(canary_on.key?("workflow_dispatch"), "canary workflow must support manual runs")
+assert(canary.dig("permissions", "contents") == "read", "canary workflow must use read-only contents permission")
+canary_matrix = canary.dig("jobs", "live-feed", "strategy", "matrix", "os") || []
+%w[ubuntu-latest macos-latest windows-latest].each do |os|
+  assert(canary_matrix.include?(os), "canary matrix must include #{os}")
+end
+canary_runs = canary.dig("jobs", "live-feed", "steps").map { |step| step["run"].to_s }.join("\n")
+assert(canary_runs.include?("./gos.sh check"), "canary must run gos check against the live feed")
+assert(canary_runs.include?("./gos.sh rollback"), "canary must exercise rollback against a real install")
+
 ci_on = workflow_on(ci)
 assert(ci_on.key?("pull_request"), "CI must run on pull_request")
 assert(ci_on.dig("push", "branches")&.include?("main"), "CI must run on pushes to main")
@@ -236,12 +249,13 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
   "bash tests/checksum.bash",
   "bash tests/detection.bash",
   "bash tests/features.bash",
+  "bash tests/homebrew-tap.bash",
   "bash tests/install-transaction.bash",
   "bash tests/install-sh.bash",
   "bash tests/install-ps1.bash",
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
-  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -272,7 +286,6 @@ packaging_text = packaging_files.map { |path| File.read(path) }.join("\n")
   "packaging/chocolatey/gos.nuspec",
   "packaging/chocolatey/tools/chocolateyInstall.ps1",
   "packaging/chocolatey/tools/chocolateyUninstall.ps1",
-  "packaging/chocolatey/tools/gos.cmd",
   "packaging/winget/johnny4young.gos.yaml"
 ].each do |path|
   assert(File.file?(path), "packaging must keep #{path}")
