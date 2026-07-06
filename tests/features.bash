@@ -396,6 +396,23 @@ if [ -s "${case_dir}/urls.log" ]; then
 fi
 pass "install dir guardrails refuse dangerous paths before any work"
 
+# `gos env` output is meant to be run with `eval "$(gos env)"`, so a path
+# carrying shell metacharacters must be single-quoted, never interpolated raw,
+# or it becomes command injection.
+case_dir="${test_root}/env-injection"
+mkdir -p "$case_dir"
+# shellcheck disable=SC2016
+evil_dir='/tmp/x";id > '"${case_dir}"'/pwned;"go'
+rm -f "${case_dir}/pwned"
+GOS_TEST_INSTALL_DIR="$evil_dir" run_gos "$case_dir" bash "$script" env
+[ "$status" -eq 0 ] || fail "env with a hostile install dir failed: ${output}"
+env_line="$output"
+# Run the emitted line the way the README tells users to.
+( eval "$env_line" ) >/dev/null 2>&1 || true
+[ -f "${case_dir}/pwned" ] && fail "gos env output executed injected command via eval"
+assert_contains "$env_line" "export PATH='" "env single-quotes the path"
+pass "gos env output is injection-safe under eval"
+
 case_dir="${test_root}/trailing-slash"
 mkdir -p "$case_dir"
 create_old_install "${case_dir}/go"
@@ -620,7 +637,7 @@ pass "rollback twice rolls forward to the displaced installation"
 case_dir="${test_root}/env"
 run_gos "$case_dir" bash "$script" env
 [ "$status" -eq 0 ] || fail "env failed: ${output}"
-assert_contains "$output" "export PATH=\"${case_dir}/go/bin:\$PATH\"" "env posix"
+assert_contains "$output" "export PATH='${case_dir}/go/bin':\"\$PATH\"" "env posix"
 run_gos "$case_dir" bash "$script" env --fish
 [ "$status" -eq 0 ] || fail "env --fish failed: ${output}"
 assert_contains "$output" "fish_add_path --path '${case_dir}/go/bin'" "env fish"

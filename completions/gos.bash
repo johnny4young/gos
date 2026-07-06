@@ -4,7 +4,7 @@
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   local commands="latest install use pin check rollback uninstall prune current list platforms env doctor self-update version help"
-  local cmd_index=1 cmd words=""
+  local cmd_index=1 cmd words="" line
 
   # A leading --json shifts the command to the next position (gos --json list).
   if [ "${COMP_WORDS[1]:-}" = "--json" ]; then

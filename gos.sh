@@ -34,10 +34,24 @@ GOS_ACTIVATION_BACKUP=""
 # Temp staging is cleaned from a trap so interrupted installs (Ctrl-C, kill)
 # do not leak partially extracted archives.
 _gos_cleanup_tmp() {
-  if [ -n "$GOS_ACTIVATION_BACKUP" ] && [ -d "$GOS_ACTIVATION_BACKUP" ] && [ ! -e "$GOS_INSTALL_DIR" ]; then
+  # Restore the backup only if the install slot is genuinely empty. -L catches a
+  # side-by-side symlink backup (for which -d would be false) and guards against
+  # clobbering a symlink that the activation step already managed to create.
+  if [ -n "$GOS_ACTIVATION_BACKUP" ] \
+     && { [ -e "$GOS_ACTIVATION_BACKUP" ] || [ -L "$GOS_ACTIVATION_BACKUP" ]; } \
+     && [ ! -e "$GOS_INSTALL_DIR" ] && [ ! -L "$GOS_INSTALL_DIR" ]; then
     echo "Interrupted during activation; restoring the previous Go installation..." >&2
-    mv "$GOS_ACTIVATION_BACKUP" "$GOS_INSTALL_DIR" 2>/dev/null \
-      || echo "Warning: could not restore ${GOS_ACTIVATION_BACKUP}; move it back to ${GOS_INSTALL_DIR} manually." >&2
+    # The backup was created with sudo for root-owned installs (default
+    # /usr/local/go), so a plain mv cannot restore it; escalate on failure or the
+    # trap would leave the machine with no Go at all.
+    if ! mv "$GOS_ACTIVATION_BACKUP" "$GOS_INSTALL_DIR" 2>/dev/null; then
+      if [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null \
+         && sudo mv "$GOS_ACTIVATION_BACKUP" "$GOS_INSTALL_DIR" 2>/dev/null; then
+        :
+      else
+        echo "Warning: could not restore ${GOS_ACTIVATION_BACKUP}; move it back to ${GOS_INSTALL_DIR} manually." >&2
+      fi
+    fi
   fi
   if [ -n "$GOS_TMP_DIR" ] && [ -d "$GOS_TMP_DIR" ]; then
     rm -rf "$GOS_TMP_DIR"
@@ -109,6 +123,29 @@ _gos_validate_version() {
   fi
 }
 
+# Reject path values that are unsafe to interpolate or to feed to privileged
+# rm -rf/mv. Shared by every user-controlled directory knob so a hardening added
+# here (e.g. the shell-metacharacter denylist) can never drift between them.
+# Usage: _gos_reject_unsafe_path <var-name> <value>
+_gos_reject_unsafe_path() {
+  local label="$1" value="$2"
+  # Reject control characters that make paths ambiguous in logs and commands.
+  case "$value" in
+    *$'\n'*|*$'\r'*|*$'\t'*)
+      echo "Error: ${label} must not contain control characters." >&2
+      return 1
+      ;;
+  esac
+  # Reject . and .. components; without canonicalization they would let a path
+  # like /usr/local/../../etc/go slip past the system-critical denylist.
+  case "/${value}/" in
+    *"/../"*|*"/./"*)
+      echo "Error: ${label}='${value}' must not contain . or .. path components." >&2
+      return 1
+      ;;
+  esac
+}
+
 # Guard against catastrophic rm -rf on dangerous paths.
 _gos_validate_install_dir() {
   local dir="$1"
@@ -125,21 +162,7 @@ _gos_validate_install_dir() {
       return 1
       ;;
   esac
-  # Reject control characters that make paths ambiguous in logs and commands
-  case "$dir" in
-    *$'\n'*|*$'\r'*|*$'\t'*)
-      echo "Error: GOS_INSTALL_DIR must not contain control characters." >&2
-      return 1
-      ;;
-  esac
-  # Reject . and .. components; without canonicalization they would let a path
-  # like /usr/local/../../etc/go slip past the system-critical denylist below.
-  case "/${dir}/" in
-    *"/../"*|*"/./"*)
-      echo "Error: GOS_INSTALL_DIR='${dir}' must not contain . or .. path components." >&2
-      return 1
-      ;;
-  esac
+  _gos_reject_unsafe_path "GOS_INSTALL_DIR" "$dir" || return 1
   # Reject known system-critical roots
   case "$dir" in
     /|/usr|/etc|/home|/var|/bin|/sbin|/lib|/opt|/tmp|/root|/sys|/proc|/dev)
@@ -182,18 +205,7 @@ _gos_validate_versions_dir() {
       return 1
       ;;
   esac
-  case "$GOS_VERSIONS_DIR" in
-    *$'\n'*|*$'\r'*|*$'\t'*)
-      echo "Error: GOS_VERSIONS_DIR must not contain control characters." >&2
-      return 1
-      ;;
-  esac
-  case "/${GOS_VERSIONS_DIR}/" in
-    *"/../"*|*"/./"*)
-      echo "Error: GOS_VERSIONS_DIR='${GOS_VERSIONS_DIR}' must not contain . or .. path components." >&2
-      return 1
-      ;;
-  esac
+  _gos_reject_unsafe_path "GOS_VERSIONS_DIR" "$GOS_VERSIONS_DIR" || return 1
 }
 
 _gos_versions_mode() {
@@ -1520,6 +1532,24 @@ cmd_uninstall() {
   echo "Uninstalled go${version} from ${version_dir}."
 }
 
+# Single-quote a value so it is inert when the caller runs it through eval.
+# Wrapping in single quotes neutralizes every shell metacharacter; an embedded
+# single quote is closed, escaped, and reopened ('\''). This is what keeps
+# `eval "$(gos env)"` safe when GOS_INSTALL_DIR contains shell metacharacters.
+_gos_shquote_posix() {
+  local s=${1//\'/\'\\\'\'}
+  printf "'%s'" "$s"
+}
+
+# Single-quote a value for `gos env --fish | source`. Inside fish single quotes
+# only backslash and the single quote itself are special.
+_gos_shquote_fish() {
+  local s=$1
+  s=${s//\\/\\\\}
+  s=${s//\'/\\\'}
+  printf "'%s'" "$s"
+}
+
 # Print the shell configuration needed to put the managed Go on PATH.
 # Usage: eval "$(gos env)"    or    gos env --fish | source
 cmd_env() {
@@ -1549,18 +1579,25 @@ cmd_env() {
   fi
 
   if [ "$shell_kind" = "fish" ]; then
-    printf "fish_add_path --path '%s'\n" "$go_bin"
+    printf 'fish_add_path --path %s\n' "$(_gos_shquote_fish "$go_bin")"
   else
-    # $PATH is intentionally literal: it must expand in the user's shell.
+    # The path is single-quoted so any metacharacter is inert; $PATH is left
+    # outside the quotes so the user's shell still expands it.
     # shellcheck disable=SC2016
-    printf 'export PATH="%s:$PATH"\n' "$go_bin"
+    printf 'export PATH=%s:"$PATH"\n' "$(_gos_shquote_posix "$go_bin")"
   fi
 }
 
 # Resolve the on-disk path of the running script, following symlinks when the
 # platform allows it (git-clone setups symlink gos -> gos.sh).
 _gos_self_path() {
-  local src="${BASH_SOURCE[0]}"
+  # BASH_SOURCE[0] is unbound under `set -u` when gos runs from stdin
+  # (curl ... | bash -s doctor), so default it and fail cleanly rather than
+  # aborting with "unbound variable" and silently resolving to the caller's cwd.
+  local src="${BASH_SOURCE[0]:-}"
+  if [ -z "$src" ] || [ "$src" = "bash" ] || [ "$src" = "sh" ]; then
+    return 1
+  fi
 
   if command -v realpath &>/dev/null; then
     realpath "$src" 2>/dev/null && return 0
@@ -1613,25 +1650,34 @@ cmd_self_update() {
     return 0
   fi
 
-  # Verify against the checksum manifest published with the release.
+  # Verify against the checksum manifest published with the release. Unlike a
+  # Go archive install (which may fall back to a warning), self-update replaces
+  # the running script — often via sudo — so it always fails closed: an
+  # unverifiable download is refused regardless of GOS_REQUIRE_CHECKSUM.
   expected_sha=""
   if _gos_download "${GOS_RELEASE_BASE_URL}/checksums.txt" "$checksums" 2>/dev/null; then
-    expected_sha=$(awk '$2 == "gos.sh" { print $1; exit }' "$checksums")
+    # Accept both text-mode ("<hash>  gos.sh") and binary-mode ("<hash> *gos.sh")
+    # sha256sum manifests so a future release format change cannot silently
+    # blank out the digest and disable verification.
+    expected_sha=$(awk '{ f=$2; sub(/^\*/, "", f); if (f == "gos.sh") { print $1; exit } }' "$checksums")
   fi
-  if [ -n "$expected_sha" ]; then
-    actual_sha=$(_gos_sha256 "$new_script")
-    if [ -z "$actual_sha" ]; then
-      _gos_checksum_unavailable "no SHA256 tool output was available" || return 1
-    elif [ "$actual_sha" != "$expected_sha" ]; then
-      echo "Error: checksum mismatch for the downloaded gos release." >&2
-      echo "Expected ${expected_sha}, got ${actual_sha}. Aborting." >&2
-      return 1
-    else
-      echo "Checksum verified."
-    fi
-  else
-    _gos_checksum_unavailable "the release checksum manifest was unavailable" || return 1
+  if [ -z "$expected_sha" ]; then
+    echo "Error: could not obtain the published checksum for gos.sh; refusing to self-update from an unverifiable download." >&2
+    echo "The release checksums.txt manifest was missing or unreadable. Re-run the installer instead (see the README)." >&2
+    return 1
   fi
+  actual_sha=$(_gos_sha256 "$new_script")
+  if [ -z "$actual_sha" ]; then
+    echo "Error: no SHA256 tool is available to verify the downloaded gos release; refusing to self-update." >&2
+    echo "Install sha256sum or shasum, or re-run the installer instead." >&2
+    return 1
+  fi
+  if [ "$actual_sha" != "$expected_sha" ]; then
+    echo "Error: checksum mismatch for the downloaded gos release." >&2
+    echo "Expected ${expected_sha}, got ${actual_sha}. Aborting." >&2
+    return 1
+  fi
+  echo "Checksum verified."
 
   # A syntax check catches truncated or mangled downloads before activation.
   if ! bash -n "$new_script" 2>/dev/null; then
@@ -1877,14 +1923,19 @@ cmd_doctor() {
     _gos_doctor_check "problem" "extract" "tar is not available" "Install tar."
   fi
 
-  local script_dir
+  local script_dir self_path
   # Resolve symlinks (a symlinked gos on PATH is common for git-clone
   # installs) so the completions check looks next to the real script.
-  script_dir=$(dirname "$(_gos_self_path)")
-  if [ -f "${script_dir}/completions/gos.bash" ] && [ -f "${script_dir}/completions/gos.zsh" ] && [ -f "${script_dir}/completions/gos.fish" ]; then
-    _gos_doctor_check "ok" "completions" "Bash, Zsh, and Fish completion files are present"
+  if self_path=$(_gos_self_path); then
+    script_dir=$(dirname "$self_path")
+    if [ -f "${script_dir}/completions/gos.bash" ] && [ -f "${script_dir}/completions/gos.zsh" ] && [ -f "${script_dir}/completions/gos.fish" ]; then
+      _gos_doctor_check "ok" "completions" "Bash, Zsh, and Fish completion files are present"
+    else
+      _gos_doctor_check "warn" "completions" "one or more completion files are missing"
+    fi
   else
-    _gos_doctor_check "warn" "completions" "one or more completion files are missing"
+    # No on-disk script path (e.g. run from stdin: curl ... | bash -s doctor).
+    _gos_doctor_check "warn" "completions" "cannot locate the gos script on disk to check completions"
   fi
 
   if _gos_json_enabled; then
