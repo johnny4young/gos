@@ -37,16 +37,25 @@ url=""
 tap_repo="johnny4young/homebrew-tap"
 key_file=""
 
+take_value() {
+  local opt="$1" value="${2:-}"
+  if [ -z "$value" ]; then
+    echo "::error::${opt} requires a value" >&2
+    exit 2
+  fi
+  printf '%s\n' "$value"
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --kind) kind="$2"; shift 2 ;;
-    --name) name="$2"; shift 2 ;;
-    --version) version="$2"; shift 2 ;;
-    --sha256) sha256="$2"; shift 2 ;;
-    --template) template="$2"; shift 2 ;;
-    --url) url="$2"; shift 2 ;;
-    --tap-repo) tap_repo="$2"; shift 2 ;;
-    --deploy-key-file) key_file="$2"; shift 2 ;;
+    --kind) kind=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --name) name=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --version) version=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --sha256) sha256=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --template) template=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --url) url=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --tap-repo) tap_repo=$(take_value "$1" "${2:-}"); shift 2 ;;
+    --deploy-key-file) key_file=$(take_value "$1" "${2:-}"); shift 2 ;;
     *) echo "::error::update-homebrew-tap: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done

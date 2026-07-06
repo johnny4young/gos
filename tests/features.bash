@@ -594,6 +594,37 @@ run_gos "$case_dir" bash "$script" install 1.21.6 --json
 assert_contains "$output" "unexpected argument for gos install" "install trailing argument"
 pass "install rejects trailing arguments instead of ignoring them"
 
+case_dir="${test_root}/cli-extra-args"
+run_gos "$case_dir" bash "$script" latest extra
+[ "$status" -ne 0 ] || fail "latest with trailing argument should fail"
+assert_contains "$output" "unexpected argument for gos latest" "latest trailing argument"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "latest with a trailing argument must not reach the network"
+fi
+run_gos "$case_dir" bash "$script" platforms 1.21.6 extra
+[ "$status" -ne 0 ] || fail "platforms with trailing argument should fail"
+assert_contains "$output" "unexpected argument for gos platforms" "platforms trailing argument"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "platforms with a trailing argument must not reach the network"
+fi
+run_gos "$case_dir" bash "$script" use "$case_dir" extra
+[ "$status" -ne 0 ] || fail "use with trailing argument should fail"
+assert_contains "$output" "unexpected argument for gos use" "use trailing argument"
+(
+  cd "$case_dir"
+  run_gos "$case_dir" bash "$script" pin 1.21.6 extra
+  [ "$status" -ne 0 ] || fail "pin with trailing argument should fail"
+  assert_contains "$output" "unexpected argument for gos pin" "pin trailing argument"
+  [ ! -f .go-version ] || fail "pin with a trailing argument must not write .go-version"
+)
+run_gos "$case_dir" bash "$script" rollback extra
+[ "$status" -ne 0 ] || fail "rollback with trailing argument should fail"
+assert_contains "$output" "unexpected argument for gos rollback" "rollback trailing argument"
+run_gos "$case_dir" bash "$script" self-update extra
+[ "$status" -ne 0 ] || fail "self-update with trailing argument should fail"
+assert_contains "$output" "unexpected argument for gos self-update" "self-update trailing argument"
+pass "single-purpose commands reject trailing arguments instead of ignoring them"
+
 case_dir="${test_root}/corrupted-cache"
 run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "corrupted-cache setup install failed: ${output}"
@@ -697,6 +728,16 @@ assert_contains "$output" "is the active version" "uninstall active guard"
 GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.20.0
 [ "$status" -eq 0 ] || fail "uninstall failed: ${output}"
 [ ! -d "${versions_dir}/go1.20.0" ] || fail "uninstall left the version directory"
+[ -L "${case_dir}/go.gos-rollback" ] || fail "rollback link should remain as a dangling symlink after uninstalling its target"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.20.0
+[ "$status" -eq 0 ] || fail "install after dangling rollback failed: ${output}"
+if printf '%s\n' "$output" | grep -q "rollback was not saved"; then
+  fail "dangling rollback symlink should be replaced before saving a new rollback"
+fi
+[ -L "${case_dir}/go.gos-rollback" ] || fail "install after dangling rollback did not save a rollback link"
+[ "$(readlink "${case_dir}/go.gos-rollback")" = "${versions_dir}/go1.21.6" ] || fail "rollback link was not refreshed after replacing a dangling symlink"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "switch back after dangling rollback test failed: ${output}"
 GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.19.0
 [ "$status" -ne 0 ] || fail "uninstalling a missing version should fail"
 assert_contains "$output" "is not installed" "uninstall missing version"

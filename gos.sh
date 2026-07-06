@@ -752,7 +752,10 @@ _gos_save_rollback_backup() {
   local backup_dir="$1" rollback_dir
   rollback_dir=$(_gos_rollback_dir)
 
-  if [ -e "$rollback_dir" ] && ! _gos_sudo rm -rf "$rollback_dir"; then
+  # -L catches a dangling rollback symlink left after uninstalling the version
+  # it pointed at; without removing that path first, the mv below fails and the
+  # otherwise-good backup is stranded outside the rollback slot.
+  if { [ -e "$rollback_dir" ] || [ -L "$rollback_dir" ]; } && ! _gos_sudo rm -rf "$rollback_dir"; then
     echo "Warning: failed to remove existing rollback installation at ${rollback_dir}." >&2
     _gos_warn_rollback_unavailable "$backup_dir" "$rollback_dir"
     return 0
@@ -813,25 +816,31 @@ _gos_activate_install() {
       return 1
     fi
   fi
-  # The install dir exists again; the interrupt trap no longer needs to act.
-  GOS_ACTIVATION_BACKUP=""
-
+  # Keep GOS_ACTIVATION_BACKUP armed through validation: a validation-failure
+  # restore below deletes GOS_INSTALL_DIR before moving the backup back, so if it
+  # is interrupted (Ctrl-C between its rm and mv) the EXIT trap is the only thing
+  # that can put the previous install back. Clearing it here would disarm that.
   go_bin="${GOS_INSTALL_DIR}/bin/go"
   if [ ! -x "$go_bin" ]; then
     echo "Error: activated Go installation is missing bin/go." >&2
     _gos_restore_backup "$backup_dir" || true
+    GOS_ACTIVATION_BACKUP=""
     return 1
   fi
 
   if ! version_output=$("$go_bin" version 2>&1); then
     echo "Error: activated Go failed validation: ${version_output}" >&2
     _gos_restore_backup "$backup_dir" || true
+    GOS_ACTIVATION_BACKUP=""
     return 1
   fi
 
   if [ -n "$backup_dir" ]; then
     _gos_save_rollback_backup "$backup_dir"
   fi
+  # The new install is validated and in place and the backup has been consumed
+  # (saved as rollback or restored); the trap no longer needs to act.
+  GOS_ACTIVATION_BACKUP=""
 
   echo "Done! ${version_output}"
 }
@@ -1208,6 +1217,12 @@ _gos_json_array_from_lines() {
 # ─── Commands ─────────────────────────────────────────────────────────────────
 
 cmd_latest() {
+  if [ "$#" -gt 0 ]; then
+    echo "Error: unexpected argument for gos latest: ${1}" >&2
+    echo "Usage: gos latest" >&2
+    return 1
+  fi
+
   echo "Fetching latest stable Go version..."
   local latest current
 
@@ -1438,6 +1453,10 @@ cmd_platforms() {
       GOS_OUTPUT_JSON=1
     elif [ -z "$version" ]; then
       version="${arg#go}"
+    else
+      echo "Error: unexpected argument for gos platforms: ${arg}" >&2
+      echo "Usage: gos platforms [version] [--json]" >&2
+      return 1
     fi
   done
 
@@ -1473,6 +1492,12 @@ cmd_platforms() {
 cmd_use() {
   local start_dir="${1:-$PWD}" resolved version source
 
+  if [ "$#" -gt 1 ]; then
+    echo "Error: unexpected argument for gos use: ${2}" >&2
+    echo "Usage: gos use [path]" >&2
+    return 1
+  fi
+
   if [ "$start_dir" = "--json" ]; then
     echo "Error: gos use does not support --json." >&2
     return 1
@@ -1498,6 +1523,11 @@ cmd_pin() {
     echo "Usage: gos pin <version>  e.g. gos pin 1.24.0" >&2
     return 1
   fi
+  if [ "$#" -gt 1 ]; then
+    echo "Error: unexpected argument for gos pin: ${2}" >&2
+    echo "Usage: gos pin <version>  e.g. gos pin 1.24.0" >&2
+    return 1
+  fi
 
   version="${version#go}"
   _gos_validate_version "$version" || return 1
@@ -1506,6 +1536,12 @@ cmd_pin() {
 }
 
 cmd_rollback() {
+  if [ "$#" -gt 0 ]; then
+    echo "Error: unexpected argument for gos rollback: ${1}" >&2
+    echo "Usage: gos rollback" >&2
+    return 1
+  fi
+
   _gos_activate_rollback
 }
 
@@ -1668,6 +1704,12 @@ cmd_self_update() {
   local script_path script_dir tmp_dir new_script checksums
   local expected_sha actual_sha new_version
 
+  if [ "$#" -gt 0 ]; then
+    echo "Error: unexpected argument for gos self-update: ${1}" >&2
+    echo "Usage: gos self-update" >&2
+    return 1
+  fi
+
   script_path=$(_gos_self_path) || {
     echo "Error: could not resolve the path of the running gos script." >&2
     return 1
@@ -1816,14 +1858,14 @@ cmd_prune() {
   rollback_dir=$(_gos_rollback_dir)
   rollback_state="none"
   if [ "$prune_rollback" = "true" ]; then
-    if [ -d "$rollback_dir" ]; then
+    if [ -d "$rollback_dir" ] || [ -L "$rollback_dir" ]; then
       _gos_sudo rm -rf "$rollback_dir" || return 1
       rollback_state="removed"
       _gos_json_enabled || echo "Removed rollback installation at ${rollback_dir}."
     else
       _gos_json_enabled || echo "No rollback installation found at ${rollback_dir}."
     fi
-  elif [ -d "$rollback_dir" ]; then
+  elif [ -d "$rollback_dir" ] || [ -L "$rollback_dir" ]; then
     rollback_state="kept"
     _gos_json_enabled || echo "Rollback installation kept at ${rollback_dir} (remove it with: gos prune --rollback)."
   fi
@@ -2112,19 +2154,19 @@ main() {
       ;;
     use)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      cmd_use "${1:-}"
+      cmd_use "$@"
       ;;
-    pin)       cmd_pin "${1:-}" ;;
+    pin)       cmd_pin "$@" ;;
     rollback)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      cmd_rollback
+      cmd_rollback "$@"
       ;;
     prune)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       cmd_prune "$@"
       ;;
     check)     cmd_check "$@" ;;
-    self-update|selfupdate) cmd_self_update ;;
+    self-update|selfupdate) cmd_self_update "$@" ;;
     uninstall)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       cmd_uninstall "$@"

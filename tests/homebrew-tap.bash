@@ -35,6 +35,15 @@ assert_contains() {
 command -v git >/dev/null 2>&1 || fail "git is required for the tap tests"
 command -v ruby >/dev/null 2>&1 || fail "ruby is required for the tap tests"
 
+missing_value_output=""
+missing_value_status=0
+set +e
+missing_value_output=$(bash "$script" --kind 2>&1)
+missing_value_status=$?
+set -e
+[ "$missing_value_status" -eq 2 ] || fail "missing option values should fail with usage status"
+assert_contains "$missing_value_output" "--kind requires a value" "missing option value"
+
 # Seed a bare "tap" repository with an empty main branch.
 tap_remote="${test_root}/tap.git"
 seed_dir="${test_root}/seed"
