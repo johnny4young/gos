@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GOS_VERSION="1.5.0"
+GOS_VERSION="1.6.0"
 GOS_INSTALL_DIR="${GOS_INSTALL_DIR:-/usr/local/go}"
 # Strip trailing slashes so sibling paths (backup, rollback) are computed as
 # true siblings: /usr/local/go/ would otherwise yield /usr/local/go/.gos-backup.

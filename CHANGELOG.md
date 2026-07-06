@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-07-06
+
 ### Added
 
 - Add opt-in side-by-side version management: with `GOS_VERSIONS_DIR` set, every Go version stays installed under its own directory, `GOS_INSTALL_DIR` becomes a symlink to the active one, switching is an instant re-link, and `gos uninstall <version>` plus `gos list --installed` manage the set.
@@ -182,7 +184,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Homebrew formula
 
 
-[Unreleased]: https://github.com/johnny4young/gos/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/johnny4young/gos/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/johnny4young/gos/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/johnny4young/gos/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/johnny4young/gos/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/johnny4young/gos/releases/tag/v1.4.2

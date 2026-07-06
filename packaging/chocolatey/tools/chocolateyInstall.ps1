@@ -1,8 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
 $toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$url = 'https://github.com/johnny4young/gos/releases/download/v1.5.0/gos-windows.zip'
-$checksum = '53cc21789fe7d1f093b0806c478ae3a0699e73e16db062f13505df66561572d8'
+$url = 'https://github.com/johnny4young/gos/releases/download/v1.6.0/gos-windows.zip'
+$checksum = '2975ea07a8e3c7774f5971e1e570e4f4b95fb2c9a55a89e63a3fce33daf58f4a'
 $zipPath = Join-Path $toolsDir 'gos-windows.zip'
 $installDir = Join-Path $toolsDir 'gos'
 $gosPath = Join-Path $installDir 'gos.sh'
