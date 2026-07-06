@@ -33,7 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
-- Interrupted activations now restore the previous installation from an exit trap, and `gos prune` reports (and `--rollback` removes) orphaned crash-residue backups.
+- Interrupted activations now restore the previous installation from an exit trap — including a root-owned install, which the trap now restores with sudo — and the backup stays armed through validation so an interrupt during a validation-failure restore is still recovered. `gos prune` reports (and `--rollback` removes) orphaned crash-residue backups.
 - `gos install`/`gos latest` no longer skip installing when a matching `go` elsewhere on `PATH` masks a missing or stale managed install.
 - `_gos_sudo` keeps command stdout and stderr separate, so tool warnings no longer leak into data output.
 - The Homebrew tap publish pins GitHub's SSH host keys (fetched over TLS from the GitHub meta API) instead of trust-on-first-use.
@@ -46,7 +46,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `gos latest` on a machine without Go prints `Current: none` instead of `Current: gonone`.
 - `gos doctor` no longer reports a false checksum-tool warning when gos runs from stdin (`curl | bash -s doctor`), resolves symlinked installs when checking completions, and recognizes `go.exe` under the install dir on Windows.
 - `gos platforms` without `jq`/`python3` no longer emits source/installer artifacts (e.g. `go1.x.src.tar.gz`) as bogus platforms, and the last-resort feed parser no longer drops rc/beta versions.
-- `gos install` rejects unexpected trailing arguments instead of silently ignoring them.
+- All single-purpose commands (`install`, `uninstall`, `latest`, `platforms`, `use`, `pin`, `rollback`, `self-update`) reject unexpected trailing arguments instead of silently ignoring them, and `gos check`/`current`/`version`/`doctor` reject unknown flags.
+- `gos uninstall` resolves a bare `X.Y` to the matching installed patch release (like `gos install`), and its active-version guard compares by device and inode so a differently spelled but equivalent versions directory cannot bypass it.
+- Rollback save and `gos prune` handle a dangling rollback symlink left after uninstalling its target, replacing it instead of stranding the newly saved backup.
+- `gos doctor`'s checksum-hash check now hashes a throwaway file, catching a present-but-broken SHA256 tool, and `_gos_self_path` resolves symlinks without `realpath` on older macOS.
 - `.go-version`/`go.mod` lookup now also finds manifests at the filesystem root.
 - The release workflow now verifies installer patching, pushes the release commit and tag atomically, marks `-rc` versions as pre-releases (keeping them out of `releases/latest` and the Homebrew tap), requires tag-push releases to point at commits on `main`, asserts the stamped `GOS_VERSION` matches the tag, and serializes concurrent runs.
 - The Windows release package pins `gos.sh`'s executable bit so the zip checksum cannot drift with checkout file modes.
@@ -59,6 +62,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Sudo retry detection now works on non-English locales.
 - `gos doctor` completions check now resolves the script directory correctly when invoked as `bash gos.sh`.
 - Feature tests no longer hard-code the released version, and Ruby-based checks run under any locale.
+
+### Security
+
+- `gos env` now single-quotes the emitted `PATH` entry, so a `GOS_INSTALL_DIR` containing shell metacharacters can no longer inject commands when the documented `eval "$(gos env)"` (or `gos env --fish | source`) runs.
+- `gos self-update` now fails closed: it refuses to replace the running script when the release `checksums.txt` manifest is missing or unreadable, instead of proceeding with an unverifiable download.
 
 ## [1.5.0] - 2026-05-12
 
