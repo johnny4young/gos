@@ -691,7 +691,9 @@ _gos_restore_backup() {
   echo "Rolling back Go installation..."
   _gos_sudo rm -rf "$GOS_INSTALL_DIR" || return 1
 
-  if [ -n "$backup_dir" ] && [ -d "$backup_dir" ]; then
+  # -L so a side-by-side symlink backup is restored too; -d alone would silently
+  # drop it and leave the install slot empty.
+  if [ -n "$backup_dir" ] && { [ -e "$backup_dir" ] || [ -L "$backup_dir" ]; }; then
     _gos_sudo mv "$backup_dir" "$GOS_INSTALL_DIR" || return 1
   fi
 }
@@ -732,7 +734,10 @@ _gos_activate_staged_install() {
   local backup_dir=""
   local version_output
 
-  if [ -e "$GOS_INSTALL_DIR" ]; then
+  # -L also catches a (possibly dangling) symlink left by a previous
+  # side-by-side install; without it the mv below fails with ENOTDIR because
+  # the slot is a symlink, not the empty path a plain [ -e ] test assumes.
+  if [ -e "$GOS_INSTALL_DIR" ] || [ -L "$GOS_INSTALL_DIR" ]; then
     backup_dir="${GOS_INSTALL_DIR}.gos-backup.$$"
     if [ -e "$backup_dir" ]; then
       echo "Error: backup path already exists: ${backup_dir}" >&2
@@ -1499,6 +1504,11 @@ cmd_uninstall() {
     echo "Usage: gos uninstall <version>  e.g. gos uninstall 1.24.0" >&2
     return 1
   fi
+  if [ "$#" -gt 1 ]; then
+    echo "Error: unexpected argument for gos uninstall: ${2}" >&2
+    echo "Usage: gos uninstall <version>  e.g. gos uninstall 1.24.0" >&2
+    return 1
+  fi
   version="${version#go}"
   _gos_validate_version "$version" || return 1
 
@@ -1508,6 +1518,30 @@ cmd_uninstall() {
     return 1
   fi
   _gos_validate_versions_dir || return 1
+
+  # A bare X.Y resolves to the matching installed patch release, mirroring
+  # `gos install 1.21` (which installs the newest 1.21.x): resolve against
+  # what is actually installed so uninstall stays network-free.
+  case "$version" in
+    *rc*|*beta*|*.*.*) ;;
+    *)
+      local installed match_count=0 resolved=""
+      for installed in $(_gos_installed_versions); do
+        case "$installed" in
+          "$version"|"$version".*) resolved="$installed"; match_count=$((match_count + 1)) ;;
+        esac
+      done
+      if [ "$match_count" -eq 1 ]; then
+        version="$resolved"
+      elif [ "$match_count" -gt 1 ]; then
+        echo "Error: '${version}' matches multiple installed Go versions; re-run with an exact version:" >&2
+        for installed in $(_gos_installed_versions); do
+          case "$installed" in "$version"|"$version".*) echo "  go${installed}" >&2 ;; esac
+        done
+        return 1
+      fi
+      ;;
+  esac
 
   version_dir=$(_gos_version_dir_for "$version")
   if [ ! -d "$version_dir" ]; then
@@ -1759,7 +1793,8 @@ cmd_prune() {
   # --rollback, which already means "discard my safety copies".
   local orphan orphans_removed=0 orphans_found=0
   for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
-    [ -d "$orphan" ] || continue
+    # -L so a stranded side-by-side symlink backup is reported/removed too.
+    [ -d "$orphan" ] || [ -L "$orphan" ] || continue
     orphans_found=$((orphans_found + 1))
     if [ "$prune_rollback" = "true" ] && [ -x "${GOS_INSTALL_DIR}/bin/go" ]; then
       _gos_sudo rm -rf "$orphan" || return 1
@@ -2042,7 +2077,7 @@ main() {
     self-update|selfupdate) cmd_self_update ;;
     uninstall)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      cmd_uninstall "${1:-}"
+      cmd_uninstall "$@"
       ;;
     env)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1

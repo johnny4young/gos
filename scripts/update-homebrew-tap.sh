@@ -174,7 +174,14 @@ until git push origin HEAD:main; do
   fi
   push_attempt=$((push_attempt + 1))
   sleep 2
-  git pull --rebase origin main
+  # Under `set -e` a failed rebase (conflict, fetch error) would abort the whole
+  # script before the retry cap is reached, turning a transient race into a hard
+  # failure with a half-finished rebase. Absorb the failure, clean up any
+  # in-progress rebase, and let the loop retry / hit the ::error path cleanly.
+  if ! git pull --rebase origin main; then
+    git rebase --abort 2>/dev/null || true
+    echo "::warning::rebase onto ${tap_repo} main failed on attempt $((push_attempt - 1)); retrying" >&2
+  fi
 done
 
 echo "Updated ${tap_repo} → ${name} ${version}."

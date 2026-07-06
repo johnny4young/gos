@@ -696,6 +696,20 @@ GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninsta
 GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.19.0
 [ "$status" -ne 0 ] || fail "uninstalling a missing version should fail"
 assert_contains "$output" "is not installed" "uninstall missing version"
+# uninstall rejects trailing arguments, symmetric with install (the guard runs
+# before the active-version check, so this fails on the extra arg).
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.21.6 extra
+[ "$status" -ne 0 ] || fail "uninstall should reject trailing arguments"
+assert_contains "$output" "unexpected argument for gos uninstall" "uninstall trailing args"
+# a bare X.Y resolves to the matching installed patch release, like install.
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.20.0
+[ "$status" -eq 0 ] || fail "reinstall 1.20.0 failed: ${output}"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "switch back to 1.21.6 failed: ${output}"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.20
+[ "$status" -eq 0 ] || fail "uninstall of a bare minor failed: ${output}"
+[ ! -d "${versions_dir}/go1.20.0" ] || fail "bare-minor uninstall did not remove go1.20.0"
+assert_contains "$output" "Uninstalled go1.20.0" "uninstall resolves bare X.Y to installed patch"
 pass "side-by-side mode installs, switches instantly, lists, and uninstalls versions"
 
 else
