@@ -1,1 +1,4 @@
 ROADMAP.md
+
+# LLVM/coverage profiling artifacts (e.g. default.profraw)
+*.profraw
