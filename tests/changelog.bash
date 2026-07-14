@@ -62,6 +62,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 CHANGELOG
 }
 
+
+current_changelog_requires_unreleased_notes_when_ahead_of_latest_tag() {
+  local changelog latest_tag notes commit_count
+  changelog="$repo_root/CHANGELOG.md"
+
+  latest_tag=$(git -C "$repo_root" describe --tags --abbrev=0 2>/dev/null || true)
+  if [ -z "$latest_tag" ]; then
+    printf 'ok - current changelog Unreleased guard skipped: no reachable tag\n'
+    return 0
+  fi
+
+  commit_count=$(git -C "$repo_root" rev-list --count "${latest_tag}..HEAD" 2>/dev/null || printf '0')
+  if [ "$commit_count" -eq 0 ]; then
+    printf 'ok - current changelog Unreleased guard skipped: no post-tag commits\n'
+    return 0
+  fi
+
+  notes=$(unreleased_notes "$changelog")
+  if ! printf '%s\n' "$notes" | grep -Eq '^- '; then
+    printf 'not ok - CHANGELOG.md has %s post-%s commit(s), but Unreleased has no bullet notes\n' "$commit_count" "$latest_tag" >&2
+    exit 1
+  fi
+
+  printf 'ok - current changelog keeps post-tag notes under Unreleased\n'
+}
+
 test_promotes_unreleased_notes() {
   local tmp_dir changelog notes
   tmp_dir="$(mktemp -d)"
@@ -313,6 +339,7 @@ CHANGELOG
   printf 'ok - heading-only Unreleased fails instead of silently discarding headings\n'
 }
 
+current_changelog_requires_unreleased_notes_when_ahead_of_latest_tag
 test_promotes_unreleased_notes
 test_empty_unreleased_without_commits_fails_without_mutation
 test_empty_unreleased_generates_notes_from_git
