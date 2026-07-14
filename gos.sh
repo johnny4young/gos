@@ -3169,6 +3169,38 @@ cmd_completions() {
   esac
 }
 
+_gos_command_manifest() {
+  cat <<'GOS_COMMANDS'
+latest|latest|Install the latest stable Go version
+install|install <version>|Install a specific Go version (e.g. gos install 1.26.1)
+run|run <version> <cmd>|Run a command with a side-by-side Go version
+use|use [path]|Install the Go version requested by project manifest
+pin|pin <version>|Write .go-version in the current directory
+check|check|Check whether a newer stable Go is available
+rollback|rollback|Restore the previous Go installation, if available
+uninstall|uninstall <version>|Remove an installed version (side-by-side mode only)
+prune|prune [--rollback]|Remove cached Go archives (and the rollback copy with --rollback)
+current|current|Show the currently active Go version
+list|list [--installed]|List available Go versions (or locally installed ones)
+platforms|platforms [version]|List supported OS/arch archives for a Go version
+status|status|Show an offline dashboard for gos and the active Go
+which|which [version]|Show the active or side-by-side Go binary path
+env|env [--fish] [--auto]|Print PATH setup or an opt-in auto-switch hook
+completions|completions <shell>|Print a Bash, Zsh, or Fish completion script
+doctor|doctor [--fix]|Diagnose gos, Go, PATH, and tool dependencies
+self-update|self-update|Update gos itself to the latest release
+version|version|Show gos version
+help|help|Show this help message
+GOS_COMMANDS
+}
+
+_gos_command_help() {
+  local _command_name command_usage command_description
+  _gos_command_manifest | while IFS='|' read -r _command_name command_usage command_description; do
+    printf '  %-19s %s\n' "$command_usage" "$command_description"
+  done
+}
+
 cmd_help() {
   cat <<EOF
 
@@ -3179,26 +3211,7 @@ USAGE:
   gos <command> [options]
 
 COMMANDS:
-  latest              Install the latest stable Go version
-  install <version>   Install a specific Go version (e.g. gos install 1.26.1)
-  run <version> <cmd> Run a command with a side-by-side Go version
-  use [path]          Install the Go version requested by project manifest
-  pin <version>       Write .go-version in the current directory
-  check               Check whether a newer stable Go is available
-  rollback            Restore the previous Go installation, if available
-  uninstall <version> Remove an installed version (side-by-side mode only)
-  prune [--rollback]  Remove cached Go archives (and the rollback copy with --rollback)
-  current             Show the currently active Go version
-  list [--installed]  List available Go versions (or locally installed ones)
-  platforms [version] List supported OS/arch archives for a Go version
-  status              Show an offline dashboard for gos and the active Go
-  which [version]     Show the active or side-by-side Go binary path
-  env [--fish] [--auto] Print PATH setup or an opt-in auto-switch hook
-  completions <shell> Print a Bash, Zsh, or Fish completion script
-  doctor [--fix]      Diagnose gos, Go, PATH, and tool dependencies
-  self-update         Update gos itself to the latest release
-  version             Show gos version
-  help                Show this help message
+$(_gos_command_help)
 
 OPTIONS:
   --json              Machine-readable output for check, current, list,
@@ -3222,9 +3235,10 @@ EOF
 }
 
 _gos_commands() {
-  printf '%s\n' \
-    latest install run use pin check rollback uninstall prune current list \
-    platforms status which env completions doctor self-update version help
+  local command_name _command_usage _command_description
+  _gos_command_manifest | while IFS='|' read -r command_name _command_usage _command_description; do
+    printf '%s\n' "$command_name"
+  done
 }
 
 cmd___commands() {
