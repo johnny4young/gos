@@ -56,6 +56,9 @@ zsh_completion = file_text("completions/gos.zsh")
 fish_completion_file = file_text("completions/gos.fish")
 gos_version = file_text("gos.sh")[/^GOS_VERSION="([^"]+)"$/, 1]
 assert(gos_version && !gos_version.empty?, "gos.sh must define GOS_VERSION")
+public_commands = `bash gos.sh __commands`.lines.map(&:strip).reject(&:empty?)
+assert($?.success?, "gos __commands must succeed for workflow invariants")
+assert(!public_commands.empty?, "gos __commands must list public commands")
 assert(!releasing.empty?, "repository must include RELEASING.md")
 assert(!security.empty?, "repository must include SECURITY.md")
 
@@ -321,8 +324,8 @@ assert(readme.include?("SECURITY.md"), "README must link to SECURITY.md")
 assert(!readme.include?("winget install johnny4young.gos"), "README must not advertise unpublished Winget install command")
 assert(!readme.include?("choco install gos"), "README must not advertise unpublished Chocolatey install command")
 
-%w[run use pin rollback prune platforms status which completions doctor].each do |command|
-  assert(readme.include?(command), "README must document #{command}")
+public_commands.each do |command|
+  assert(readme.include?("gos #{command}"), "README must document gos #{command}")
   assert(bash_completion.include?(command), "Bash completion must include #{command}")
   assert(zsh_completion.include?(command), "Zsh completion must include #{command}")
   assert(fish_completion_file.include?(command), "Fish completion must include #{command}")
