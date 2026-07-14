@@ -17,6 +17,8 @@ _gos() {
     'current:Show the currently active Go version'
     'list:List available Go versions (or installed ones with --installed)'
     'platforms:List supported OS/arch archives for a Go version'
+    'status:Show an offline dashboard for gos and the active Go'
+    'which:Show the active or side-by-side Go binary path'
     'env:Print the PATH setup line for your shell'
     'completions:Print a Bash, Zsh, or Fish completion script'
     'doctor:Diagnose gos, Go, PATH, and tool dependencies'
@@ -45,7 +47,7 @@ _gos() {
         completions)
           _values 'shell' bash zsh fish
           ;;
-        check|current|platforms|doctor|version)
+        check|current|platforms|status|which|doctor|version)
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)

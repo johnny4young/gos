@@ -307,7 +307,56 @@ run_gos "$case_dir" bash "$script" platforms 1.21.6 --json
 [ "$status" -eq 0 ] || fail "platforms --json failed: ${output}"
 assert_json "$output" "platforms --json"
 assert_contains "$output" '"platforms":["darwin/arm64","linux/amd64"]' "platforms json"
-pass "machine-readable current, list, version, and platforms work"
+
+case_dir="${test_root}/status"
+mkdir -p "$case_dir/project" "$case_dir/cache"
+printf '1.20rc1\n' >"$case_dir/project/.go-version"
+printf 'cached archive\n' >"$case_dir/cache/go1.20rc1.darwin-arm64.tar.gz"
+pushd "$case_dir/project" >/dev/null
+run_gos "$case_dir" bash "$script" status --json
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "status --json failed: ${output}"
+assert_json "$output" "status --json"
+assert_contains "$output" '"active":"go1.20rc1"' "status json active"
+assert_contains "$output" '"source":"path"' "status json source"
+assert_contains "$output" '"project":{"version":"go1.20rc1"' "status json project"
+assert_contains "$output" '"matches_active":true' "status json project match"
+assert_contains "$output" '"archives":1' "status json cache count"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "status must not reach the network"
+fi
+pushd "$case_dir/project" >/dev/null
+run_gos "$case_dir" bash "$script" status
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "status failed: ${output}"
+assert_contains "$output" "Project:      go1.20rc1" "status human project"
+assert_contains "$output" "Cache:        1 archive(s)" "status human cache"
+
+case_dir="${test_root}/which"
+run_gos "$case_dir" bash "$script" which --json
+[ "$status" -eq 0 ] || fail "which --json failed: ${output}"
+assert_json "$output" "which --json"
+assert_contains "$output" "\"path\":\"${fake_bin}/go\"" "which json path"
+assert_contains "$output" '"managed":false' "which json managed flag"
+run_gos "$case_dir" bash "$script" which
+[ "$status" -eq 0 ] || fail "which failed: ${output}"
+[ "$output" = "${fake_bin}/go" ] || fail "which output changed: ${output}"
+versions_dir="${case_dir}/versions"
+mkdir -p "${versions_dir}/go1.21.6/bin"
+cat >"${versions_dir}/go1.21.6/bin/go" <<'WHICH_GO'
+#!/usr/bin/env bash
+echo "go version go1.21.6 darwin/arm64"
+WHICH_GO
+chmod +x "${versions_dir}/go1.21.6/bin/go"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" which 1.21.6 --json
+[ "$status" -eq 0 ] || fail "which <version> --json failed: ${output}"
+assert_json "$output" "which <version> --json"
+assert_contains "$output" "\"path\":\"${versions_dir}/go1.21.6/bin/go\"" "which version json path"
+assert_contains "$output" '"version":"go1.21.6"' "which version json version"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" which 1.20.0
+[ "$status" -ne 0 ] || fail "which missing side-by-side version should fail"
+assert_contains "$output" "is not installed" "which missing version"
+pass "machine-readable current, list, version, platforms, status, and which work"
 
 case_dir="${test_root}/pin"
 mkdir -p "$case_dir/project"

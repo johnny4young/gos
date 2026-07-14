@@ -79,12 +79,13 @@ Done. That's the whole setup.
 - **Project-aware switching** — `gos use` reads `.go-version`, `.tool-versions`, `toolchain`, or `go` directives
 - **Update checks** — `gos check` reports whether a newer stable Go is available without installing anything
 - **Doctor diagnostics** — `gos doctor` checks Go, PATH, permissions, checksum tools, and extraction tools
+- **Offline status dashboard** — `gos status` summarizes the active Go, project manifest, rollback, cache, and layout without network access
 - **Cache and rollback** — verified archives are cached, `gos rollback` restores the previous install, and `gos prune` reclaims the disk space
 - **Side-by-side versions (opt-in)** — set `GOS_VERSIONS_DIR` and every version stays installed; switching becomes an instant symlink flip, with `gos list --installed` and `gos uninstall`
 - **Shell setup in one line** — `eval "$(gos env)"` puts the managed Go on PATH
 - **Self-updating** — `gos self-update` upgrades gos itself from the latest verified release
 - **Mirror support** — `GOS_DOWNLOAD_MIRROR` downloads archives from an HTTPS mirror while still verifying official go.dev checksums
-- **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `doctor`, `prune`, and `version`
+- **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `doctor`, `prune`, and `version`
 - **Auto-detects everything** — OS (`darwin`, `linux`, `windows`) and architecture (`amd64`, `arm64`, `armv6l`, `386`)
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)
 - **Zero dependencies** — just `curl` and `bash`, both pre-installed on most systems
@@ -265,6 +266,8 @@ exec fish          # for Fish
 | `gos current` | Show the currently active Go version |
 | `gos list [--installed]` | List available Go versions, or locally installed ones |
 | `gos platforms [version]` | List supported OS/arch archives for a Go version |
+| `gos status` | Show an offline dashboard for gos and the active Go |
+| `gos which [version]` | Show the active Go binary path, or a side-by-side version path |
 | `gos env [--fish]` | Print the PATH setup line for your shell |
 | `gos completions <shell>` | Print a Bash, Zsh, or Fish completion script |
 | `gos doctor` | Diagnose gos, Go, PATH, and local tool dependencies |
@@ -303,6 +306,19 @@ Already on Go 1.21.6, nothing to do.
 $ gos current
 go1.24.1
 
+$ gos status
+Active:       go1.24.1
+Go path:      /usr/local/go/bin/go (managed)
+Install dir:  /usr/local/go
+Layout:       flat
+Project:      go1.24.1 (/path/to/project/.go-version, matches active)
+Rollback:     available
+Cache:        1 archive(s), 73400320 byte(s) in /Users/alice/.cache/gos
+gos:          v1.6.0
+
+$ gos which
+/usr/local/go/bin/go
+
 $ gos list
 Fetching available Go versions...
 go1.22.5
@@ -327,6 +343,9 @@ $ gos check --json
 
 $ gos current --json
 {"found":true,"version":"1.24.1","current":"go1.24.1"}
+
+$ gos status --json
+{"active":"go1.24.1","source":"managed","go_path":"/usr/local/go/bin/go","install_dir":"/usr/local/go","layout":"flat","layout_target":null,"project":{"version":"go1.24.1","source":"/path/to/project/.go-version","matches_active":true},"rollback_available":true,"cache":{"dir":"/Users/alice/.cache/gos","archives":1,"bytes":73400320},"gos_version":"1.6.0"}
 
 $ gos self-update
 Checking for the latest gos release...

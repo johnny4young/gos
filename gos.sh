@@ -1253,6 +1253,34 @@ _gos_json_array_from_lines() {
   printf ']'
 }
 
+_gos_path_is_under() {
+  local path="$1" dir="$2"
+  dir="${dir%/}"
+  case "$path" in
+    "$dir"|"$dir"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_gos_active_go_path() {
+  command -v go 2>/dev/null || return 1
+}
+
+_gos_cache_archive_stats() {
+  local file count=0 bytes=0 size
+
+  if [ -d "$GOS_CACHE_DIR" ]; then
+    for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip; do
+      [ -f "$file" ] || continue
+      count=$((count + 1))
+      size=$(wc -c < "$file" | tr -d '[:space:]') || size=0
+      bytes=$((bytes + size))
+    done
+  fi
+
+  printf '%s|%s\n' "$count" "$bytes"
+}
+
 # ─── Commands ─────────────────────────────────────────────────────────────────
 
 cmd_latest() {
@@ -1526,6 +1554,184 @@ cmd_platforms() {
 
   echo "Supported platforms for go${version}:"
   printf '%s\n' "$platforms"
+}
+
+cmd_which() {
+  local version="" arg go_path managed="false" version_dir
+
+  for arg in "$@"; do
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      *)
+        if [ -z "$version" ]; then
+          version="${arg#go}"
+        else
+          echo "Error: unexpected argument for gos which: ${arg}" >&2
+          echo "Usage: gos which [version] [--json]" >&2
+          return 1
+        fi
+        ;;
+    esac
+  done
+
+  if [ -n "$version" ]; then
+    _gos_validate_version "$version" || return 1
+    if ! _gos_versions_mode; then
+      echo "Error: gos which <version> requires side-by-side mode (set GOS_VERSIONS_DIR)." >&2
+      return 1
+    fi
+    _gos_validate_versions_dir || return 1
+    version_dir=$(_gos_version_dir_for "$version")
+    go_path="${version_dir}/bin/go"
+    if [ ! -x "$go_path" ]; then
+      echo "Error: go${version} is not installed under ${GOS_VERSIONS_DIR}." >&2
+      return 1
+    fi
+    managed="true"
+  else
+    if ! go_path=$(_gos_active_go_path); then
+      echo "Error: no go binary found on PATH." >&2
+      return 1
+    fi
+    if _gos_path_is_under "$go_path" "$GOS_INSTALL_DIR"; then
+      managed="true"
+    fi
+  fi
+
+  if _gos_json_enabled; then
+    printf '{"path":'
+    _gos_json_string "$go_path"
+    printf ',"managed":%s,"install_dir":' "$managed"
+    _gos_json_string "$GOS_INSTALL_DIR"
+    if [ -n "$version" ]; then
+      printf ',"version":'
+      _gos_json_string "go${version}"
+    fi
+    printf '}\n'
+    return 0
+  fi
+
+  printf '%s\n' "$go_path"
+}
+
+cmd_status() {
+  local active go_path source layout layout_target resolved project_version project_source
+  local project_matches="null" rollback_available="false" stats cache_count cache_bytes
+
+  _gos_set_json_from_args "$@" || return 1
+
+  active=$(_gos_current)
+  go_path=$(_gos_active_go_path 2>/dev/null) || go_path=""
+  source="none"
+  if [ -n "$go_path" ]; then
+    if _gos_path_is_under "$go_path" "$GOS_INSTALL_DIR"; then
+      source="managed"
+    else
+      source="path"
+    fi
+  fi
+
+  if _gos_versions_mode; then
+    layout="side-by-side"
+  else
+    layout="flat"
+  fi
+  layout_target=""
+  if [ -L "$GOS_INSTALL_DIR" ]; then
+    layout_target=$(readlink "$GOS_INSTALL_DIR" 2>/dev/null || true)
+    if ! _gos_versions_mode; then
+      layout="symlink"
+    fi
+  fi
+
+  resolved=$(_gos_resolve_project_version "$PWD" 2>/dev/null) || resolved=""
+  project_version=""
+  project_source=""
+  if [ -n "$resolved" ]; then
+    project_version="${resolved%%|*}"
+    project_source="${resolved#*|}"
+    project_version="${project_version#go}"
+    if [ "$active" = "$project_version" ]; then
+      project_matches="true"
+    else
+      project_matches="false"
+    fi
+  fi
+
+  if [ -d "$(_gos_rollback_dir)" ] || [ -L "$(_gos_rollback_dir)" ]; then
+    rollback_available="true"
+  fi
+  stats=$(_gos_cache_archive_stats)
+  cache_count="${stats%%|*}"
+  cache_bytes="${stats#*|}"
+
+  if _gos_json_enabled; then
+    printf '{"active":'
+    if [ "$active" = "none" ]; then
+      printf 'null'
+    else
+      _gos_json_string "go${active}"
+    fi
+    printf ',"source":'
+    _gos_json_string "$source"
+    printf ',"go_path":'
+    if [ -n "$go_path" ]; then _gos_json_string "$go_path"; else printf 'null'; fi
+    printf ',"install_dir":'
+    _gos_json_string "$GOS_INSTALL_DIR"
+    printf ',"layout":'
+    _gos_json_string "$layout"
+    printf ',"layout_target":'
+    if [ -n "$layout_target" ]; then _gos_json_string "$layout_target"; else printf 'null'; fi
+    printf ',"project":'
+    if [ -n "$project_version" ]; then
+      printf '{"version":'
+      _gos_json_string "go${project_version}"
+      printf ',"source":'
+      _gos_json_string "$project_source"
+      printf ',"matches_active":%s}' "$project_matches"
+    else
+      printf 'null'
+    fi
+    printf ',"rollback_available":%s,"cache":{"dir":' "$rollback_available"
+    _gos_json_string "$GOS_CACHE_DIR"
+    printf ',"archives":%s,"bytes":%s},"gos_version":' "$cache_count" "$cache_bytes"
+    _gos_json_string "$GOS_VERSION"
+    printf '}\n'
+    return 0
+  fi
+
+  if [ "$active" = "none" ]; then
+    printf 'Active:       none\n'
+  else
+    printf 'Active:       go%s\n' "$active"
+  fi
+  if [ -n "$go_path" ]; then
+    printf 'Go path:      %s (%s)\n' "$go_path" "$source"
+  else
+    printf 'Go path:      not found on PATH\n'
+  fi
+  printf 'Install dir:  %s\n' "$GOS_INSTALL_DIR"
+  if [ -n "$layout_target" ]; then
+    printf 'Layout:       %s -> %s\n' "$layout" "$layout_target"
+  else
+    printf 'Layout:       %s\n' "$layout"
+  fi
+  if [ -n "$project_version" ]; then
+    if [ "$project_matches" = "true" ]; then
+      printf 'Project:      go%s (%s, matches active)\n' "$project_version" "$project_source"
+    else
+      printf 'Project:      go%s (%s, differs from active)\n' "$project_version" "$project_source"
+    fi
+  else
+    printf 'Project:      none found from %s upward\n' "$PWD"
+  fi
+  if [ "$rollback_available" = "true" ]; then
+    printf 'Rollback:     available\n'
+  else
+    printf 'Rollback:     unavailable\n'
+  fi
+  printf 'Cache:        %s archive(s), %s byte(s) in %s\n' "$cache_count" "$cache_bytes" "$GOS_CACHE_DIR"
+  printf 'gos:          v%s\n' "$GOS_VERSION"
 }
 
 cmd_use() {
@@ -2135,7 +2341,7 @@ _gos_completion_bash() {
 
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local commands="latest install use pin check rollback uninstall prune current list platforms env completions doctor self-update version help"
+  local commands="latest install use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
   local cmd_index=1 cmd words="" line
 
   # A leading --json shifts the command to the next position (gos --json list).
@@ -2164,7 +2370,7 @@ _gos_completions() {
       completions)
         words="bash zsh fish"
         ;;
-      check|current|platforms|doctor|version)
+      check|current|platforms|status|which|doctor|version)
         words="--json"
         ;;
       use)
@@ -2211,6 +2417,8 @@ _gos() {
     'current:Show the currently active Go version'
     'list:List available Go versions (or installed ones with --installed)'
     'platforms:List supported OS/arch archives for a Go version'
+    'status:Show an offline dashboard for gos and the active Go'
+    'which:Show the active or side-by-side Go binary path'
     'env:Print the PATH setup line for your shell'
     'completions:Print a Bash, Zsh, or Fish completion script'
     'doctor:Diagnose gos, Go, PATH, and tool dependencies'
@@ -2239,7 +2447,7 @@ _gos() {
         completions)
           _values 'shell' bash zsh fish
           ;;
-        check|current|platforms|doctor|version)
+        check|current|platforms|status|which|doctor|version)
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)
@@ -2272,6 +2480,8 @@ complete -c gos -n '__fish_use_subcommand' -a 'prune'    -d 'Remove cached Go ar
 complete -c gos -n '__fish_use_subcommand' -a 'current'  -d 'Show the currently active Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'list'     -d 'List all available Go versions'
 complete -c gos -n '__fish_use_subcommand' -a 'platforms' -d 'List supported OS/arch archives for a Go version'
+complete -c gos -n '__fish_use_subcommand' -a 'status'   -d 'Show an offline dashboard for gos and the active Go'
+complete -c gos -n '__fish_use_subcommand' -a 'which'    -d 'Show the active or side-by-side Go binary path'
 complete -c gos -n '__fish_use_subcommand' -a 'env'      -d 'Print the PATH setup line for your shell'
 complete -c gos -n '__fish_use_subcommand' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script'
 complete -c gos -n '__fish_use_subcommand' -a 'doctor'   -d 'Diagnose gos, Go, PATH, and tool dependencies'
@@ -2280,7 +2490,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'version'  -d 'Show gos version'
 complete -c gos -n '__fish_use_subcommand' -a 'help'     -d 'Show help message'
 # --json only where gos actually supports it (leading flag or per command).
 complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable JSON where supported'
-complete -c gos -n '__fish_seen_subcommand_from check current list platforms doctor prune env version' -l json -d 'Output machine-readable JSON'
+complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version' -l json -d 'Output machine-readable JSON'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
 complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
@@ -2336,6 +2546,8 @@ COMMANDS:
   current             Show the currently active Go version
   list [--installed]  List available Go versions (or locally installed ones)
   platforms [version] List supported OS/arch archives for a Go version
+  status              Show an offline dashboard for gos and the active Go
+  which [version]     Show the active or side-by-side Go binary path
   env [--fish]        Print the PATH setup line for your shell
   completions <shell> Print a Bash, Zsh, or Fish completion script
   doctor              Diagnose gos, Go, PATH, and tool dependencies
@@ -2345,7 +2557,7 @@ COMMANDS:
 
 OPTIONS:
   --json              Machine-readable output for check, current, list,
-                      platforms, env, doctor, prune, and version
+                      platforms, status, which, env, doctor, prune, and version
 
 EXAMPLES:
   gos latest
@@ -2356,6 +2568,8 @@ EXAMPLES:
   gos doctor
   gos current
   gos list --json
+  gos status
+  gos which
   gos completions bash
 
 EOF
@@ -2364,7 +2578,7 @@ EOF
 _gos_commands() {
   printf '%s\n' \
     latest install use pin check rollback uninstall prune current list \
-    platforms env completions doctor self-update version help
+    platforms status which env completions doctor self-update version help
 }
 
 _gos_suggest_command() {
@@ -2428,6 +2642,8 @@ main() {
     current)   cmd_current "$@" ;;
     list)      cmd_list "$@" ;;
     platforms) cmd_platforms "$@" ;;
+    status)    cmd_status "$@" ;;
+    which)     cmd_which "$@" ;;
     doctor)    cmd_doctor "$@" ;;
     version)   cmd_version "$@" ;;
     help|--help|-h) cmd_help ;;

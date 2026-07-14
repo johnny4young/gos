@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Add `gos completions <bash|zsh|fish>` so single-file installs can print shell completions without needing the repository checkout.
 - Add `.tool-versions` support to `gos use` for asdf/mise-style `golang` or `go` version files.
 - Add "Did you mean?" suggestions for unknown command prefixes.
+- Add offline introspection commands: `gos status` for a local dashboard and `gos which [version]` for active or side-by-side Go paths.
 
 ### Changed
 

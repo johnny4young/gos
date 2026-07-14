@@ -314,7 +314,7 @@ assert(readme.include?("SECURITY.md"), "README must link to SECURITY.md")
 assert(!readme.include?("winget install johnny4young.gos"), "README must not advertise unpublished Winget install command")
 assert(!readme.include?("choco install gos"), "README must not advertise unpublished Chocolatey install command")
 
-%w[use pin rollback prune platforms completions doctor].each do |command|
+%w[use pin rollback prune platforms status which completions doctor].each do |command|
   assert(readme.include?(command), "README must document #{command}")
   assert(bash_completion.include?(command), "Bash completion must include #{command}")
   assert(zsh_completion.include?(command), "Zsh completion must include #{command}")
@@ -328,6 +328,7 @@ assert(readme.include?("--json"), "README must document --json")
 assert(bash_completion.include?("--json"), "Bash completion must include --json")
 assert(zsh_completion.include?("--json"), "Zsh completion must include --json")
 assert(fish_completion_file.include?("-l json"), "Fish completion must include --json")
+assert(readme.include?("gos status --json"), "README must document status JSON")
 
 [
   "workflow_dispatch",
