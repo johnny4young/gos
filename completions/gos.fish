@@ -3,6 +3,7 @@
 complete -c gos -f
 complete -c gos -n '__fish_use_subcommand' -a 'latest'  -d 'Install the latest stable Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'install'  -d 'Install a specific Go version'
+complete -c gos -n '__fish_use_subcommand' -a 'run'      -d 'Run a command with a side-by-side Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'use'      -d 'Install the Go version requested by project manifest'
 complete -c gos -n '__fish_use_subcommand' -a 'pin'      -d 'Write .go-version in the current directory'
 complete -c gos -n '__fish_use_subcommand' -a 'check'    -d 'Check whether a newer stable Go is available'
@@ -26,7 +27,7 @@ complete -c gos -n '__fish_seen_subcommand_from check current list platforms sta
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__fish_seen_subcommand_from doctor' -l fix -d 'Apply safe non-destructive fixes'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
-complete -c gos -n '__fish_seen_subcommand_from install' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
+complete -c gos -n '__fish_seen_subcommand_from install run' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
 complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
 complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
 complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'

@@ -970,6 +970,29 @@ assert_json "$output" "list --installed --json"
 assert_contains "$output" '"installed":["go1.20.0","go1.21.6"]' "list installed json"
 assert_contains "$output" '"active":"go1.21.6"' "list installed json active"
 
+: >"${case_dir}/urls.log"
+active_before=$(readlink "${case_dir}/go")
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 go version
+[ "$status" -eq 0 ] || fail "run installed exact version failed: ${output}"
+assert_contains "$output" "go version go1.20.0 darwin/arm64" "run exact version output"
+[ "$(readlink "${case_dir}/go")" = "$active_before" ] || fail "run exact version changed the active symlink"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "run with an installed exact version must not reach the network"
+fi
+
+: >"${case_dir}/urls.log"
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20 go version
+[ "$status" -eq 0 ] || fail "run installed bare minor failed: ${output}"
+assert_contains "$output" "go version go1.20.0 darwin/arm64" "run bare minor output"
+[ "$(readlink "${case_dir}/go")" = "$active_before" ] || fail "run bare minor changed the active symlink"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "run with an installed bare minor must not reach the network"
+fi
+
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 bash -c 'exit 7'
+[ "$status" -eq 7 ] || fail "run should propagate command exit status 7, got ${status}. Output: ${output}"
+pass "run uses installed side-by-side versions without switching and propagates exit codes"
+
 GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.21.6
 [ "$status" -ne 0 ] || fail "uninstalling the active version should fail"
 assert_contains "$output" "is the active version" "uninstall active guard"
@@ -1003,6 +1026,15 @@ GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninsta
 [ "$status" -eq 0 ] || fail "uninstall of a bare minor failed: ${output}"
 [ ! -d "${versions_dir}/go1.20.0" ] || fail "bare-minor uninstall did not remove go1.20.0"
 assert_contains "$output" "Uninstalled go1.20.0" "uninstall resolves bare X.Y to installed patch"
+
+active_before=$(readlink "${case_dir}/go")
+GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 go version
+[ "$status" -eq 0 ] || fail "run missing version install failed: ${output}"
+assert_contains "$output" "Installed go1.20.0 at ${versions_dir}/go1.20.0" "run missing version install"
+assert_contains "$output" "go version go1.20.0 darwin/arm64" "run missing version command output"
+[ -x "${versions_dir}/go1.20.0/bin/go" ] || fail "run missing version did not install into GOS_VERSIONS_DIR"
+[ "$(readlink "${case_dir}/go")" = "$active_before" ] || fail "run missing version changed the active symlink"
+[ ! -e "${case_dir}/go.gos-lock" ] || fail "run missing version left the gos lock behind"
 pass "side-by-side mode installs, switches instantly, lists, and uninstalls versions"
 
 else
@@ -1015,6 +1047,15 @@ run_gos "$case_dir" bash "$script" uninstall 1.21.6
 [ "$status" -ne 0 ] || fail "uninstall in flat mode should fail"
 assert_contains "$output" "requires side-by-side mode" "uninstall flat mode"
 pass "uninstall explains it needs side-by-side mode"
+
+case_dir="${test_root}/run-flat"
+run_gos "$case_dir" bash "$script" run 1.21.6 go version
+[ "$status" -ne 0 ] || fail "run in flat mode should fail"
+assert_contains "$output" "gos run requires side-by-side mode" "run flat mode"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "run in flat mode must not reach the network"
+fi
+pass "run explains it needs side-by-side mode"
 
 case_dir="${test_root}/current-json-none"
 GOS_TEST_GO_BROKEN=1 run_gos "$case_dir" bash "$script" current --json

@@ -60,10 +60,7 @@ _gos_cleanup_tmp() {
   if [ -n "$GOS_TMP_DIR" ] && [ -d "$GOS_TMP_DIR" ]; then
     rm -rf "$GOS_TMP_DIR"
   fi
-  if [ -n "$GOS_LOCK_DIR" ] && [ -d "$GOS_LOCK_DIR" ]; then
-    _gos_sudo rm -rf "$GOS_LOCK_DIR" 2>/dev/null || rm -rf "$GOS_LOCK_DIR" 2>/dev/null || true
-    GOS_LOCK_DIR=""
-  fi
+  _gos_release_lock
 }
 trap _gos_cleanup_tmp EXIT
 trap 'exit 130' INT
@@ -748,6 +745,13 @@ _gos_lock_dir() {
   printf '%s.gos-lock' "$GOS_INSTALL_DIR"
 }
 
+_gos_release_lock() {
+  if [ -n "$GOS_LOCK_DIR" ] && [ -d "$GOS_LOCK_DIR" ]; then
+    _gos_sudo rm -rf "$GOS_LOCK_DIR" 2>/dev/null || rm -rf "$GOS_LOCK_DIR" 2>/dev/null || true
+  fi
+  GOS_LOCK_DIR=""
+}
+
 _gos_pid_is_running() {
   local pid="$1"
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
@@ -1045,6 +1049,7 @@ _gos_activate_rollback() {
 _gos_install_version() {
   local version=$1
   local include_all_checksums="${2:-false}"
+  local activate="${3:-true}"
   local os arch ext pkg url tmp_dir tmp_file stage_dir staged_go_dir version_dir
 
   _gos_validate_version "$version" || return 1
@@ -1055,11 +1060,18 @@ _gos_install_version() {
     _gos_validate_versions_dir || return 1
     version_dir=$(_gos_version_dir_for "$version")
     if [ -x "${version_dir}/bin/go" ]; then
-      echo "Using installed go${version} from ${version_dir}."
-      _gos_prepare_install_parent || return 1
-      _gos_activate_install link "$version_dir" || return 1
+      if [ "$activate" = "true" ]; then
+        echo "Using installed go${version} from ${version_dir}."
+        _gos_prepare_install_parent || return 1
+        _gos_activate_install link "$version_dir" || return 1
+      fi
       return 0
     fi
+  fi
+
+  if [ "$activate" != "true" ] && ! _gos_versions_mode; then
+    echo "Error: installing without activation requires side-by-side mode (set GOS_VERSIONS_DIR)." >&2
+    return 1
   fi
 
   os=$(_gos_os)
@@ -1178,7 +1190,11 @@ _gos_install_version() {
       echo "Error: failed to move new Go installation into ${GOS_VERSIONS_DIR}." >&2
       return 1
     fi
-    _gos_activate_install link "$version_dir" || return 1
+    if [ "$activate" = "true" ]; then
+      _gos_activate_install link "$version_dir" || return 1
+    else
+      echo "Installed go${version} at ${version_dir}."
+    fi
   else
     _gos_warn_orphaned_versions_link
     _gos_activate_install move "$staged_go_dir" || return 1
@@ -1569,6 +1585,78 @@ cmd_install() {
   _gos_install_version "$version" true
 }
 
+cmd_run() {
+  local version="${1:-}" resolved version_dir
+
+  if [ -z "$version" ]; then
+    echo "Usage: gos run <version> [--] <command> [args...]" >&2
+    return 1
+  fi
+  shift
+  if [ "$version" = "--json" ]; then
+    echo "Error: gos run does not support --json." >&2
+    return 1
+  fi
+  if [ "${1:-}" = "--" ]; then
+    shift
+  fi
+  if [ "$#" -eq 0 ]; then
+    echo "Usage: gos run <version> [--] <command> [args...]" >&2
+    return 1
+  fi
+
+  version="${version#go}"
+  _gos_validate_version "$version" || return 1
+
+  if ! _gos_versions_mode; then
+    echo "Error: gos run requires side-by-side mode (set GOS_VERSIONS_DIR)." >&2
+    echo "Example: export GOS_INSTALL_DIR=\"\$HOME/.gos/go\"; export GOS_VERSIONS_DIR=\"\$HOME/.gos/versions\"" >&2
+    return 1
+  fi
+  _gos_validate_versions_dir || return 1
+
+  case "$version" in
+    *rc*|*beta*|*.*.*) ;;
+    *)
+      set +e
+      resolved=$(_gos_resolve_installed_bare_minor "$version")
+      case "$?" in
+        0)
+          set -e
+          version="$resolved"
+          ;;
+        1)
+          set -e
+          _gos_feed_json true >/dev/null 2>&1 || true
+          resolved=$(_gos_resolve_bare_minor "$version")
+          if [ "$resolved" != "$version" ]; then
+            echo "Resolved Go ${version} to go${resolved}."
+            version="$resolved"
+          fi
+          ;;
+        *)
+          set -e
+          return 1
+          ;;
+      esac
+      ;;
+  esac
+
+  version_dir=$(_gos_version_dir_for "$version")
+  if [ ! -x "${version_dir}/bin/go" ]; then
+    _gos_acquire_lock || return 1
+    _gos_install_version "$version" true false || return 1
+  fi
+  if [ ! -x "${version_dir}/bin/go" ]; then
+    echo "Error: go${version} is not installed under ${GOS_VERSIONS_DIR}." >&2
+    return 1
+  fi
+
+  _gos_release_lock
+  unset GOROOT
+  PATH="${version_dir}/bin:${PATH}" exec "$@"
+}
+
 cmd_current() {
   local current
   _gos_set_json_from_args "$@" || return 1
@@ -1614,6 +1702,28 @@ _gos_installed_versions() {
     [ -n "$version" ] && printf '%s\n' "$version"
   fi
   return 0
+}
+
+_gos_resolve_installed_bare_minor() {
+  local version="$1" installed match_count=0 resolved=""
+
+  for installed in $(_gos_installed_versions); do
+    case "$installed" in
+      "$version"|"$version".*) resolved="$installed"; match_count=$((match_count + 1)) ;;
+    esac
+  done
+  if [ "$match_count" -eq 1 ]; then
+    printf '%s\n' "$resolved"
+    return 0
+  fi
+  if [ "$match_count" -gt 1 ]; then
+    echo "Error: '${version}' matches multiple installed Go versions; re-run with an exact version:" >&2
+    for installed in $(_gos_installed_versions); do
+      case "$installed" in "$version"|"$version".*) echo "  go${installed}" >&2 ;; esac
+    done
+    return 2
+  fi
+  return 1
 }
 
 cmd___versions() {
@@ -2596,7 +2706,7 @@ _gos_completion_bash() {
 
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local commands="latest install use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
+  local commands="latest install run use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
   local cmd_index=1 cmd words="" line
   local versions=""
 
@@ -2617,7 +2727,7 @@ _gos_completions() {
       prune)
         words="--rollback --json"
         ;;
-      install)
+      install|run)
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions --remote-cached 2>/dev/null || true)
         fi
@@ -2685,6 +2795,7 @@ _gos() {
   commands=(
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
+    'run:Run a command with a side-by-side Go version'
     'use:Install the Go version requested by project manifest'
     'pin:Write .go-version in the current directory'
     'check:Check whether a newer stable Go is available'
@@ -2715,7 +2826,7 @@ _gos() {
         prune)
           _arguments '--rollback[Also remove the rollback installation]' '--json[Output machine-readable JSON]'
           ;;
-        install)
+        install|run)
           if command -v gos >/dev/null 2>&1; then
             _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
           fi
@@ -2767,6 +2878,7 @@ _gos_completion_fish() {
 complete -c gos -f
 complete -c gos -n '__fish_use_subcommand' -a 'latest'  -d 'Install the latest stable Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'install'  -d 'Install a specific Go version'
+complete -c gos -n '__fish_use_subcommand' -a 'run'      -d 'Run a command with a side-by-side Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'use'      -d 'Install the Go version requested by project manifest'
 complete -c gos -n '__fish_use_subcommand' -a 'pin'      -d 'Write .go-version in the current directory'
 complete -c gos -n '__fish_use_subcommand' -a 'check'    -d 'Check whether a newer stable Go is available'
@@ -2790,7 +2902,7 @@ complete -c gos -n '__fish_seen_subcommand_from check current list platforms sta
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__fish_seen_subcommand_from doctor' -l fix -d 'Apply safe non-destructive fixes'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
-complete -c gos -n '__fish_seen_subcommand_from install' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
+complete -c gos -n '__fish_seen_subcommand_from install run' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
 complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
 complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
 complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
@@ -2836,6 +2948,7 @@ USAGE:
 COMMANDS:
   latest              Install the latest stable Go version
   install <version>   Install a specific Go version (e.g. gos install 1.26.1)
+  run <version> <cmd> Run a command with a side-by-side Go version
   use [path]          Install the Go version requested by project manifest
   pin <version>       Write .go-version in the current directory
   check               Check whether a newer stable Go is available
@@ -2861,6 +2974,7 @@ OPTIONS:
 EXAMPLES:
   gos latest
   gos install 1.24.0
+  gos run 1.24 go test ./...
   gos use
   gos pin 1.24.0
   gos check --json
@@ -2876,7 +2990,7 @@ EOF
 
 _gos_commands() {
   printf '%s\n' \
-    latest install use pin check rollback uninstall prune current list \
+    latest install run use pin check rollback uninstall prune current list \
     platforms status which env completions doctor self-update version help
 }
 
@@ -2915,6 +3029,10 @@ main() {
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       _gos_acquire_lock || return 1
       cmd_install "$@"
+      ;;
+    run)
+      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      cmd_run "$@"
       ;;
     use)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1

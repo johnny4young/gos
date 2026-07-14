@@ -314,7 +314,7 @@ assert(readme.include?("SECURITY.md"), "README must link to SECURITY.md")
 assert(!readme.include?("winget install johnny4young.gos"), "README must not advertise unpublished Winget install command")
 assert(!readme.include?("choco install gos"), "README must not advertise unpublished Chocolatey install command")
 
-%w[use pin rollback prune platforms status which completions doctor].each do |command|
+%w[run use pin rollback prune platforms status which completions doctor].each do |command|
   assert(readme.include?(command), "README must document #{command}")
   assert(bash_completion.include?(command), "Bash completion must include #{command}")
   assert(zsh_completion.include?(command), "Zsh completion must include #{command}")
@@ -335,6 +335,9 @@ assert(readme.include?(".gos-lock"), "README must mention the concurrent-operati
 assert(bash_completion.include?("__versions --remote-cached"), "Bash completion must use cached dynamic versions")
 assert(zsh_completion.include?("__versions --remote-cached"), "Zsh completion must use cached dynamic versions")
 assert(fish_completion_file.include?("__versions --remote-cached"), "Fish completion must use cached dynamic versions")
+assert(bash_completion.include?("install|run"), "Bash completion must complete install/run versions")
+assert(zsh_completion.include?("install|run"), "Zsh completion must complete install/run versions")
+assert(fish_completion_file.include?("__fish_seen_subcommand_from install run"), "Fish completion must complete install/run versions")
 assert(bash_completion.include?("--fix"), "Bash completion must include doctor --fix")
 assert(zsh_completion.include?("--fix"), "Zsh completion must include doctor --fix")
 assert(fish_completion_file.include?("-l fix"), "Fish completion must include doctor --fix")

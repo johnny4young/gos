@@ -3,7 +3,7 @@
 
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local commands="latest install use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
+  local commands="latest install run use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
   local cmd_index=1 cmd words="" line
   local versions=""
 
@@ -24,7 +24,7 @@ _gos_completions() {
       prune)
         words="--rollback --json"
         ;;
-      install)
+      install|run)
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions --remote-cached 2>/dev/null || true)
         fi

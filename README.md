@@ -76,6 +76,7 @@ Done. That's the whole setup.
 
 - **One command to latest Go** — `gos latest` fetches and installs the newest stable release
 - **Pin any version** — `gos install 1.21.6` gets exactly what you need; `gos install 1.21` resolves to the newest patch release
+- **Run without switching** — `gos run 1.21 go test ./...` runs a command with a side-by-side Go version without changing the active one
 - **Project-aware switching** — `gos use` reads `.go-version`, `.tool-versions`, `toolchain`, or `go` directives
 - **Update checks** — `gos check` reports whether a newer stable Go is available without installing anything
 - **Doctor diagnostics** — `gos doctor` checks Go, PATH, permissions, checksum tools, and extraction tools; `gos doctor --fix` applies only safe, non-destructive fixes
@@ -258,6 +259,7 @@ exec fish          # for Fish
 |---|---|
 | `gos latest` | Install the latest stable Go version |
 | `gos install <version>` | Install a specific Go version |
+| `gos run <version> [--] <command>` | Run a command with a side-by-side Go version without activating it globally |
 | `gos use [path]` | Install the Go version requested by `.go-version`, `.tool-versions`, or `go.mod` |
 | `gos pin <version>` | Write `.go-version` in the current directory |
 | `gos check` | Check whether a newer stable Go is available (no install) |
@@ -299,6 +301,9 @@ Backing up existing Go installation...
 Activating new Go installation...
 Rollback available: gos rollback
 Done! go version go1.21.6 linux/amd64
+
+$ gos run 1.21.6 go version
+go version go1.21.6 darwin/arm64
 
 $ gos use
 Using Go 1.21.6 from /path/to/project/.go-version
