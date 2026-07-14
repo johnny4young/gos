@@ -88,7 +88,7 @@ Done. That's the whole setup.
 - **Auto-detects everything** — OS (`darwin`, `linux`, `windows`) and architecture (`amd64`, `arm64`, `armv6l`, `386`)
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)
 - **Zero dependencies** — just `curl` and `bash`, both pre-installed on most systems
-- **Shell completions** — tab-completion for Bash, Zsh, and Fish
+- **Shell completions** — tab-completion for Bash, Zsh, and Fish, including `gos completions <shell>` for single-file installs
 - **Lightweight** — single shell script, no compilation, no runtime
 
 ---
@@ -206,27 +206,39 @@ export PATH="$HOME/.gos:$PATH"
 
 ### Manual Shell Configuration
 
-If you installed via git clone or want to add completions, add the following to your shell config file:
+Homebrew installs completion files automatically. For `curl | bash`,
+PowerShell, Windows package-manager, or git-clone installs, use the embedded
+completion scripts printed by `gos completions <shell>`.
+
+If you installed via git clone, keep the cloned command on `PATH` first:
+
+```bash
+export PATH="$HOME/.gos:$PATH"
+```
+
+Then add the completion setup for your shell.
 
 **Bash** (`~/.bashrc`):
 
 ```bash
-export PATH="$HOME/.gos:$PATH"
-source "$HOME/.gos/completions/gos.bash"
+mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/gos"
+gos completions bash > "${XDG_CACHE_HOME:-$HOME/.cache}/gos/gos.bash"
+source "${XDG_CACHE_HOME:-$HOME/.cache}/gos/gos.bash"
 ```
 
 **Zsh** (`~/.zshrc`):
 
-```bash
-export PATH="$HOME/.gos:$PATH"
-source "$HOME/.gos/completions/gos.zsh"
+```zsh
+mkdir -p "${ZDOTDIR:-$HOME}/.zsh/completions"
+gos completions zsh > "${ZDOTDIR:-$HOME}/.zsh/completions/_gos"
+fpath=("${ZDOTDIR:-$HOME}/.zsh/completions" $fpath)
+autoload -Uz compinit && compinit
 ```
 
 **Fish** (`~/.config/fish/config.fish`):
 
 ```fish
-fish_add_path $HOME/.gos
-source $HOME/.gos/completions/gos.fish
+gos completions fish | source
 ```
 
 After editing, reload your shell:
@@ -254,6 +266,7 @@ exec fish          # for Fish
 | `gos list [--installed]` | List available Go versions, or locally installed ones |
 | `gos platforms [version]` | List supported OS/arch archives for a Go version |
 | `gos env [--fish]` | Print the PATH setup line for your shell |
+| `gos completions <shell>` | Print a Bash, Zsh, or Fish completion script |
 | `gos doctor` | Diagnose gos, Go, PATH, and local tool dependencies |
 | `gos self-update` | Update gos itself to the latest verified release |
 | `gos version` | Show gos version |
@@ -292,11 +305,10 @@ go1.24.1
 
 $ gos list
 Fetching available Go versions...
+go1.22.5
+go1.23.2
+go1.24rc1
 go1.24.1
-go1.24.0
-go1.23.5
-go1.23.4
-...
 
 $ gos doctor
 ok - platform: detected darwin/arm64 from Darwin/arm64
@@ -336,9 +348,17 @@ gos use          # installs/switches to that version
 
 ## Shell Completions
 
-Shell completions are included for Bash, Zsh, and Fish. If you installed via `curl | bash` or Homebrew, completions may already be set up.
+Shell completions are included for Bash, Zsh, and Fish. Homebrew installs
+completion files automatically; other install methods can load the embedded
+scripts from the single `gos` file:
 
-To manually enable them, see the [Manual Shell Configuration](#manual-shell-configuration) section above.
+```bash
+mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/gos"
+gos completions bash > "${XDG_CACHE_HOME:-$HOME/.cache}/gos/gos.bash"
+source "${XDG_CACHE_HOME:-$HOME/.cache}/gos/gos.bash"
+```
+
+For Zsh and Fish setup, see [Manual Shell Configuration](#manual-shell-configuration).
 
 ---
 

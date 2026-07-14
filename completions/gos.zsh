@@ -18,6 +18,7 @@ _gos() {
     'list:List available Go versions (or installed ones with --installed)'
     'platforms:List supported OS/arch archives for a Go version'
     'env:Print the PATH setup line for your shell'
+    'completions:Print a Bash, Zsh, or Fish completion script'
     'doctor:Diagnose gos, Go, PATH, and tool dependencies'
     'self-update:Update gos itself to the latest release'
     'version:Show gos version'
@@ -40,6 +41,9 @@ _gos() {
           ;;
         env)
           _arguments '--fish[Emit fish shell syntax]' '--json[Output machine-readable JSON]'
+          ;;
+        completions)
+          _values 'shell' bash zsh fish
           ;;
         check|current|platforms|doctor|version)
           _arguments '--json[Output machine-readable JSON]'

@@ -50,7 +50,7 @@ jobs:
 
       - name: Bash syntax
         run: |
-          bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
+          bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-embedded-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
 
       - name: PowerShell installer syntax
         if: runner.os == 'Windows'
@@ -65,6 +65,10 @@ jobs:
       - name: Run checksum tests
         run: |
           bash tests/checksum.bash
+
+      - name: Run completion tests
+        run: |
+          bash tests/completions.bash
 
       - name: Run transactional install tests
         run: |

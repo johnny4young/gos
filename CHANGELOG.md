@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- Add `gos completions <bash|zsh|fish>` so single-file installs can print shell completions without needing the repository checkout.
+
+### Changed
+
+- Clarify README completion setup: Homebrew installs completion files automatically; other install methods should use `gos completions <shell>`.
+- Fix the README `gos list` example to show the real ascending version order.
+
 ## [1.6.0] - 2026-07-06
 
 ### Added

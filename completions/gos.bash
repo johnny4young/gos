@@ -3,7 +3,7 @@
 
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local commands="latest install use pin check rollback uninstall prune current list platforms env doctor self-update version help"
+  local commands="latest install use pin check rollback uninstall prune current list platforms env completions doctor self-update version help"
   local cmd_index=1 cmd words="" line
 
   # A leading --json shifts the command to the next position (gos --json list).
@@ -28,6 +28,9 @@ _gos_completions() {
         ;;
       env)
         words="--fish --json"
+        ;;
+      completions)
+        words="bash zsh fish"
         ;;
       check|current|platforms|doctor|version)
         words="--json"

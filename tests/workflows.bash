@@ -247,6 +247,7 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
 [
   "bash tests/changelog.bash",
   "bash tests/checksum.bash",
+  "bash tests/completions.bash",
   "bash tests/detection.bash",
   "bash tests/features.bash",
   "bash tests/homebrew-tap.bash",
@@ -255,7 +256,7 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
   "bash tests/install-ps1.bash",
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
-  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-embedded-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -313,12 +314,16 @@ assert(readme.include?("SECURITY.md"), "README must link to SECURITY.md")
 assert(!readme.include?("winget install johnny4young.gos"), "README must not advertise unpublished Winget install command")
 assert(!readme.include?("choco install gos"), "README must not advertise unpublished Chocolatey install command")
 
-%w[use pin rollback prune platforms doctor].each do |command|
+%w[use pin rollback prune platforms completions doctor].each do |command|
   assert(readme.include?(command), "README must document #{command}")
   assert(bash_completion.include?(command), "Bash completion must include #{command}")
   assert(zsh_completion.include?(command), "Zsh completion must include #{command}")
   assert(fish_completion_file.include?(command), "Fish completion must include #{command}")
 end
+assert(readme.include?("gos completions bash"), "README must document embedded completion setup")
+assert(readme.include?("Homebrew installs completion files automatically"), "README must not claim curl bash installs completions automatically")
+assert(!readme.include?("curl | bash` or Homebrew, completions may already be set up"), "README must not claim curl bash installs completions automatically")
+assert(!readme.include?("go1.24.1\ngo1.24.0"), "README gos list example must not show newest-first ordering")
 assert(readme.include?("--json"), "README must document --json")
 assert(bash_completion.include?("--json"), "Bash completion must include --json")
 assert(zsh_completion.include?("--json"), "Zsh completion must include --json")

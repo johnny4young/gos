@@ -13,6 +13,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'current'  -d 'Show the currently 
 complete -c gos -n '__fish_use_subcommand' -a 'list'     -d 'List all available Go versions'
 complete -c gos -n '__fish_use_subcommand' -a 'platforms' -d 'List supported OS/arch archives for a Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'env'      -d 'Print the PATH setup line for your shell'
+complete -c gos -n '__fish_use_subcommand' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script'
 complete -c gos -n '__fish_use_subcommand' -a 'doctor'   -d 'Diagnose gos, Go, PATH, and tool dependencies'
 complete -c gos -n '__fish_use_subcommand' -a 'self-update' -d 'Update gos itself to the latest release'
 complete -c gos -n '__fish_use_subcommand' -a 'version'  -d 'Show gos version'
@@ -24,3 +25,4 @@ complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remo
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
 complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
 complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
+complete -c gos -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell'

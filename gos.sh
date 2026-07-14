@@ -2058,11 +2058,11 @@ cmd_doctor() {
     if [ -f "${script_dir}/completions/gos.bash" ] && [ -f "${script_dir}/completions/gos.zsh" ] && [ -f "${script_dir}/completions/gos.fish" ]; then
       _gos_doctor_check "ok" "completions" "Bash, Zsh, and Fish completion files are present"
     else
-      _gos_doctor_check "warn" "completions" "one or more completion files are missing"
+      _gos_doctor_check "warn" "completions" "one or more completion files are missing" "Run gos completions <bash|zsh|fish> to write or source an embedded completion script."
     fi
   else
     # No on-disk script path (e.g. run from stdin: curl ... | bash -s doctor).
-    _gos_doctor_check "warn" "completions" "cannot locate the gos script on disk to check completions"
+    _gos_doctor_check "warn" "completions" "cannot locate the gos script on disk to check completions" "After installing gos, run gos completions <bash|zsh|fish> to write or source an embedded completion script."
   fi
 
   if _gos_json_enabled; then
@@ -2088,6 +2088,194 @@ cmd_version() {
   echo "gos v${GOS_VERSION}"
 }
 
+# gos-completions:bash:begin
+_gos_completion_bash() {
+  cat <<'GOS_COMPLETION_BASH'
+#!/usr/bin/env bash
+# Bash completion for gos
+
+_gos_completions() {
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  local commands="latest install use pin check rollback uninstall prune current list platforms env completions doctor self-update version help"
+  local cmd_index=1 cmd words="" line
+
+  # A leading --json shifts the command to the next position (gos --json list).
+  if [ "${COMP_WORDS[1]:-}" = "--json" ]; then
+    cmd_index=2
+  fi
+
+  COMPREPLY=()
+  if [ "$COMP_CWORD" -le "$cmd_index" ]; then
+    words="$commands"
+    if [ "$cmd_index" -eq 1 ]; then
+      words="$words --json"
+    fi
+  else
+    cmd="${COMP_WORDS[$cmd_index]:-}"
+    case "$cmd" in
+      prune)
+        words="--rollback --json"
+        ;;
+      list)
+        words="--installed --json"
+        ;;
+      env)
+        words="--fish --json"
+        ;;
+      completions)
+        words="bash zsh fish"
+        ;;
+      check|current|platforms|doctor|version)
+        words="--json"
+        ;;
+      use)
+        while IFS= read -r line; do
+          COMPREPLY+=("$line")
+        done < <(compgen -d -- "$cur")
+        return
+        ;;
+      *)
+        return
+        ;;
+    esac
+  fi
+
+  while IFS= read -r line; do
+    COMPREPLY+=("$line")
+  done < <(compgen -W "$words" -- "$cur")
+}
+
+complete -F _gos_completions gos
+GOS_COMPLETION_BASH
+}
+# gos-completions:bash:end
+
+# gos-completions:zsh:begin
+_gos_completion_zsh() {
+  cat <<'GOS_COMPLETION_ZSH'
+#compdef gos
+# Zsh completion for gos
+
+_gos() {
+  local context state state_descr line
+  typeset -A opt_args
+  local -a commands
+  commands=(
+    'latest:Install the latest stable Go version'
+    'install:Install a specific Go version'
+    'use:Install the Go version requested by .go-version or go.mod'
+    'pin:Write .go-version in the current directory'
+    'check:Check whether a newer stable Go is available'
+    'rollback:Restore the previous Go installation'
+    'uninstall:Remove an installed version (side-by-side mode)'
+    'prune:Remove cached Go archives and optionally the rollback copy'
+    'current:Show the currently active Go version'
+    'list:List available Go versions (or installed ones with --installed)'
+    'platforms:List supported OS/arch archives for a Go version'
+    'env:Print the PATH setup line for your shell'
+    'completions:Print a Bash, Zsh, or Fish completion script'
+    'doctor:Diagnose gos, Go, PATH, and tool dependencies'
+    'self-update:Update gos itself to the latest release'
+    'version:Show gos version'
+    'help:Show help message'
+  )
+
+  _arguments '--json[Output machine-readable JSON where supported]' '1:command:->cmds' '*::arg:->args'
+
+  case "$state" in
+    cmds)
+      _describe -t commands 'gos command' commands
+      ;;
+    args)
+      case "${line[1]}" in
+        prune)
+          _arguments '--rollback[Also remove the rollback installation]' '--json[Output machine-readable JSON]'
+          ;;
+        list)
+          _arguments '--installed[List locally installed versions]' '--json[Output machine-readable JSON]'
+          ;;
+        env)
+          _arguments '--fish[Emit fish shell syntax]' '--json[Output machine-readable JSON]'
+          ;;
+        completions)
+          _values 'shell' bash zsh fish
+          ;;
+        check|current|platforms|doctor|version)
+          _arguments '--json[Output machine-readable JSON]'
+          ;;
+        use)
+          _files -/
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_gos "$@"
+GOS_COMPLETION_ZSH
+}
+# gos-completions:zsh:end
+
+# gos-completions:fish:begin
+_gos_completion_fish() {
+  cat <<'GOS_COMPLETION_FISH'
+# Fish completion for gos
+
+complete -c gos -f
+complete -c gos -n '__fish_use_subcommand' -a 'latest'  -d 'Install the latest stable Go version'
+complete -c gos -n '__fish_use_subcommand' -a 'install'  -d 'Install a specific Go version'
+complete -c gos -n '__fish_use_subcommand' -a 'use'      -d 'Install the Go version requested by .go-version or go.mod'
+complete -c gos -n '__fish_use_subcommand' -a 'pin'      -d 'Write .go-version in the current directory'
+complete -c gos -n '__fish_use_subcommand' -a 'check'    -d 'Check whether a newer stable Go is available'
+complete -c gos -n '__fish_use_subcommand' -a 'rollback' -d 'Restore the previous Go installation'
+complete -c gos -n '__fish_use_subcommand' -a 'uninstall' -d 'Remove an installed version (side-by-side mode)'
+complete -c gos -n '__fish_use_subcommand' -a 'prune'    -d 'Remove cached Go archives and optionally the rollback copy'
+complete -c gos -n '__fish_use_subcommand' -a 'current'  -d 'Show the currently active Go version'
+complete -c gos -n '__fish_use_subcommand' -a 'list'     -d 'List all available Go versions'
+complete -c gos -n '__fish_use_subcommand' -a 'platforms' -d 'List supported OS/arch archives for a Go version'
+complete -c gos -n '__fish_use_subcommand' -a 'env'      -d 'Print the PATH setup line for your shell'
+complete -c gos -n '__fish_use_subcommand' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script'
+complete -c gos -n '__fish_use_subcommand' -a 'doctor'   -d 'Diagnose gos, Go, PATH, and tool dependencies'
+complete -c gos -n '__fish_use_subcommand' -a 'self-update' -d 'Update gos itself to the latest release'
+complete -c gos -n '__fish_use_subcommand' -a 'version'  -d 'Show gos version'
+complete -c gos -n '__fish_use_subcommand' -a 'help'     -d 'Show help message'
+# --json only where gos actually supports it (leading flag or per command).
+complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable JSON where supported'
+complete -c gos -n '__fish_seen_subcommand_from check current list platforms doctor prune env version' -l json -d 'Output machine-readable JSON'
+complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
+complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
+complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
+complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
+complete -c gos -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell'
+GOS_COMPLETION_FISH
+}
+# gos-completions:fish:end
+
+cmd_completions() {
+  local shell_name="${1:-}"
+
+  if [ -z "$shell_name" ]; then
+    echo "Usage: gos completions <bash|zsh|fish>" >&2
+    return 1
+  fi
+  if [ "$#" -gt 1 ]; then
+    echo "Error: unexpected argument for gos completions: ${2}" >&2
+    echo "Usage: gos completions <bash|zsh|fish>" >&2
+    return 1
+  fi
+
+  case "$shell_name" in
+    bash) _gos_completion_bash ;;
+    zsh)  _gos_completion_zsh ;;
+    fish) _gos_completion_fish ;;
+    *)
+      echo "Error: unsupported shell for gos completions: ${shell_name}" >&2
+      echo "Usage: gos completions <bash|zsh|fish>" >&2
+      return 1
+      ;;
+  esac
+}
+
 cmd_help() {
   cat <<EOF
 
@@ -2110,6 +2298,7 @@ COMMANDS:
   list [--installed]  List available Go versions (or locally installed ones)
   platforms [version] List supported OS/arch archives for a Go version
   env [--fish]        Print the PATH setup line for your shell
+  completions <shell> Print a Bash, Zsh, or Fish completion script
   doctor              Diagnose gos, Go, PATH, and tool dependencies
   self-update         Update gos itself to the latest release
   version             Show gos version
@@ -2117,7 +2306,7 @@ COMMANDS:
 
 OPTIONS:
   --json              Machine-readable output for check, current, list,
-                      platforms, doctor, prune, and version
+                      platforms, env, doctor, prune, and version
 
 EXAMPLES:
   gos latest
@@ -2128,6 +2317,7 @@ EXAMPLES:
   gos doctor
   gos current
   gos list --json
+  gos completions bash
 
 EOF
 }
@@ -2175,6 +2365,7 @@ main() {
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       cmd_env "$@"
       ;;
+    completions) cmd_completions "$@" ;;
     current)   cmd_current "$@" ;;
     list)      cmd_list "$@" ;;
     platforms) cmd_platforms "$@" ;;
