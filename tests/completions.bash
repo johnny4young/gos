@@ -6,6 +6,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "${repo_root}/tests/lib.bash"
 script="${repo_root}/gos.sh"
 sync_script="${repo_root}/scripts/sync-embedded-completions.bash"
+fish_sync_script="${repo_root}/scripts/sync-fish-command-completions.bash"
 test_root="$(mktemp -d)"
 
 cleanup() {
@@ -13,6 +14,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+bash "$fish_sync_script" --check
 bash "$sync_script" --check
 
 for shell_name in bash zsh fish; do

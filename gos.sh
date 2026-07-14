@@ -3108,6 +3108,7 @@ _gos_completion_fish() {
 # Fish completion for gos
 
 complete -c gos -f
+# gos-commands:fish:begin
 complete -c gos -n '__fish_use_subcommand' -a 'latest' -d 'Install the latest stable Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'install' -d 'Install a specific Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally'
@@ -3128,6 +3129,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'doctor' -d 'Diagnose gos, Go, PAT
 complete -c gos -n '__fish_use_subcommand' -a 'self-update' -d 'Update gos itself to the latest verified release'
 complete -c gos -n '__fish_use_subcommand' -a 'version' -d 'Show gos version'
 complete -c gos -n '__fish_use_subcommand' -a 'help' -d 'Show this help message'
+# gos-commands:fish:end
 # --json only where gos actually supports it (leading flag or per command).
 complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable JSON where supported'
 complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version' -l json -d 'Output machine-readable JSON'
