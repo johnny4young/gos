@@ -11,6 +11,7 @@ gos_version="$(sed -n 's/^GOS_VERSION="\([^"]*\)"$/\1/p' "$script")"
 test_root="$(mktemp -d)"
 fake_bin="${test_root}/bin"
 original_path="$PATH"
+real_mv="$(command -v mv)"
 
 cleanup() {
   rm -rf "$test_root"
@@ -229,8 +230,26 @@ fi
 echo "go version go${GOS_TEST_GO_VERSION:-1.20rc1} darwin/arm64"
 FAKE_GO
 
+cat >"${fake_bin}/mv" <<'FAKE_MV'
+#!/usr/bin/env bash
+set -euo pipefail
+
+dest=""
+for arg in "$@"; do
+  dest="$arg"
+done
+
+if [ -n "${GOS_TEST_MV_FAIL_DEST:-}" ] \
+  && { [ "$dest" = "$GOS_TEST_MV_FAIL_DEST" ] || [ "${dest##*/}" = "${GOS_TEST_MV_FAIL_DEST##*/}" ]; }; then
+  printf 'simulated mv failure: %s\n' "$dest" >&2
+  exit 1
+fi
+
+exec "$GOS_TEST_REAL_MV" "$@"
+FAKE_MV
+
 chmod +x "${fake_bin}/uname" "${fake_bin}/curl" "${fake_bin}/sha256sum" \
-  "${fake_bin}/tar" "${fake_bin}/go"
+  "${fake_bin}/tar" "${fake_bin}/go" "${fake_bin}/mv"
 
 fail() {
   echo "not ok - $*" >&2
@@ -279,6 +298,8 @@ run_gos() {
       GOS_TEST_GO_VERSION="${GOS_TEST_GO_VERSION:-}" \
       GOS_TEST_GO_BROKEN="${GOS_TEST_GO_BROKEN:-0}" \
       GOS_TEST_SELFUPDATE_SCRIPT="${GOS_TEST_SELFUPDATE_SCRIPT:-}" \
+      GOS_TEST_MV_FAIL_DEST="${GOS_TEST_MV_FAIL_DEST:-}" \
+      GOS_TEST_REAL_MV="$real_mv" \
       GOS_REQUIRE_CHECKSUM="${GOS_TEST_REQUIRE_CHECKSUM:-}" \
       GOS_FEED_TTL="${GOS_TEST_FEED_TTL:-}" \
       "$@" 2>&1
@@ -324,6 +345,32 @@ FAKE_INSTALLED_GO
   chmod +x "${install_dir}/bin/go"
   printf '%s\n' "$marker" >"${install_dir}/VERSION_MARKER"
 }
+
+sourceable_script="${test_root}/gos-functions.bash"
+sed '$d' "$script" >"$sourceable_script"
+sort_output="$(
+  PATH="${fake_bin}:${original_path}" \
+    GOS_INSTALL_DIR="${test_root}/sort/go" \
+    GOS_CACHE_DIR="${test_root}/sort/cache" \
+    GOS_TEST_REAL_MV="$real_mv" \
+    bash -c '
+      set -euo pipefail
+      . "$1"
+      printf "%s\n" 1.24.0 1.24rc2 1.23.9 1.24beta1 1.24rc1 1.24.1 | _gos_sort_versions
+    ' bash "$sourceable_script"
+)"
+expected_sort_output="$(
+  cat <<'SORT_OUTPUT'
+1.23.9
+1.24beta1
+1.24rc1
+1.24rc2
+1.24.0
+1.24.1
+SORT_OUTPUT
+)"
+[ "$sort_output" = "$expected_sort_output" ] || fail "_gos_sort_versions ordering changed. Output: ${sort_output}"
+pass "version sorter orders beta, rc, releases, and patches"
 
 case_dir="${test_root}/json"
 run_gos "$case_dir" bash "$script" version --json
@@ -1053,6 +1100,24 @@ GOS_TEST_SELFUPDATE_SCRIPT="${case_dir}/release-gos.sh" run_gos "$case_dir" bash
 [ "$status" -eq 0 ] || fail "idempotent self-update failed: ${output}"
 assert_contains "$output" "Already on the latest gos (v9.9.9)." "self-update idempotent"
 pass "self-update replaces the script after checksum and syntax validation"
+
+case_dir="${test_root}/self-update-mv-failure"
+mkdir -p "${case_dir}/app"
+cp "$script" "${case_dir}/app/gos"
+chmod +x "${case_dir}/app/gos"
+sed 's/^GOS_VERSION=.*/GOS_VERSION="9.9.9"/' "$script" >"${case_dir}/release-gos.sh"
+original_self_update_sha="$(shasum -a 256 "${case_dir}/app/gos" | cut -d' ' -f1)"
+resolved_self_update_path="$(cd "${case_dir}/app" && pwd -P)/gos"
+GOS_TEST_SELFUPDATE_SCRIPT="${case_dir}/release-gos.sh" \
+  GOS_TEST_MV_FAIL_DEST="$resolved_self_update_path" \
+  run_gos "$case_dir" bash "${case_dir}/app/gos" self-update
+[ "$status" -ne 0 ] || fail "self-update should fail when final replacement mv fails"
+assert_contains "$output" "failed to replace ${resolved_self_update_path}" "self-update mv failure message"
+assert_contains "$output" "simulated mv failure" "self-update surfaces mv failure"
+current_self_update_sha="$(shasum -a 256 "${case_dir}/app/gos" | cut -d' ' -f1)"
+[ "$current_self_update_sha" = "$original_self_update_sha" ] || fail "self-update mv failure changed the installed script"
+grep -q "^GOS_VERSION=\"${gos_version}\"$" "${case_dir}/app/gos" || fail "self-update mv failure did not preserve the original version"
+pass "self-update preserves the current script when final replacement fails"
 
 case_dir="${test_root}/resolve-minor"
 run_gos "$case_dir" bash "$script" install 1.21
