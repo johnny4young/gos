@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Add a pinned `shfmt` CI check and apply the initial repository shell formatting pass.
 - Harden feature tests for semantic Go version sorting and `gos self-update` replacement failures.
 
+### Changed
+
+- Clarify the release checklist around curated `Unreleased` notes, fallback changelog generation, and the current validation bundle.
+
 ## [1.7.0] - 2026-07-14
 
 ### Added

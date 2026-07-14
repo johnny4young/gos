@@ -369,15 +369,21 @@ assert(fish_completion_file.include?("-l auto"), "Fish completion must include e
   "Chocolatey",
   "Winget",
   "bash tests/packaging.bash",
+  "bash tests/completions.bash",
+  "bash tests/homebrew-tap.bash",
   "bash tests/changelog.bash",
   "bash tests/workflows.bash",
+  "scripts/sync-embedded-completions.bash --check",
+  "shfmt -d -i 2 -ci -bn .",
   "git diff --check",
   "scripts/update-changelog.bash",
   "scripts/update-packaging.bash"
 ].each do |fragment|
   assert(releasing.include?(fragment), "RELEASING.md must mention #{fragment}")
 end
-assert(releasing.include?("generates notes from non-merge git commit subjects"), "RELEASING.md must explain automatic changelog generation")
+assert(releasing.include?("fallback git commit subjects"), "RELEASING.md must explain fallback changelog generation")
+assert(releasing.include?("tests/changelog.bash` fails a post-tag branch"), "RELEASING.md must explain the curated Unreleased guard")
+assert(!releasing.include?("Curated bullets under `Unreleased` are optional"), "RELEASING.md must not describe curated release notes as optional")
 assert(releasing.include?("SECURITY.md"), "RELEASING.md must include security-release checks")
 assert(releasing.include?("no public Chocolatey or Winget install commands"), "RELEASING.md must keep package-manager commands gated")
 assert(releasing.include?("`[Unreleased]` compare link"), "RELEASING.md must include changelog compare-link checks")

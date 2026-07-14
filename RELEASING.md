@@ -28,10 +28,13 @@ commands, and changelog links aligned.
      `Formula/gos.rb` there. When the secret is absent (for example on a fork),
      the job warns and skips instead of failing the release.
 4. Verify `CHANGELOG.md` has `## [Unreleased]` immediately after the intro.
-   Curated bullets under `Unreleased` are optional: if the section is empty, the
-   manual release generates notes from non-merge git commit subjects since the
-   previous tag. Keep commit subjects release-note friendly, preferably using
-   conventional prefixes such as `feat:`, `fix:`, `docs:`, `ci:`, or `security:`.
+   Add curated bullets for every user-facing change before cutting a maintainer
+   release; `tests/changelog.bash` fails a post-tag branch whose `Unreleased`
+   section has no bullets. The changelog helper can still generate notes from
+   non-merge git commit subjects as a fallback when no bullets are present, but
+   treat that as a safety net instead of the normal release path. Keep commit
+   subjects release-note friendly, preferably using conventional prefixes such
+   as `feat:`, `fix:`, `docs:`, `ci:`, or `security:`.
 5. If the release includes a security fix, prepare the private advisory and
    public wording from `SECURITY.md` before publishing.
 6. Verify `README.md` points users to supported install paths:
@@ -45,16 +48,19 @@ commands, and changelog links aligned.
 
 ```bash
 bash tests/checksum.bash
+bash tests/completions.bash
 bash tests/install-transaction.bash
 bash tests/install-sh.bash
 bash tests/install-ps1.bash
 bash tests/packaging.bash
+bash tests/homebrew-tap.bash
 bash tests/changelog.bash
 bash tests/features.bash
 bash tests/detection.bash
 bash tests/windows-extract.bash
 bash tests/workflows.bash
-bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/detection.bash tests/features.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
+scripts/sync-embedded-completions.bash --check
+bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
 zsh -n completions/gos.zsh
 ./gos.sh version
 ./gos.sh help
@@ -62,10 +68,11 @@ ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); YAML.load_f
 git diff --check
 ```
 
-If ShellCheck and Fish are installed locally, also run:
+If ShellCheck, shfmt, and Fish are installed locally, also run:
 
 ```bash
 shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash
+shfmt -d -i 2 -ci -bn .
 fish --no-config --no-execute completions/gos.fish
 ```
 
@@ -79,10 +86,11 @@ fish --no-config --no-execute completions/gos.fish
    - `validate-release-ref` validates the version or tag.
    - `release-preflight` fails manual releases before any mutation if the run
      is not from `main`, the tag already exists, or changelog notes cannot be
-     resolved from `Unreleased` or git commits.
-   - `version-bump` updates `gos.sh`, promotes `Unreleased` notes or generated
-     git commit notes into the release section, updates Chocolatey metadata and
-     Winget metadata, then commits and tags the release.
+     resolved from `Unreleased` bullets or fallback git commit subjects.
+   - `version-bump` updates `gos.sh`, promotes `Unreleased` notes (or
+     helper-generated fallback notes when no bullets are present) into the
+     release section, updates Chocolatey metadata and Winget metadata, then
+     commits and tags the release.
    - `smoke-test` checks the release tag on Linux and macOS.
    - `release` patches installers, builds `gos-windows.zip`, creates checksums,
      publishes attestations, and uploads release assets.
