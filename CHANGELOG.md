@@ -13,7 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Add a best-effort `gos` self-version check to `gos check`, including JSON metadata and a `gos self-update` hint when a newer release is available.
 - Add a pinned `shfmt` CI check and apply the initial repository shell formatting pass.
 - Harden feature tests for semantic Go version sorting and `gos self-update` replacement failures.
-- Add a shared shell test helper library and continue migrating static/release suites to it.
+- Add a shared shell test helper library and continue migrating shell suites to it.
 
 ### Changed
 

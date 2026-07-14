@@ -2,6 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.bash
+. "${repo_root}/tests/lib.bash"
 script="${repo_root}/install.sh"
 test_root="$(mktemp -d)"
 fake_bin="${test_root}/bin"
@@ -107,15 +109,6 @@ FAKE_SUDO
 chmod +x "${fake_bin}/curl" "${fake_bin}/sha256sum" "${fake_bin}/shasum" \
   "${fake_bin}/mkdir" "${fake_bin}/sudo"
 
-fail() {
-  echo "not ok - $*" >&2
-  exit 1
-}
-
-pass() {
-  echo "ok - $*"
-}
-
 assert_status() {
   local expected="$1" actual="$2" name="$3"
   if [ "$actual" -ne "$expected" ]; then
@@ -128,14 +121,6 @@ assert_nonzero_status() {
   if [ "$actual" -eq 0 ]; then
     fail "${name}: expected non-zero status. Output: ${output}"
   fi
-}
-
-assert_contains() {
-  local haystack="$1" needle="$2" name="$3"
-  case "$haystack" in
-    *"$needle"*) ;;
-    *) fail "${name}: missing '${needle}'. Output: ${haystack}" ;;
-  esac
 }
 
 assert_file_contains() {
