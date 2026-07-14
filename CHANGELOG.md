@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Add `gos env --auto` and `gos env --auto --fish` to emit opt-in per-shell hooks that switch `PATH` to installed project versions without mutating global state.
 - Show curl/wget download progress for archive downloads only when stderr is an interactive TTY, while keeping pipes, JSON, and CI output quiet.
 - Style interactive `gos doctor` checks and stderr `Error:`/`Warning:` lines with color and symbols while honoring `NO_COLOR`, `GOS_NO_COLOR=1`, pipes, and JSON output.
+- Add a best-effort `gos` self-version check to `gos check`, including JSON metadata and a `gos self-update` hint when a newer release is available.
 
 ### Changed
 

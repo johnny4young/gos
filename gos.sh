@@ -1500,6 +1500,19 @@ _gos_cache_archive_stats() {
   printf '%s|%s\n' "$count" "$bytes"
 }
 
+_gos_fetch_latest_gos_release() {
+  command -v curl >/dev/null 2>&1 || return 1
+
+  local effective tag version
+  effective=$(curl -sIL -o /dev/null -w '%{url_effective}' 'https://github.com/johnny4young/gos/releases/latest' 2>/dev/null) || return 1
+  tag="${effective##*/}"
+  version="${tag#v}"
+  case "$version" in
+    [0-9]*.[0-9]*.[0-9]*) printf '%s\n' "$version" ;;
+    *) return 1 ;;
+  esac
+}
+
 # ─── Commands ─────────────────────────────────────────────────────────────────
 
 cmd_latest() {
@@ -1542,7 +1555,7 @@ cmd_latest() {
 }
 
 cmd_check() {
-  local latest current up_to_date
+  local latest current up_to_date gos_latest="" gos_up_to_date="null"
   _gos_set_json_from_args "$@" || return 1
 
   if ! _gos_json_enabled; then
@@ -1562,6 +1575,15 @@ cmd_check() {
     up_to_date="false"
   fi
 
+  gos_latest=$(_gos_fetch_latest_gos_release 2>/dev/null) || gos_latest=""
+  if [ -n "$gos_latest" ]; then
+    if [ "$gos_latest" = "$GOS_VERSION" ]; then
+      gos_up_to_date="true"
+    else
+      gos_up_to_date="false"
+    fi
+  fi
+
   if _gos_json_enabled; then
     printf '{"current":'
     if [ "$current" = "none" ]; then
@@ -1571,7 +1593,15 @@ cmd_check() {
     fi
     printf ',"latest":'
     _gos_json_string "go${latest}"
-    printf ',"up_to_date":%s}\n' "$up_to_date"
+    printf ',"up_to_date":%s,"gos":{"current":' "$up_to_date"
+    _gos_json_string "v${GOS_VERSION}"
+    printf ',"latest":'
+    if [ -n "$gos_latest" ]; then
+      _gos_json_string "v${gos_latest}"
+    else
+      printf 'null'
+    fi
+    printf ',"up_to_date":%s}}\n' "$gos_up_to_date"
     return 0
   fi
 
@@ -1585,6 +1615,10 @@ cmd_check() {
   else
     echo "Current: go${current}"
     echo "Update available. Install it with: gos latest"
+  fi
+
+  if [ -n "$gos_latest" ] && [ "$gos_up_to_date" = "false" ]; then
+    echo "gos v${gos_latest} is available. Update with: gos self-update"
   fi
 }
 

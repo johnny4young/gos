@@ -78,7 +78,7 @@ Done. That's the whole setup.
 - **Pin any version** — `gos install 1.21.6` gets exactly what you need; `gos install 1.21` resolves to the newest patch release
 - **Run without switching** — `gos run 1.21 go test ./...` runs a command with a side-by-side Go version without changing the active one
 - **Project-aware switching** — `gos use` reads `.go-version`, `.tool-versions`, `toolchain`, or `go` directives
-- **Update checks** — `gos check` reports whether a newer stable Go is available without installing anything
+- **Update checks** — `gos check` reports whether newer stable Go or `gos` releases are available without installing anything
 - **Doctor diagnostics** — `gos doctor` checks Go, PATH, permissions, checksum tools, and extraction tools; `gos doctor --fix` applies only safe, non-destructive fixes
 - **Offline status dashboard** — `gos status` summarizes the active Go, project manifest, rollback, cache, and layout without network access
 - **Cache and rollback** — verified archives are cached, `gos rollback` restores the previous install, and `gos prune` reclaims the disk space
@@ -265,7 +265,7 @@ exec fish          # for Fish
 | `gos run <version> [--] <command>` | Run a command with a side-by-side Go version without activating it globally |
 | `gos use [path]` | Install the Go version requested by `.go-version`, `.tool-versions`, or `go.mod` |
 | `gos pin <version>` | Write `.go-version` in the current directory |
-| `gos check` | Check whether a newer stable Go is available (no install) |
+| `gos check` | Check whether newer stable Go or gos releases are available (no install) |
 | `gos rollback` | Restore the previous Go installation, if available |
 | `gos uninstall <version>` | Remove an installed version (side-by-side mode) |
 | `gos prune [--rollback]` | Remove cached Go archives; `--rollback` also removes the rollback copy |
@@ -347,9 +347,10 @@ Checking for Go updates...
 Latest:  go1.24.1
 Current: go1.24.0
 Update available. Install it with: gos latest
+gos v1.7.1 is available. Update with: gos self-update
 
 $ gos check --json
-{"current":"go1.24.0","latest":"go1.24.1","up_to_date":false}
+{"current":"go1.24.0","latest":"go1.24.1","up_to_date":false,"gos":{"current":"v1.7.0","latest":"v1.7.1","up_to_date":false}}
 
 $ gos current --json
 {"found":true,"version":"1.24.1","current":"go1.24.1"}

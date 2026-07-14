@@ -43,16 +43,20 @@ fi
 
 output=""
 url=""
+write_out=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o)
       output="$2"
       shift 2
       ;;
-    --proto|--connect-timeout|--retry)
+    --proto|--connect-timeout|--retry|-w)
+      if [ "$1" = "-w" ]; then
+        write_out="$2"
+      fi
       shift 2
       ;;
-    --tlsv1.2|-fsSL|-fSL|--progress-bar)
+    --tlsv1.2|-fsSL|-fSL|--progress-bar|-sIL)
       shift
       ;;
     *)
@@ -82,6 +86,15 @@ case "$url" in
     ;;
   https://github.com/johnny4young/gos/releases/latest/download/checksums.txt)
     printf 'expectedsha  gos.sh\n' >"$output"
+    ;;
+  https://github.com/johnny4young/gos/releases/latest)
+    if [ "${GOS_TEST_DOWNLOAD_MODE:-ok}" = "fail-gos-release" ]; then
+      echo "release lookup disabled" >&2
+      exit 1
+    fi
+    case "$write_out" in
+      *url_effective*) printf 'https://github.com/johnny4young/gos/releases/tag/v9.9.9' ;;
+    esac
     ;;
   'https://go.dev/dl/?mode=json')
     cat <<'JSON'
@@ -859,8 +872,8 @@ grep -q 'https://go.dev/dl/?mode=json$' "${case_dir}/urls.log" \
   || fail "initial check should fetch the default feed"
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json
 [ "$status" -eq 0 ] || fail "check feed-cache cached run failed: ${output}"
-if [ -s "${case_dir}/urls.log" ]; then
-  fail "cached check should not reach the network: $(cat "${case_dir}/urls.log")"
+if grep -q 'https://go.dev/dl/?mode=json$' "${case_dir}/urls.log"; then
+  fail "cached check should not refetch the Go feed: $(cat "${case_dir}/urls.log")"
 fi
 
 case_dir="${test_root}/feed-cache-absent"
@@ -910,6 +923,7 @@ assert_contains "$output" "Already up to date." "check up to date"
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
 [ "$status" -eq 0 ] || fail "check outdated failed: ${output}"
 assert_contains "$output" "Update available. Install it with: gos latest" "check outdated"
+assert_contains "$output" "gos v9.9.9 is available. Update with: gos self-update" "check gos update"
 if grep -q 'dl/go1' "${case_dir}/urls.log"; then
   fail "check must never download an archive"
 fi
@@ -919,10 +933,20 @@ assert_json "$output" "check --json outdated"
 assert_contains "$output" '"current":"go1.20.0"' "check json current"
 assert_contains "$output" '"latest":"go1.21.6"' "check json latest"
 assert_contains "$output" '"up_to_date":false' "check json outdated"
+assert_contains "$output" '"gos":{"current":"v' "check json gos current"
+assert_contains "$output" '"latest":"v9.9.9"' "check json gos latest"
+assert_contains "$output" '"gos":{"current":"v' "check json gos object"
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --json
 [ "$status" -eq 0 ] || fail "check --json up-to-date failed: ${output}"
 assert_json "$output" "check --json up-to-date"
 assert_contains "$output" '"up_to_date":true' "check json up to date"
+assert_contains "$output" '"latest":"v9.9.9"' "check json gos latest up to date"
+GOS_TEST_DOWNLOAD_MODE="fail-gos-release" GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
+[ "$status" -eq 0 ] || fail "check should skip gos release lookup failures: ${output}"
+assert_contains "$output" "Update available. Install it with: gos latest" "check skip gos release go output"
+case "$output" in
+  *"gos v"*) fail "check should skip gos release line when GitHub lookup fails: ${output}" ;;
+esac
 # Unknown flags are rejected, not silently ignored (shared [--json] parser).
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --bogus
 [ "$status" -ne 0 ] || fail "check should reject an unknown flag"
