@@ -108,6 +108,19 @@ _gos_json_string() {
   printf '"%s"' "$(_gos_json_escape "$1")"
 }
 
+_gos_color_enabled() {
+  [ "${GOS_OUTPUT_JSON:-0}" != "1" ] || return 1
+  [ -t 1 ] || return 1
+  [ -z "${NO_COLOR:-}" ] || return 1
+  [ "${GOS_NO_COLOR:-0}" != "1" ] || return 1
+  [ "${TERM:-}" != "dumb" ] || return 1
+}
+
+_gos_color_text() {
+  local code="$1" text="$2"
+  printf '\033[%sm%s\033[0m' "$code" "$text"
+}
+
 # Parse the flags shared by commands that take only [--json]. Unknown arguments
 # are rejected rather than silently ignored, so `gos check --bogus` errors like
 # the hand-rolled parsers in list/env/prune already do.
@@ -2582,7 +2595,16 @@ _gos_doctor_check() {
     return 0
   fi
 
-  printf '%s - %s: %s\n' "$status" "$name" "$message"
+  if _gos_color_enabled; then
+    case "$status" in
+      ok)      printf '%s %s - %s: %s\n' "$(_gos_color_text 32 '✓')" "$(_gos_color_text 32 "$status")" "$name" "$message" ;;
+      warn)    printf '%s %s - %s: %s\n' "$(_gos_color_text 33 '!')" "$(_gos_color_text 33 "$status")" "$name" "$message" ;;
+      problem) printf '%s %s - %s: %s\n' "$(_gos_color_text 31 '✗')" "$(_gos_color_text 31 "$status")" "$name" "$message" ;;
+      *)       printf '%s - %s: %s\n' "$status" "$name" "$message" ;;
+    esac
+  else
+    printf '%s - %s: %s\n' "$status" "$name" "$message"
+  fi
   if [ -n "$fix" ]; then
     printf 'fix - %s\n' "$fix"
   fi

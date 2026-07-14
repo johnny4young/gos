@@ -508,7 +508,58 @@ run_gos "$case_dir" bash "$script" doctor --json
 assert_json "$output" "doctor --json"
 assert_contains "$output" '"status":"ok"' "doctor json"
 assert_contains "$output" '"name":"checksum-hash"' "doctor json checks"
+run_gos "$case_dir" bash "$script" doctor
+[ "$status" -eq 0 ] || fail "doctor human failed: ${output}"
+case "$output" in
+  *$'\033['*) fail "doctor non-tty output must not contain ANSI: ${output}" ;;
+esac
 pass "doctor emits machine-readable diagnostics"
+
+case_dir="${test_root}/doctor-color"
+mkdir -p "$case_dir"
+runner="${case_dir}/doctor-tty.sh"
+cat >"$runner" <<TTY_DOCTOR
+#!/usr/bin/env bash
+set -euo pipefail
+unset NO_COLOR GOS_NO_COLOR
+PATH="${fake_bin}:${original_path}" \
+TERM="xterm-256color" \
+GOS_INSTALL_DIR="${case_dir}/go" \
+GOS_CACHE_DIR="${case_dir}/cache" \
+  bash "$script" doctor
+TTY_DOCTOR
+chmod +x "$runner"
+if run_with_pty "$runner" "${case_dir}/doctor-tty.out"; then
+  doctor_tty=$(<"${case_dir}/doctor-tty.out")
+  assert_contains "$doctor_tty" $'\033[32m✓\033[0m' "doctor tty ok symbol"
+  assert_contains "$doctor_tty" $'\033[32mok\033[0m' "doctor tty ok label"
+else
+  echo "ok - doctor color TTY branch skipped: no usable pseudo-terminal harness"
+fi
+runner="${case_dir}/doctor-no-color.sh"
+cat >"$runner" <<TTY_DOCTOR_NO_COLOR
+#!/usr/bin/env bash
+set -euo pipefail
+PATH="${fake_bin}:${original_path}" \
+TERM="xterm-256color" \
+NO_COLOR="1" \
+GOS_INSTALL_DIR="${case_dir}/plain-go" \
+GOS_CACHE_DIR="${case_dir}/plain-cache" \
+  bash "$script" doctor
+TTY_DOCTOR_NO_COLOR
+chmod +x "$runner"
+if run_with_pty "$runner" "${case_dir}/doctor-no-color.out"; then
+  doctor_plain=$(<"${case_dir}/doctor-no-color.out")
+  case "$doctor_plain" in
+    *$'\033['*) fail "NO_COLOR doctor output must not contain ANSI: ${doctor_plain}" ;;
+  esac
+  case "$doctor_plain" in
+    *"✓"*) fail "NO_COLOR doctor output must not contain symbols: ${doctor_plain}" ;;
+  esac
+else
+  echo "ok - doctor NO_COLOR TTY branch skipped: no usable pseudo-terminal harness"
+fi
+pass "doctor color is limited to interactive output and honors NO_COLOR"
 
 case_dir="${test_root}/doctor-fix"
 GOS_TEST_INSTALL_DIR="${case_dir}/nested/go" run_gos "$case_dir" bash "$script" doctor --fix --json

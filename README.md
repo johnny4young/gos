@@ -89,6 +89,7 @@ Done. That's the whole setup.
 - **Self-updating** — `gos self-update` upgrades gos itself from the latest verified release
 - **Mirror support** — `GOS_DOWNLOAD_MIRROR` downloads archives from an HTTPS mirror while still verifying official go.dev checksums
 - **TTY download progress** — interactive installs show archive progress while pipes, CI, and JSON stay quiet
+- **TTY diagnostics styling** — interactive `gos doctor` output uses color and symbols; pipes, `NO_COLOR`, `GOS_NO_COLOR=1`, and JSON stay plain
 - **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `doctor`, `prune`, and `version`
 - **Auto-detects everything** — OS (`darwin`, `linux`, `windows`) and architecture (`amd64`, `arm64`, `armv6l`, `386`)
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)
@@ -398,6 +399,7 @@ For Zsh and Fish setup, see [Manual Shell Configuration](#manual-shell-configura
 | `GOS_BIN_DIR` | `/usr/local/bin` | Where the `gos` command is installed by `install.sh`. Missing custom directories are created when possible. |
 | `GOS_CACHE_DIR` | `$XDG_CACHE_HOME/gos` or `$HOME/.cache/gos` | Where verified Go archives and discovery-only feed metadata are cached for reuse. Clear archives with `gos prune`. |
 | `GOS_FEED_TTL` | `600` | Seconds that discovery commands (`list`, `platforms`, `check`, shell completion version suggestions) may reuse cached Go feed metadata. Set to `0` to disable. Installs and checksum verification always fetch fresh metadata. |
+| `GOS_NO_COLOR` | unset | Set to `1` to disable interactive color/symbol styling. Standard `NO_COLOR` is also honored. |
 | `GOS_INSTALL_DIR` | `/usr/local/go` | Where Go gets installed. Override to install without `sudo`. Path basename must contain "go". |
 | `GOS_DOWNLOAD_MIRROR` | unset | HTTPS base URL to download Go archives from (e.g. `https://golang.google.cn/dl` behind restrictive networks). Checksums are still resolved from go.dev, and mirror downloads fail closed when they cannot be verified. |
 | `GOS_VERSIONS_DIR` | unset | Opt-in side-by-side layout (e.g. `$HOME/.gos/versions`). Each version installs to `$GOS_VERSIONS_DIR/go<version>` and `GOS_INSTALL_DIR` becomes a symlink to the active one, so switching is instant. Requires symlink support (macOS, Linux, WSL). |
