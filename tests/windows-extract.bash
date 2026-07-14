@@ -2,6 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.bash
+. "${repo_root}/tests/lib.bash"
 script="${repo_root}/gos.sh"
 test_root="$(mktemp -d)"
 real_tools_path="$PATH"
@@ -10,15 +12,6 @@ cleanup() {
   rm -rf "$test_root"
 }
 trap cleanup EXIT
-
-fail() {
-  echo "not ok - $*" >&2
-  exit 1
-}
-
-pass() {
-  echo "ok - $*"
-}
 
 link_tool() {
   local tool="$1" target

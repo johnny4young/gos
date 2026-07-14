@@ -7,6 +7,8 @@ set -euo pipefail
 # validate → commit → push flow runs without network or SSH.
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.bash
+. "${repo_root}/tests/lib.bash"
 script="${repo_root}/scripts/update-homebrew-tap.sh"
 test_root="$(mktemp -d)"
 
@@ -14,23 +16,6 @@ cleanup() {
   rm -rf "$test_root"
 }
 trap cleanup EXIT
-
-fail() {
-  echo "not ok - $*" >&2
-  exit 1
-}
-
-pass() {
-  echo "ok - $*"
-}
-
-assert_contains() {
-  local haystack="$1" needle="$2" name="$3"
-  case "$haystack" in
-    *"$needle"*) ;;
-    *) fail "${name}: missing '${needle}'. Output: ${haystack}" ;;
-  esac
-}
 
 command -v git >/dev/null 2>&1 || fail "git is required for the tap tests"
 command -v ruby >/dev/null 2>&1 || fail "ruby is required for the tap tests"

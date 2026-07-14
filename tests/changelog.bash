@@ -2,17 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.bash
+. "${repo_root}/tests/lib.bash"
 script="$repo_root/scripts/update-changelog.bash"
-
-assert_contains() {
-  local file="$1"
-  local expected="$2"
-
-  if ! grep -Fq -- "$expected" "$file"; then
-    printf 'not ok - expected %s to contain: %s\n' "$file" "$expected" >&2
-    exit 1
-  fi
-}
 
 unreleased_notes() {
   local file="$1"
@@ -99,12 +91,12 @@ test_promotes_unreleased_notes() {
     GOS_PREVIOUS_TAG="v1.0.0" \
     bash "$script" "1.1.0"
 
-  assert_contains "$changelog" "## [Unreleased]"
-  assert_contains "$changelog" "## [1.1.0] - 2026-05-07"
-  assert_contains "$changelog" "- Add a user-facing improvement."
-  assert_contains "$changelog" "- Fix a release-visible issue."
-  assert_contains "$changelog" "[Unreleased]: https://github.com/johnny4young/gos/compare/v1.1.0...HEAD"
-  assert_contains "$changelog" "[1.1.0]: https://github.com/johnny4young/gos/compare/v1.0.0...v1.1.0"
+  assert_file_contains "$changelog" "## [Unreleased]"
+  assert_file_contains "$changelog" "## [1.1.0] - 2026-05-07"
+  assert_file_contains "$changelog" "- Add a user-facing improvement."
+  assert_file_contains "$changelog" "- Fix a release-visible issue."
+  assert_file_contains "$changelog" "[Unreleased]: https://github.com/johnny4young/gos/compare/v1.1.0...HEAD"
+  assert_file_contains "$changelog" "[1.1.0]: https://github.com/johnny4young/gos/compare/v1.0.0...v1.1.0"
 
   notes="$(unreleased_notes "$changelog")"
   if printf '%s\n' "$notes" | grep -Eq '^- '; then
@@ -209,13 +201,13 @@ CHANGELOG
       bash "$script" "1.1.0"
   )
 
-  assert_contains "$changelog" "## [1.1.0] - 2026-05-07"
-  assert_contains "$changelog" "### Added"
-  assert_contains "$changelog" "- Add project-aware version switching."
-  assert_contains "$changelog" "### Changed"
-  assert_contains "$changelog" "- Clarify release checklist."
-  assert_contains "$changelog" "### Fixed"
-  assert_contains "$changelog" "- Preserve rollback backups."
+  assert_file_contains "$changelog" "## [1.1.0] - 2026-05-07"
+  assert_file_contains "$changelog" "### Added"
+  assert_file_contains "$changelog" "- Add project-aware version switching."
+  assert_file_contains "$changelog" "### Changed"
+  assert_file_contains "$changelog" "- Clarify release checklist."
+  assert_file_contains "$changelog" "### Fixed"
+  assert_file_contains "$changelog" "- Preserve rollback backups."
 
   printf 'ok - empty Unreleased generates notes from git commits\n'
 }
@@ -328,7 +320,7 @@ CHANGELOG
     exit 1
   fi
 
-  assert_contains "$tmp_dir/out" 'no "- " bullet items'
+  assert_file_contains "$tmp_dir/out" 'no "- " bullet items'
 
   if [[ "$(<"$changelog")" != "$before" ]]; then
     printf 'not ok - heading-only Unreleased failure should not mutate CHANGELOG.md\n' >&2
