@@ -260,11 +260,17 @@ run_install() {
     "GOS_TEST_EXPECTED_SHA=${expected_sha}"
   )
 
-  if [ "$strict" = "strict" ]; then
-    env_vars+=("GOS_REQUIRE_CHECKSUM=1")
-  else
-    env_vars+=("GOS_REQUIRE_CHECKSUM=")
-  fi
+  case "$strict" in
+    strict)
+      env_vars+=("GOS_REQUIRE_CHECKSUM=1")
+      ;;
+    feed)
+      env_vars+=("GOS_REQUIRE_CHECKSUM=feed")
+      ;;
+    *)
+      env_vars+=("GOS_REQUIRE_CHECKSUM=")
+      ;;
+  esac
 
   set +e
   output="$(env "${env_vars[@]}" bash "$script" install 1.21.6 2>&1)"
@@ -278,6 +284,12 @@ assert_file_contains "$url_log" "https://go.dev/dl/?mode=json&include=all" "full
 assert_contains "$output" "Checksum verified." "full feed"
 assert_tar_called "$tar_log" "full feed"
 pass "explicit install verifies checksum from include=all"
+
+run_install "feed_required" "present" "ok" "feed"
+assert_status 0 "$status" "feed required"
+assert_contains "$output" "Checksum verified." "feed required"
+assert_tar_called "$tar_log" "feed required"
+pass "GOS_REQUIRE_CHECKSUM=feed accepts feed metadata"
 
 run_install "mismatch" "present" "mismatch" "default"
 assert_nonzero_status "$status" "mismatch"
@@ -317,6 +329,12 @@ assert_contains "$output" "Checksum verified." "sha file fallback"
 assert_not_contains "$output" "skipping integrity verification" "sha file fallback"
 assert_tar_called "$tar_log" "sha file fallback"
 pass "missing feed metadata falls back to the .sha256 companion file"
+
+run_install "sha_file_fallback_feed_required" "missing" "ok" "feed" "valid"
+assert_nonzero_status "$status" "sha file fallback feed required"
+assert_contains "$output" "GOS_REQUIRE_CHECKSUM=feed but no checksum was found" "sha file fallback feed required"
+assert_tar_not_called "$tar_log" "sha file fallback feed required"
+pass "GOS_REQUIRE_CHECKSUM=feed rejects the .sha256 fallback"
 
 run_install "sha_file_fallback_mismatch" "missing" "mismatch" "default" "valid"
 assert_nonzero_status "$status" "sha file fallback mismatch"

@@ -229,6 +229,13 @@ assert_contains() {
   esac
 }
 
+assert_json() {
+  local json="$1" name="$2"
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s\n' "$json" | jq -e . >/dev/null || fail "${name}: output is not valid JSON: ${json}"
+  fi
+}
+
 run_gos() {
   local case_dir="$1"
   shift
@@ -250,6 +257,7 @@ run_gos() {
     GOS_TEST_GO_VERSION="${GOS_TEST_GO_VERSION:-}" \
     GOS_TEST_GO_BROKEN="${GOS_TEST_GO_BROKEN:-0}" \
     GOS_TEST_SELFUPDATE_SCRIPT="${GOS_TEST_SELFUPDATE_SCRIPT:-}" \
+    GOS_REQUIRE_CHECKSUM="${GOS_TEST_REQUIRE_CHECKSUM:-}" \
     "$@" 2>&1
   )"
   status=$?
@@ -270,18 +278,34 @@ FAKE_INSTALLED_GO
 case_dir="${test_root}/json"
 run_gos "$case_dir" bash "$script" version --json
 [ "$status" -eq 0 ] || fail "version --json failed: ${output}"
+assert_json "$output" "version --json"
 assert_contains "$output" "\"gos_version\":\"${gos_version}\"" "version json"
 
 run_gos "$case_dir" bash "$script" current --json
 [ "$status" -eq 0 ] || fail "current --json failed: ${output}"
+assert_json "$output" "current --json"
 assert_contains "$output" '"version":"1.20rc1"' "current json preserves rc"
 
 run_gos "$case_dir" bash "$script" list --json
 [ "$status" -eq 0 ] || fail "list --json failed: ${output}"
+assert_json "$output" "list --json"
 assert_contains "$output" '"versions":["go1.20.0","go1.21rc1","go1.21.6","go1.22rc1"]' "list json orders rc before its release"
+
+run_gos "$case_dir" bash "$script" list
+[ "$status" -eq 0 ] || fail "list failed: ${output}"
+expected_list_output="$(cat <<'LIST_OUTPUT'
+Fetching available Go versions...
+go1.20.0
+go1.21rc1
+go1.21.6
+go1.22rc1
+LIST_OUTPUT
+)"
+[ "$output" = "$expected_list_output" ] || fail "plain list output/order changed. Output: ${output}"
 
 run_gos "$case_dir" bash "$script" platforms 1.21.6 --json
 [ "$status" -eq 0 ] || fail "platforms --json failed: ${output}"
+assert_json "$output" "platforms --json"
 assert_contains "$output" '"platforms":["darwin/arm64","linux/amd64"]' "platforms json"
 pass "machine-readable current, list, version, and platforms work"
 
@@ -345,6 +369,7 @@ pass "rollback restores the previous Go installation"
 case_dir="${test_root}/doctor"
 run_gos "$case_dir" bash "$script" doctor --json
 [ "$status" -eq 0 ] || fail "doctor --json failed: ${output}"
+assert_json "$output" "doctor --json"
 assert_contains "$output" '"status":"ok"' "doctor json"
 assert_contains "$output" '"name":"checksum-hash"' "doctor json checks"
 pass "doctor emits machine-readable diagnostics"
@@ -412,6 +437,26 @@ env_line="$output"
 [ -f "${case_dir}/pwned" ] && fail "gos env output executed injected command via eval"
 assert_contains "$env_line" "export PATH='" "env single-quotes the path"
 pass "gos env output is injection-safe under eval"
+
+case_dir="${test_root}/env-quoting-matrix"
+mkdir -p "$case_dir"
+# Mix spaces, a single quote, backslash, dollar, and semicolon. The basename
+# still contains "go" so install-dir validation accepts it.
+hostile_dir="${case_dir}/team go/it'\\\$weird;go"
+GOS_TEST_INSTALL_DIR="$hostile_dir" run_gos "$case_dir" bash "$script" env
+[ "$status" -eq 0 ] || fail "env with hostile quoting matrix failed: ${output}"
+env_line="$output"
+( eval "$env_line"; case ":$PATH:" in *":${hostile_dir}/bin:"*) ;; *) exit 1 ;; esac ) \
+  || fail "env POSIX quoting did not preserve the hostile path exactly"
+GOS_TEST_INSTALL_DIR="$hostile_dir" run_gos "$case_dir" bash "$script" env --fish
+[ "$status" -eq 0 ] || fail "env --fish with hostile quoting matrix failed: ${output}"
+assert_contains "$output" "fish_add_path --path '" "env fish quotes hostile path"
+assert_contains "$output" "\$weird;go/bin'" "env fish preserves dollar/semicolon"
+if command -v fish >/dev/null 2>&1; then
+  printf '%s\n' "$output" | fish --no-config --no-execute - \
+    || fail "env --fish output is not valid fish syntax"
+fi
+pass "env quoting preserves hostile paths for POSIX and Fish"
 
 case_dir="${test_root}/trailing-slash"
 mkdir -p "$case_dir"
@@ -517,10 +562,13 @@ if grep -q 'dl/go1' "${case_dir}/urls.log"; then
 fi
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json
 [ "$status" -eq 0 ] || fail "check --json failed: ${output}"
+assert_json "$output" "check --json outdated"
 assert_contains "$output" '"current":"go1.20.0"' "check json current"
 assert_contains "$output" '"latest":"go1.21.6"' "check json latest"
 assert_contains "$output" '"up_to_date":false' "check json outdated"
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --json
+[ "$status" -eq 0 ] || fail "check --json up-to-date failed: ${output}"
+assert_json "$output" "check --json up-to-date"
 assert_contains "$output" '"up_to_date":true' "check json up to date"
 # Unknown flags are rejected, not silently ignored (shared [--json] parser).
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --bogus
@@ -540,6 +588,13 @@ if grep -q '^https://go.dev/dl/go1' "${case_dir}/urls.log"; then
   fail "mirror install must not download archives from go.dev"
 fi
 pass "mirror installs download archives from the mirror with go.dev checksums"
+
+case_dir="${test_root}/mirror-trailing-slash"
+GOS_TEST_MIRROR="https://mirror.test.invalid/dl/" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "mirror install with trailing slash failed: ${output}"
+grep -q '^https://mirror.test.invalid/dl/go1.21.6.darwin-arm64.tar.gz$' "${case_dir}/urls.log" \
+  || fail "mirror trailing slash was not normalized: $(cat "${case_dir}/urls.log")"
+pass "mirror URLs with trailing slashes are normalized"
 
 case_dir="${test_root}/mirror-unverified"
 GOS_TEST_MIRROR="https://mirror.test.invalid/dl" run_gos "$case_dir" bash "$script" install 1.19.0
@@ -643,10 +698,12 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "prune-json setup install failed: ${output}"
 run_gos "$case_dir" bash "$script" prune --json
 [ "$status" -eq 0 ] || fail "prune --json failed: ${output}"
+assert_json "$output" "prune --json"
 assert_contains "$output" '"removed_archives":1' "prune json removed count"
 assert_contains "$output" '"rollback":"kept"' "prune json rollback kept"
 run_gos "$case_dir" bash "$script" prune --rollback --json
 [ "$status" -eq 0 ] || fail "prune --rollback --json failed: ${output}"
+assert_json "$output" "prune --rollback --json"
 assert_contains "$output" '"rollback":"removed"' "prune json rollback removed"
 pass "prune supports machine-readable JSON output"
 
@@ -678,6 +735,7 @@ run_gos "$case_dir" bash "$script" env --fish
 assert_contains "$output" "fish_add_path --path '${case_dir}/go/bin'" "env fish"
 run_gos "$case_dir" bash "$script" env --json
 [ "$status" -eq 0 ] || fail "env --json failed: ${output}"
+assert_json "$output" "env --json"
 assert_contains "$output" "\"bin_dir\":\"${case_dir}/go/bin\"" "env json"
 run_gos "$case_dir" bash "$script" env --bogus
 [ "$status" -ne 0 ] || fail "env with unknown option should fail"
@@ -719,6 +777,7 @@ assert_contains "$output" "go1.20.0" "list installed old"
 assert_contains "$output" "go1.21.6" "list installed new"
 GOS_TEST_VERSIONS_DIR="$versions_dir" GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" list --installed --json
 [ "$status" -eq 0 ] || fail "list --installed --json failed: ${output}"
+assert_json "$output" "list --installed --json"
 assert_contains "$output" '"installed":["go1.20.0","go1.21.6"]' "list installed json"
 assert_contains "$output" '"active":"go1.21.6"' "list installed json active"
 
@@ -771,6 +830,7 @@ pass "uninstall explains it needs side-by-side mode"
 case_dir="${test_root}/current-json-none"
 GOS_TEST_GO_BROKEN=1 run_gos "$case_dir" bash "$script" current --json
 [ "$status" -eq 0 ] || fail "current --json with broken go failed: ${output}"
+assert_json "$output" "current --json none"
 assert_contains "$output" '{"found":false,"version":null,"current":null}' "current json none"
 pass "current --json reports found:false when no working Go exists"
 

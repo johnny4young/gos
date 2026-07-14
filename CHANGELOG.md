@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - Clarify README completion setup: Homebrew installs completion files automatically; other install methods should use `gos completions <shell>`.
 - Fix the README `gos list` example to show the real ascending version order.
+- Harden feature tests with parseable-JSON checks, plain `gos list` ordering coverage, strict feed-checksum mode coverage, hostile `gos env` quoting cases, and mirror trailing-slash normalization.
 
 ## [1.6.0] - 2026-07-06
 
