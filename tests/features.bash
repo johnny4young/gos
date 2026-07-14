@@ -37,6 +37,10 @@ cat >"${fake_bin}/curl" <<'FAKE_CURL'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ -n "${GOS_TEST_CURL_ARGS_LOG:-}" ]; then
+  printf '%s\n' "$*" >>"$GOS_TEST_CURL_ARGS_LOG"
+fi
+
 output=""
 url=""
 while [ "$#" -gt 0 ]; do
@@ -48,7 +52,7 @@ while [ "$#" -gt 0 ]; do
     --proto|--connect-timeout|--retry)
       shift 2
       ;;
-    --tlsv1.2|-fsSL)
+    --tlsv1.2|-fsSL|-fSL|--progress-bar)
       shift
       ;;
     *)
@@ -243,6 +247,7 @@ run_gos() {
   status=0
   mkdir -p "$case_dir"
   : >"${case_dir}/urls.log"
+  : >"${case_dir}/curl-args.log"
 
   set +e
   output="$(
@@ -252,6 +257,7 @@ run_gos() {
     GOS_DOWNLOAD_MIRROR="${GOS_TEST_MIRROR:-}" \
     GOS_VERSIONS_DIR="${GOS_TEST_VERSIONS_DIR:-}" \
     GOS_TEST_URL_LOG="${case_dir}/urls.log" \
+    GOS_TEST_CURL_ARGS_LOG="${case_dir}/curl-args.log" \
     GOS_TEST_DOWNLOAD_MODE="${GOS_TEST_DOWNLOAD_MODE:-ok}" \
     GOS_TEST_UNSUPPORTED_PLATFORM="${GOS_TEST_UNSUPPORTED_PLATFORM:-0}" \
     GOS_TEST_GO_VERSION="${GOS_TEST_GO_VERSION:-}" \
@@ -263,6 +269,33 @@ run_gos() {
   )"
   status=$?
   set -e
+}
+
+run_with_pty() {
+  local runner="$1" out_file="$2"
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$runner" >"$out_file" 2>&1 <<'PYPTY'
+import os
+import pty
+import sys
+
+status = pty.spawn([sys.argv[1]])
+if hasattr(os, "waitstatus_to_exitcode"):
+    sys.exit(os.waitstatus_to_exitcode(status))
+if os.WIFEXITED(status):
+    sys.exit(os.WEXITSTATUS(status))
+sys.exit(1)
+PYPTY
+    return $?
+  fi
+
+  if command -v script >/dev/null 2>&1; then
+    script -q /dev/null "$runner" >"$out_file" 2>&1
+    return $?
+  fi
+
+  return 127
 }
 
 create_old_install() {
@@ -753,6 +786,49 @@ GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --bogus
 [ "$status" -ne 0 ] || fail "check should reject an unknown flag"
 assert_contains "$output" "unexpected argument: --bogus" "check rejects unknown flag"
 pass "check reports update availability without installing"
+
+case_dir="${test_root}/download-progress"
+run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "download-progress install failed: ${output}"
+archive_args=$(grep 'go1.21.6.darwin-arm64.tar.gz' "${case_dir}/curl-args.log" | tail -n 1 || true)
+assert_contains "$archive_args" "-fsSL" "non-tty archive download keeps curl silent flags"
+case "$archive_args" in
+  *"--progress-bar"*) fail "non-tty archive download should not use curl progress: ${archive_args}" ;;
+esac
+
+case_dir="${test_root}/download-progress-tty"
+mkdir -p "$case_dir"
+: >"${case_dir}/urls.log"
+: >"${case_dir}/curl-args.log"
+runner="${case_dir}/runner.sh"
+cat >"$runner" <<TTY_RUNNER
+#!/usr/bin/env bash
+set -euo pipefail
+PATH="${fake_bin}:${original_path}" \
+GOS_INSTALL_DIR="${case_dir}/go" \
+GOS_CACHE_DIR="${case_dir}/cache" \
+GOS_DOWNLOAD_MIRROR="" \
+GOS_VERSIONS_DIR="" \
+GOS_TEST_URL_LOG="${case_dir}/urls.log" \
+GOS_TEST_CURL_ARGS_LOG="${case_dir}/curl-args.log" \
+GOS_TEST_DOWNLOAD_MODE="ok" \
+GOS_TEST_UNSUPPORTED_PLATFORM="0" \
+GOS_TEST_GO_VERSION="" \
+GOS_TEST_GO_BROKEN="0" \
+GOS_TEST_SELFUPDATE_SCRIPT="" \
+GOS_REQUIRE_CHECKSUM="" \
+GOS_FEED_TTL="" \
+  bash "$script" install 1.21.6
+TTY_RUNNER
+chmod +x "$runner"
+if run_with_pty "$runner" "${case_dir}/pty.out"; then
+  archive_args=$(grep 'go1.21.6.darwin-arm64.tar.gz' "${case_dir}/curl-args.log" | tail -n 1 || true)
+  assert_contains "$archive_args" "--progress-bar" "tty archive download enables curl progress"
+  assert_contains "$archive_args" "-fSL" "tty archive download keeps curl fail/location flags"
+else
+  echo "ok - download progress TTY branch skipped: no usable pseudo-terminal harness"
+fi
+pass "download progress is limited to interactive archive downloads"
 
 case_dir="${test_root}/mirror"
 GOS_TEST_MIRROR="https://mirror.test.invalid/dl" run_gos "$case_dir" bash "$script" install 1.21.6
