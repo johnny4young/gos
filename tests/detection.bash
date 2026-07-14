@@ -6,6 +6,8 @@ set -euo pipefail
 # used as the probe for each fake `uname` pair.
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.bash
+. "${repo_root}/tests/lib.bash"
 script="${repo_root}/gos.sh"
 test_root="$(mktemp -d)"
 fake_bin="${test_root}/bin"
@@ -28,23 +30,6 @@ case "${1:-}" in
 esac
 FAKE_UNAME
 chmod +x "${fake_bin}/uname"
-
-fail() {
-  echo "not ok - $*" >&2
-  exit 1
-}
-
-pass() {
-  echo "ok - $*"
-}
-
-assert_contains() {
-  local haystack="$1" needle="$2" name="$3"
-  case "$haystack" in
-    *"$needle"*) ;;
-    *) fail "${name}: missing '${needle}'. Output: ${haystack}" ;;
-  esac
-}
 
 doctor_for() {
   local uname_s="$1" uname_m="$2"

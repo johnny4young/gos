@@ -2,6 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.bash
+. "${repo_root}/tests/lib.bash"
 script="${repo_root}/gos.sh"
 sync_script="${repo_root}/scripts/sync-embedded-completions.bash"
 test_root="$(mktemp -d)"
@@ -10,23 +12,6 @@ cleanup() {
   rm -rf "$test_root"
 }
 trap cleanup EXIT
-
-fail() {
-  printf 'not ok - %s\n' "$1" >&2
-  exit 1
-}
-
-pass() {
-  printf 'ok - %s\n' "$1"
-}
-
-assert_contains() {
-  local haystack="$1" needle="$2" name="$3"
-  case "$haystack" in
-    *"$needle"*) ;;
-    *) fail "${name}: missing '${needle}'. Output: ${haystack}" ;;
-  esac
-}
 
 bash "$sync_script" --check
 
