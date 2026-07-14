@@ -54,6 +54,15 @@ commands_json="$(bash "$script" __commands --json)"
 assert_json "$commands_json" "__commands --json"
 assert_contains "$commands_json" '"commands":["latest","install","run","use","pin","check","rollback","uninstall","prune","current","list","platforms","status","which","env","completions","doctor","self-update","version","help"]' "__commands json"
 
+commands_details="$(bash "$script" __commands --details)"
+assert_contains "$commands_details" "latest|latest|Install the latest stable Go version" "__commands details latest"
+assert_contains "$commands_details" "self-update|self-update|Update gos itself to the latest release" "__commands details self-update"
+
+commands_details_json="$(bash "$script" __commands --details --json)"
+assert_json "$commands_details_json" "__commands --details --json"
+assert_contains "$commands_details_json" '"name":"latest","usage":"latest","description":"Install the latest stable Go version"' "__commands details json latest"
+assert_contains "$commands_details_json" '"name":"self-update","usage":"self-update","description":"Update gos itself to the latest release"' "__commands details json self-update"
+
 help_output="$(bash "$script" help)"
 bash_completion_text="$(<"${test_root}/gos.bash")"
 zsh_completion_text="$(<"${test_root}/gos.zsh")"
@@ -83,7 +92,7 @@ output="$(bash "$script" __commands --bogus 2>&1)"
 status=$?
 set -e
 [ "$status" -ne 0 ] || fail "gos __commands should reject unknown options"
-assert_contains "$output" "Usage: gos __commands [--json]" "__commands usage"
+assert_contains "$output" "Usage: gos __commands [--json] [--details]" "__commands usage"
 
 bash -n "${test_root}/gos.bash"
 assert_contains "$bash_completion_text" "gos __commands" "bash dynamic command manifest"

@@ -3241,14 +3241,35 @@ _gos_commands() {
   done
 }
 
+_gos_command_details_json() {
+  local first="true" command_name command_usage command_description
+  printf '['
+  _gos_command_manifest | while IFS='|' read -r command_name command_usage command_description; do
+    if [ "$first" = "true" ]; then
+      first="false"
+    else
+      printf ','
+    fi
+    printf '{"name":'
+    _gos_json_string "$command_name"
+    printf ',"usage":'
+    _gos_json_string "$command_usage"
+    printf ',"description":'
+    _gos_json_string "$command_description"
+    printf '}'
+  done
+  printf ']'
+}
+
 cmd___commands() {
-  local arg
+  local arg details="false"
   for arg in "$@"; do
     case "$arg" in
       --json) GOS_OUTPUT_JSON=1 ;;
+      --details) details="true" ;;
       *)
         _gos_error "unknown option for gos __commands: ${arg}"
-        echo "Usage: gos __commands [--json]" >&2
+        echo "Usage: gos __commands [--json] [--details]" >&2
         return 1
         ;;
     esac
@@ -3256,8 +3277,14 @@ cmd___commands() {
 
   if _gos_json_enabled; then
     printf '{"commands":'
-    _gos_commands | _gos_json_array_from_lines
+    if [ "$details" = "true" ]; then
+      _gos_command_details_json
+    else
+      _gos_commands | _gos_json_array_from_lines
+    fi
     printf '}\n'
+  elif [ "$details" = "true" ]; then
+    _gos_command_manifest
   else
     _gos_commands
   fi
