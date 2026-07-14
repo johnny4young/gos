@@ -680,6 +680,17 @@ run_gos "$case_dir" bash "$script" install 1.21.6 --json
 assert_contains "$output" "unexpected argument for gos install" "install trailing argument"
 pass "install rejects trailing arguments instead of ignoring them"
 
+case_dir="${test_root}/unknown-command-suggestions"
+run_gos "$case_dir" bash "$script" plat
+[ "$status" -ne 0 ] || fail "unknown command should fail"
+assert_contains "$output" "Error: unknown command: plat" "unknown command error"
+assert_contains "$output" "Did you mean?" "unknown command suggestion header"
+assert_contains "$output" "  platforms" "unknown command suggested platforms"
+run_gos "$case_dir" bash "$script" completion
+[ "$status" -ne 0 ] || fail "singular completion command should fail with a suggestion"
+assert_contains "$output" "  completions" "unknown command suggested completions"
+pass "unknown commands suggest matching command prefixes"
+
 case_dir="${test_root}/cli-extra-args"
 run_gos "$case_dir" bash "$script" latest extra
 [ "$status" -ne 0 ] || fail "latest with trailing argument should fail"

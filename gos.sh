@@ -2361,6 +2361,26 @@ EXAMPLES:
 EOF
 }
 
+_gos_commands() {
+  printf '%s\n' \
+    latest install use pin check rollback uninstall prune current list \
+    platforms env completions doctor self-update version help
+}
+
+_gos_suggest_command() {
+  local input="$1" command
+
+  # Avoid noisy guesses for one- or two-letter typos. Prefix matching is
+  # deterministic, offline, and cheap enough for the unknown-command path.
+  [ "${#input}" -ge 3 ] || return 0
+
+  _gos_commands | while IFS= read -r command; do
+    case "$command" in
+      "$input"*) printf '%s\n' "$command" ;;
+    esac
+  done
+}
+
 # ─── Entrypoint ───────────────────────────────────────────────────────────────
 
 main() {
@@ -2412,7 +2432,17 @@ main() {
     version)   cmd_version "$@" ;;
     help|--help|-h) cmd_help ;;
     *)
+      local suggestion suggestions
       echo "Error: unknown command: $cmd" >&2
+      suggestions=$(_gos_suggest_command "$cmd")
+      if [ -n "$suggestions" ]; then
+        echo "Did you mean?" >&2
+        while IFS= read -r suggestion; do
+          echo "  ${suggestion}" >&2
+        done <<EOF
+$suggestions
+EOF
+      fi
       cmd_help
       return 1
       ;;
