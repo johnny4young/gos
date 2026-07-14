@@ -258,11 +258,12 @@ exec fish          # for Fish
 
 ## Usage
 
+<!-- gos-commands:begin -->
 | Command | Description |
 |---|---|
 | `gos latest` | Install the latest stable Go version |
 | `gos install <version>` | Install a specific Go version |
-| `gos run <version> [--] <command>` | Run a command with a side-by-side Go version without activating it globally |
+| `gos run <version> [--] <command> [args...]` | Run a command with a side-by-side Go version without activating it globally |
 | `gos use [path]` | Install the Go version requested by `.go-version`, `.tool-versions`, or `go.mod` |
 | `gos pin <version>` | Write `.go-version` in the current directory |
 | `gos check` | Check whether newer stable Go or gos releases are available (no install) |
@@ -270,16 +271,17 @@ exec fish          # for Fish
 | `gos uninstall <version>` | Remove an installed version (side-by-side mode) |
 | `gos prune [--rollback]` | Remove cached Go archives; `--rollback` also removes the rollback copy |
 | `gos current` | Show the currently active Go version |
-| `gos list [--installed]` | List available Go versions, or locally installed ones |
+| `gos list [--installed]` | List available Go versions (or locally installed ones) |
 | `gos platforms [version]` | List supported OS/arch archives for a Go version |
 | `gos status` | Show an offline dashboard for gos and the active Go |
-| `gos which [version]` | Show the active Go binary path, or a side-by-side version path |
+| `gos which [version]` | Show the active or side-by-side Go binary path |
 | `gos env [--fish] [--auto]` | Print the PATH setup line or an opt-in per-shell auto-switch hook |
 | `gos completions <shell>` | Print a Bash, Zsh, or Fish completion script |
 | `gos doctor [--fix]` | Diagnose gos, Go, PATH, and local tool dependencies; `--fix` creates safe missing directories and prints the shell setup line |
 | `gos self-update` | Update gos itself to the latest verified release |
 | `gos version` | Show gos version |
-| `gos help` | Show help message |
+| `gos help` | Show this help message |
+<!-- gos-commands:end -->
 
 ### Examples
 

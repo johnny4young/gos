@@ -56,12 +56,12 @@ assert_contains "$commands_json" '"commands":["latest","install","run","use","pi
 
 commands_details="$(bash "$script" __commands --details)"
 assert_contains "$commands_details" "latest|latest|Install the latest stable Go version" "__commands details latest"
-assert_contains "$commands_details" "self-update|self-update|Update gos itself to the latest release" "__commands details self-update"
+assert_contains "$commands_details" "self-update|self-update|Update gos itself to the latest verified release" "__commands details self-update"
 
 commands_details_json="$(bash "$script" __commands --details --json)"
 assert_json "$commands_details_json" "__commands --details --json"
 assert_contains "$commands_details_json" '"name":"latest","usage":"latest","description":"Install the latest stable Go version"' "__commands details json latest"
-assert_contains "$commands_details_json" '"name":"self-update","usage":"self-update","description":"Update gos itself to the latest release"' "__commands details json self-update"
+assert_contains "$commands_details_json" '"name":"self-update","usage":"self-update","description":"Update gos itself to the latest verified release"' "__commands details json self-update"
 
 help_output="$(bash "$script" help)"
 bash_completion_text="$(<"${test_root}/gos.bash")"

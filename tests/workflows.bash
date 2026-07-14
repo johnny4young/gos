@@ -59,6 +59,8 @@ assert(gos_version && !gos_version.empty?, "gos.sh must define GOS_VERSION")
 public_commands = `bash gos.sh __commands`.lines.map(&:strip).reject(&:empty?)
 assert($?.success?, "gos __commands must succeed for workflow invariants")
 assert(!public_commands.empty?, "gos __commands must list public commands")
+readme_sync_output = `bash scripts/sync-readme-usage.bash --check 2>&1`
+assert($?.success?, "README Usage table must match gos __commands --details: #{readme_sync_output}")
 assert(!releasing.empty?, "repository must include RELEASING.md")
 assert(!security.empty?, "repository must include SECURITY.md")
 
@@ -266,7 +268,7 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
   "bash tests/install-ps1.bash",
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
-  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-embedded-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-embedded-completions.bash scripts/sync-readme-usage.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -377,6 +379,7 @@ assert(fish_completion_file.include?("-l auto"), "Fish completion must include e
   "bash tests/changelog.bash",
   "bash tests/workflows.bash",
   "scripts/sync-embedded-completions.bash --check",
+  "scripts/sync-readme-usage.bash --check",
   "shfmt -d -i 2 -ci -bn .",
   "git diff --check",
   "scripts/update-changelog.bash",

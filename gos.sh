@@ -3172,23 +3172,23 @@ cmd_completions() {
 _gos_command_manifest() {
   cat <<'GOS_COMMANDS'
 latest|latest|Install the latest stable Go version
-install|install <version>|Install a specific Go version (e.g. gos install 1.26.1)
-run|run <version> <cmd>|Run a command with a side-by-side Go version
-use|use [path]|Install the Go version requested by project manifest
+install|install <version>|Install a specific Go version
+run|run <version> [--] <command> [args...]|Run a command with a side-by-side Go version without activating it globally
+use|use [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod
 pin|pin <version>|Write .go-version in the current directory
-check|check|Check whether a newer stable Go is available
+check|check|Check whether newer stable Go or gos releases are available (no install)
 rollback|rollback|Restore the previous Go installation, if available
-uninstall|uninstall <version>|Remove an installed version (side-by-side mode only)
-prune|prune [--rollback]|Remove cached Go archives (and the rollback copy with --rollback)
+uninstall|uninstall <version>|Remove an installed version (side-by-side mode)
+prune|prune [--rollback]|Remove cached Go archives; --rollback also removes the rollback copy
 current|current|Show the currently active Go version
 list|list [--installed]|List available Go versions (or locally installed ones)
 platforms|platforms [version]|List supported OS/arch archives for a Go version
 status|status|Show an offline dashboard for gos and the active Go
 which|which [version]|Show the active or side-by-side Go binary path
-env|env [--fish] [--auto]|Print PATH setup or an opt-in auto-switch hook
+env|env [--fish] [--auto]|Print the PATH setup line or an opt-in per-shell auto-switch hook
 completions|completions <shell>|Print a Bash, Zsh, or Fish completion script
-doctor|doctor [--fix]|Diagnose gos, Go, PATH, and tool dependencies
-self-update|self-update|Update gos itself to the latest release
+doctor|doctor [--fix]|Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line
+self-update|self-update|Update gos itself to the latest verified release
 version|version|Show gos version
 help|help|Show this help message
 GOS_COMMANDS
