@@ -1069,6 +1069,29 @@ _gos_read_go_version_file() {
   return 1
 }
 
+_gos_read_tool_versions_file() {
+  local file="$1" line tool version
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%%#*}
+    line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [ -z "$line" ] && continue
+
+    # shellcheck disable=SC2086 # Intentional field split: .tool-versions is whitespace-delimited.
+    set -- $line
+    tool="${1:-}"
+    version="${2:-}"
+    case "$tool" in
+      go|golang)
+        [ -n "$version" ] || continue
+        version="${version#go}"
+        printf '%s\n' "$version"
+        return 0
+        ;;
+    esac
+  done < "$file"
+  return 1
+}
+
 # Resolve the Go version requested by a go.mod. Precedence mirrors the Go
 # toolchain itself: an explicit `toolchain goX.Y.Z` directive wins over the
 # `go X.Y` language directive; only the first `go` directive is considered.
@@ -1095,19 +1118,35 @@ _gos_read_go_mod_version() {
 }
 
 _gos_resolve_project_version() {
-  local start_dir="$1" version_file go_mod version
+  local start_dir="$1" dir candidate version
 
-  if version_file=$(_gos_find_upward "$start_dir" ".go-version"); then
-    version=$(_gos_read_go_version_file "$version_file") || return 1
-    printf '%s|%s\n' "$version" "$version_file"
-    return 0
-  fi
+  dir=$(cd "$start_dir" 2>/dev/null && pwd) || return 1
 
-  if go_mod=$(_gos_find_upward "$start_dir" "go.mod"); then
-    version=$(_gos_read_go_mod_version "$go_mod") || return 1
-    printf '%s|%s\n' "$version" "$go_mod"
-    return 0
-  fi
+  while :; do
+    candidate="${dir%/}/.go-version"
+    if [ -f "$candidate" ]; then
+      version=$(_gos_read_go_version_file "$candidate") || return 1
+      printf '%s|%s\n' "$version" "$candidate"
+      return 0
+    fi
+
+    candidate="${dir%/}/.tool-versions"
+    if [ -f "$candidate" ]; then
+      version=$(_gos_read_tool_versions_file "$candidate") || return 1
+      printf '%s|%s\n' "$version" "$candidate"
+      return 0
+    fi
+
+    candidate="${dir%/}/go.mod"
+    if [ -f "$candidate" ]; then
+      version=$(_gos_read_go_mod_version "$candidate") || return 1
+      printf '%s|%s\n' "$version" "$candidate"
+      return 0
+    fi
+
+    [ "$dir" = "/" ] && break
+    dir=$(dirname "$dir")
+  done
 
   return 1
 }
@@ -2163,7 +2202,7 @@ _gos() {
   commands=(
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
-    'use:Install the Go version requested by .go-version or go.mod'
+    'use:Install the Go version requested by project manifest'
     'pin:Write .go-version in the current directory'
     'check:Check whether a newer stable Go is available'
     'rollback:Restore the previous Go installation'
@@ -2224,7 +2263,7 @@ _gos_completion_fish() {
 complete -c gos -f
 complete -c gos -n '__fish_use_subcommand' -a 'latest'  -d 'Install the latest stable Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'install'  -d 'Install a specific Go version'
-complete -c gos -n '__fish_use_subcommand' -a 'use'      -d 'Install the Go version requested by .go-version or go.mod'
+complete -c gos -n '__fish_use_subcommand' -a 'use'      -d 'Install the Go version requested by project manifest'
 complete -c gos -n '__fish_use_subcommand' -a 'pin'      -d 'Write .go-version in the current directory'
 complete -c gos -n '__fish_use_subcommand' -a 'check'    -d 'Check whether a newer stable Go is available'
 complete -c gos -n '__fish_use_subcommand' -a 'rollback' -d 'Restore the previous Go installation'
@@ -2288,7 +2327,7 @@ USAGE:
 COMMANDS:
   latest              Install the latest stable Go version
   install <version>   Install a specific Go version (e.g. gos install 1.26.1)
-  use [path]          Install the Go version requested by .go-version or go.mod
+  use [path]          Install the Go version requested by project manifest
   pin <version>       Write .go-version in the current directory
   check               Check whether a newer stable Go is available
   rollback            Restore the previous Go installation, if available

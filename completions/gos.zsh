@@ -8,7 +8,7 @@ _gos() {
   commands=(
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
-    'use:Install the Go version requested by .go-version or go.mod'
+    'use:Install the Go version requested by project manifest'
     'pin:Write .go-version in the current directory'
     'check:Check whether a newer stable Go is available'
     'rollback:Restore the previous Go installation'

@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 
 - Add `gos completions <bash|zsh|fish>` so single-file installs can print shell completions without needing the repository checkout.
+- Add `.tool-versions` support to `gos use` for asdf/mise-style `golang` or `go` version files.
 
 ### Changed
 

@@ -330,6 +330,37 @@ assert_contains "$output" "Using Go 1.21.6 from ${case_dir}/project/.go-version"
 [ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "use did not install requested version"
 pass "use installs version from nearest .go-version"
 
+case_dir="${test_root}/use-tool-versions"
+mkdir -p "$case_dir/project/sub"
+cat >"$case_dir/project/.tool-versions" <<'TOOLVERSIONS'
+# asdf/mise style
+nodejs 22.0.0
+golang go1.21.6
+TOOLVERSIONS
+pushd "$case_dir/project/sub" >/dev/null
+run_gos "$case_dir" bash "$script" use
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "use .tool-versions failed: ${output}"
+assert_contains "$output" "Using Go 1.21.6 from ${case_dir}/project/.tool-versions" "use .tool-versions"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "use .tool-versions did not install requested version"
+pass "use reads Go versions from .tool-versions"
+
+case_dir="${test_root}/use-tool-versions-precedence"
+mkdir -p "$case_dir/project"
+printf '1.21.6\n' >"$case_dir/project/.go-version"
+printf 'golang 1.20.0\n' >"$case_dir/project/.tool-versions"
+cat >"$case_dir/project/go.mod" <<'GOMOD'
+module example.com/precedence
+
+go 1.20
+GOMOD
+pushd "$case_dir/project" >/dev/null
+run_gos "$case_dir" bash "$script" use
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "use manifest precedence failed: ${output}"
+assert_contains "$output" "Using Go 1.21.6 from ${case_dir}/project/.go-version" "use .go-version precedence"
+pass ".go-version wins over .tool-versions and go.mod in the same directory"
+
 case_dir="${test_root}/use-go-mod"
 mkdir -p "$case_dir/project"
 cat >"$case_dir/project/go.mod" <<'GOMOD'

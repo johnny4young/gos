@@ -76,7 +76,7 @@ Done. That's the whole setup.
 
 - **One command to latest Go** — `gos latest` fetches and installs the newest stable release
 - **Pin any version** — `gos install 1.21.6` gets exactly what you need; `gos install 1.21` resolves to the newest patch release
-- **Project-aware switching** — `gos use` reads `.go-version`, `toolchain`, or `go` directives
+- **Project-aware switching** — `gos use` reads `.go-version`, `.tool-versions`, `toolchain`, or `go` directives
 - **Update checks** — `gos check` reports whether a newer stable Go is available without installing anything
 - **Doctor diagnostics** — `gos doctor` checks Go, PATH, permissions, checksum tools, and extraction tools
 - **Cache and rollback** — verified archives are cached, `gos rollback` restores the previous install, and `gos prune` reclaims the disk space
@@ -256,7 +256,7 @@ exec fish          # for Fish
 |---|---|
 | `gos latest` | Install the latest stable Go version |
 | `gos install <version>` | Install a specific Go version |
-| `gos use [path]` | Install the Go version requested by `.go-version` or `go.mod` |
+| `gos use [path]` | Install the Go version requested by `.go-version`, `.tool-versions`, or `go.mod` |
 | `gos pin <version>` | Write `.go-version` in the current directory |
 | `gos check` | Check whether a newer stable Go is available (no install) |
 | `gos rollback` | Restore the previous Go installation, if available |
@@ -336,7 +336,8 @@ gos updated: v1.5.0 -> v1.6.0
 
 ### Project-aware versions
 
-`gos use` searches from the current directory upward. It prefers `.go-version`,
+`gos use` searches from the current directory upward. At each directory level it
+prefers `.go-version`, then `.tool-versions` entries named `golang` or `go`,
 then a `toolchain goX.Y.Z` directive in `go.mod`, then the `go X.Y` directive.
 
 ```bash
