@@ -38,6 +38,22 @@ _gos() {
         prune)
           _arguments '--rollback[Also remove the rollback installation]' '--json[Output machine-readable JSON]'
           ;;
+        install)
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
+          fi
+          ;;
+        uninstall)
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
+          fi
+          ;;
+        which)
+          _arguments '--json[Output machine-readable JSON]'
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
+          fi
+          ;;
         list)
           _arguments '--installed[List locally installed versions]' '--json[Output machine-readable JSON]'
           ;;
@@ -47,7 +63,7 @@ _gos() {
         completions)
           _values 'shell' bash zsh fish
           ;;
-        check|current|platforms|status|which|doctor|version)
+        check|current|platforms|status|doctor|version)
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)

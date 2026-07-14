@@ -13,6 +13,9 @@ GOS_CACHE_DIR="${GOS_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/gos}"
 # Version/checksum metadata always comes from go.dev, so mirror bytes are still
 # verified against the official checksums before activation.
 GOS_DOWNLOAD_MIRROR="${GOS_DOWNLOAD_MIRROR:-}"
+# Discovery-only Go downloads feed cache TTL in seconds. Set to 0 to disable
+# the on-disk feed cache and force discovery commands to fetch every run.
+GOS_FEED_TTL="${GOS_FEED_TTL:-600}"
 # Opt-in side-by-side layout: when set, each Go version is installed under
 # $GOS_VERSIONS_DIR/go<version> and GOS_INSTALL_DIR becomes a symlink to the
 # active one, making version switches instant and enabling gos uninstall.
@@ -306,17 +309,93 @@ _gos_download_stdout() {
 GOS_FEED_JSON_DEFAULT=""
 GOS_FEED_JSON_ALL=""
 
+_gos_feed_cache_enabled() {
+  case "$GOS_FEED_TTL" in
+    ''|*[!0-9]*|0) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+_gos_feed_cache_path() {
+  local include_all="$1"
+  if [ "$include_all" = "true" ]; then
+    printf '%s/feed-all.json' "$GOS_CACHE_DIR"
+  else
+    printf '%s/feed-default.json' "$GOS_CACHE_DIR"
+  fi
+}
+
+_gos_file_mtime() {
+  local file="$1"
+  stat -f %m "$file" 2>/dev/null || stat -c %Y "$file" 2>/dev/null
+}
+
+_gos_feed_cache_fresh() {
+  local cache_file="$1" mtime now age
+
+  _gos_feed_cache_enabled || return 1
+  [ -f "$cache_file" ] || return 1
+  mtime=$(_gos_file_mtime "$cache_file") || return 1
+  case "$mtime" in ''|*[!0-9]*) return 1 ;; esac
+  now=$(date +%s 2>/dev/null) || return 1
+  age=$((now - mtime))
+  [ "$age" -ge 0 ] && [ "$age" -le "$GOS_FEED_TTL" ]
+}
+
+_gos_cached_feed_json() {
+  local include_all="$1" cache_file
+  cache_file=$(_gos_feed_cache_path "$include_all")
+  _gos_feed_cache_fresh "$cache_file" || return 1
+  cat "$cache_file"
+}
+
+_gos_write_feed_cache() {
+  local include_all="$1" json="$2" cache_file tmp_file
+
+  _gos_feed_cache_enabled || return 0
+  cache_file=$(_gos_feed_cache_path "$include_all")
+  if ! mkdir -p "$GOS_CACHE_DIR" 2>/dev/null; then
+    echo "Warning: could not write Go downloads feed cache at ${GOS_CACHE_DIR}." >&2
+    return 0
+  fi
+  tmp_file=$(mktemp "${cache_file}.XXXXXX" 2>/dev/null) || {
+    echo "Warning: could not write Go downloads feed cache at ${GOS_CACHE_DIR}." >&2
+    return 0
+  }
+  printf '%s\n' "$json" >"$tmp_file" || {
+    rm -f "$tmp_file"
+    echo "Warning: could not write Go downloads feed cache at ${GOS_CACHE_DIR}." >&2
+    return 0
+  }
+  mv "$tmp_file" "$cache_file" 2>/dev/null || {
+    rm -f "$tmp_file"
+    echo "Warning: could not write Go downloads feed cache at ${GOS_CACHE_DIR}." >&2
+    return 0
+  }
+}
+
 _gos_feed_json() {
   local include_all="${1:-false}"
+  local allow_disk_cache="${2:-false}" json
 
   if [ "$include_all" = "true" ]; then
     if [ -z "$GOS_FEED_JSON_ALL" ]; then
-      GOS_FEED_JSON_ALL=$(_gos_download_stdout 'https://go.dev/dl/?mode=json&include=all') || return 1
+      if [ "$allow_disk_cache" = "true" ] && json=$(_gos_cached_feed_json true); then
+        GOS_FEED_JSON_ALL="$json"
+      else
+        GOS_FEED_JSON_ALL=$(_gos_download_stdout 'https://go.dev/dl/?mode=json&include=all') || return 1
+        [ "$allow_disk_cache" = "true" ] && _gos_write_feed_cache true "$GOS_FEED_JSON_ALL"
+      fi
     fi
     printf '%s\n' "$GOS_FEED_JSON_ALL"
   else
     if [ -z "$GOS_FEED_JSON_DEFAULT" ]; then
-      GOS_FEED_JSON_DEFAULT=$(_gos_download_stdout 'https://go.dev/dl/?mode=json') || return 1
+      if [ "$allow_disk_cache" = "true" ] && json=$(_gos_cached_feed_json false); then
+        GOS_FEED_JSON_DEFAULT="$json"
+      else
+        GOS_FEED_JSON_DEFAULT=$(_gos_download_stdout 'https://go.dev/dl/?mode=json') || return 1
+        [ "$allow_disk_cache" = "true" ] && _gos_write_feed_cache false "$GOS_FEED_JSON_DEFAULT"
+      fi
     fi
     printf '%s\n' "$GOS_FEED_JSON_DEFAULT"
   fi
@@ -347,8 +426,9 @@ for item in json.load(sys.stdin):
 }
 
 _gos_fetch_latest() {
+  local allow_disk_cache="${1:-false}"
   local json
-  json=$(_gos_feed_json false) || return 1
+  json=$(_gos_feed_json false "$allow_disk_cache") || return 1
   _gos_feed_versions "$json" | head -1
 }
 
@@ -1184,7 +1264,7 @@ _gos_sort_versions() {
 
 _gos_list_versions() {
   local json
-  json=$(_gos_feed_json true) || {
+  json=$(_gos_feed_json true true) || {
     echo "Error: could not fetch the Go version list. Check your internet connection." >&2
     return 1
   }
@@ -1198,7 +1278,7 @@ _gos_list_versions() {
 _gos_platforms_for_version() {
   local version="$1" json go_version
   go_version="go${version#go}"
-  json=$(_gos_feed_json true) || {
+  json=$(_gos_feed_json true true) || {
     echo "Error: could not fetch the Go downloads feed. Check your internet connection." >&2
     return 1
   }
@@ -1330,7 +1410,7 @@ cmd_check() {
     echo "Checking for Go updates..."
   fi
 
-  latest=$(_gos_fetch_latest) || latest=""
+  latest=$(_gos_fetch_latest true) || latest=""
   if [ -z "$latest" ]; then
     echo "Error: could not fetch latest version. Check your internet connection." >&2
     return 1
@@ -1465,6 +1545,32 @@ _gos_installed_versions() {
   return 0
 }
 
+cmd___versions() {
+  local include_remote_cached="false" arg json versions
+
+  for arg in "$@"; do
+    case "$arg" in
+      --remote-cached) include_remote_cached="true" ;;
+      *)
+        echo "Error: unknown option for gos __versions: ${arg}" >&2
+        echo "Usage: gos __versions [--remote-cached]" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  versions=$(
+    {
+      _gos_installed_versions
+      if [ "$include_remote_cached" = "true" ] && json=$(_gos_cached_feed_json true 2>/dev/null); then
+        _gos_feed_versions "$json"
+      fi
+    } | _gos_sort_versions | uniq
+  )
+  [ -n "$versions" ] && printf '%s\n' "$versions"
+  return 0
+}
+
 cmd_list() {
   local versions installed="false" current arg
   for arg in "$@"; do
@@ -1528,7 +1634,7 @@ cmd_platforms() {
   done
 
   if [ -z "$version" ]; then
-    version=$(_gos_fetch_latest) || version=""
+    version=$(_gos_fetch_latest true) || version=""
     if [ -z "$version" ]; then
       echo "Error: could not fetch latest version. Check your internet connection." >&2
       return 1
@@ -2343,6 +2449,7 @@ _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   local commands="latest install use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
   local cmd_index=1 cmd words="" line
+  local versions=""
 
   # A leading --json shifts the command to the next position (gos --json list).
   if [ "${COMP_WORDS[1]:-}" = "--json" ]; then
@@ -2361,6 +2468,24 @@ _gos_completions() {
       prune)
         words="--rollback --json"
         ;;
+      install)
+        if command -v gos >/dev/null 2>&1; then
+          versions=$(gos __versions --remote-cached 2>/dev/null || true)
+        fi
+        words="$versions"
+        ;;
+      uninstall)
+        if command -v gos >/dev/null 2>&1; then
+          versions=$(gos __versions 2>/dev/null || true)
+        fi
+        words="$versions"
+        ;;
+      which)
+        if command -v gos >/dev/null 2>&1; then
+          versions=$(gos __versions 2>/dev/null || true)
+        fi
+        words="--json $versions"
+        ;;
       list)
         words="--installed --json"
         ;;
@@ -2370,7 +2495,7 @@ _gos_completions() {
       completions)
         words="bash zsh fish"
         ;;
-      check|current|platforms|status|which|doctor|version)
+      check|current|platforms|status|doctor|version)
         words="--json"
         ;;
       use)
@@ -2438,6 +2563,22 @@ _gos() {
         prune)
           _arguments '--rollback[Also remove the rollback installation]' '--json[Output machine-readable JSON]'
           ;;
+        install)
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
+          fi
+          ;;
+        uninstall)
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
+          fi
+          ;;
+        which)
+          _arguments '--json[Output machine-readable JSON]'
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
+          fi
+          ;;
         list)
           _arguments '--installed[List locally installed versions]' '--json[Output machine-readable JSON]'
           ;;
@@ -2447,7 +2588,7 @@ _gos() {
         completions)
           _values 'shell' bash zsh fish
           ;;
-        check|current|platforms|status|which|doctor|version)
+        check|current|platforms|status|doctor|version)
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)
@@ -2493,6 +2634,8 @@ complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable J
 complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version' -l json -d 'Output machine-readable JSON'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
+complete -c gos -n '__fish_seen_subcommand_from install' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
+complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
 complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
 complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
 complete -c gos -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell'
@@ -2644,6 +2787,7 @@ main() {
     platforms) cmd_platforms "$@" ;;
     status)    cmd_status "$@" ;;
     which)     cmd_which "$@" ;;
+    __versions) cmd___versions "$@" ;;
     doctor)    cmd_doctor "$@" ;;
     version)   cmd_version "$@" ;;
     help|--help|-h) cmd_help ;;

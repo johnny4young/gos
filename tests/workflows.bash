@@ -329,6 +329,10 @@ assert(bash_completion.include?("--json"), "Bash completion must include --json"
 assert(zsh_completion.include?("--json"), "Zsh completion must include --json")
 assert(fish_completion_file.include?("-l json"), "Fish completion must include --json")
 assert(readme.include?("gos status --json"), "README must document status JSON")
+assert(readme.include?("GOS_FEED_TTL"), "README must document feed cache TTL")
+assert(bash_completion.include?("__versions --remote-cached"), "Bash completion must use cached dynamic versions")
+assert(zsh_completion.include?("__versions --remote-cached"), "Zsh completion must use cached dynamic versions")
+assert(fish_completion_file.include?("__versions --remote-cached"), "Fish completion must use cached dynamic versions")
 
 [
   "workflow_dispatch",

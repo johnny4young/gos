@@ -258,6 +258,7 @@ run_gos() {
     GOS_TEST_GO_BROKEN="${GOS_TEST_GO_BROKEN:-0}" \
     GOS_TEST_SELFUPDATE_SCRIPT="${GOS_TEST_SELFUPDATE_SCRIPT:-}" \
     GOS_REQUIRE_CHECKSUM="${GOS_TEST_REQUIRE_CHECKSUM:-}" \
+    GOS_FEED_TTL="${GOS_TEST_FEED_TTL:-}" \
     "$@" 2>&1
   )"
   status=$?
@@ -616,6 +617,66 @@ if [ "$feed_fetches" -ne 1 ]; then
   fail "latest should fetch the downloads feed exactly once, got ${feed_fetches}: $(cat "${case_dir}/urls.log")"
 fi
 pass "latest resolves version and checksum from a single feed request"
+
+case_dir="${test_root}/feed-cache"
+run_gos "$case_dir" bash "$script" list --json
+[ "$status" -eq 0 ] || fail "feed-cache initial list failed: ${output}"
+grep -q 'https://go.dev/dl/?mode=json&include=all' "${case_dir}/urls.log" \
+  || fail "initial list should fetch the all-versions feed"
+run_gos "$case_dir" bash "$script" list --json
+[ "$status" -eq 0 ] || fail "feed-cache cached list failed: ${output}"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "cached list should not reach the network: $(cat "${case_dir}/urls.log")"
+fi
+assert_contains "$output" '"versions":["go1.20.0","go1.21rc1","go1.21.6","go1.22rc1"]' "cached list output"
+run_gos "$case_dir" bash "$script" __versions --remote-cached
+[ "$status" -eq 0 ] || fail "__versions --remote-cached failed: ${output}"
+assert_contains "$output" "1.21.6" "__versions remote cached"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "__versions --remote-cached must not reach the network"
+fi
+GOS_TEST_FEED_TTL=0 run_gos "$case_dir" bash "$script" list --json
+[ "$status" -eq 0 ] || fail "GOS_FEED_TTL=0 list failed: ${output}"
+grep -q 'https://go.dev/dl/?mode=json&include=all' "${case_dir}/urls.log" \
+  || fail "GOS_FEED_TTL=0 should disable feed-cache reads"
+
+case_dir="${test_root}/check-feed-cache"
+GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json
+[ "$status" -eq 0 ] || fail "check feed-cache initial run failed: ${output}"
+grep -q 'https://go.dev/dl/?mode=json$' "${case_dir}/urls.log" \
+  || fail "initial check should fetch the default feed"
+GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json
+[ "$status" -eq 0 ] || fail "check feed-cache cached run failed: ${output}"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "cached check should not reach the network: $(cat "${case_dir}/urls.log")"
+fi
+
+case_dir="${test_root}/feed-cache-absent"
+run_gos "$case_dir" bash "$script" __versions --remote-cached
+[ "$status" -eq 0 ] || fail "__versions without cache should succeed with empty output: ${output}"
+[ -z "$output" ] || fail "__versions without installed versions or cache should be empty: ${output}"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "__versions without a cache must not reach the network"
+fi
+
+case_dir="${test_root}/feed-cache-poisoned-install"
+mkdir -p "${case_dir}/cache"
+printf '[{\"version\":\"go1.21.6\",\"files\":[]}]\n' >"${case_dir}/cache/feed-all.json"
+GOS_TEST_REQUIRE_CHECKSUM=feed run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "install should ignore poisoned feed cache: ${output}"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "install with poisoned feed cache did not complete"
+grep -q 'https://go.dev/dl/?mode=json&include=all' "${case_dir}/urls.log" \
+  || fail "install must fetch fresh feed metadata instead of reading cache"
+
+case_dir="${test_root}/feed-cache-poisoned-latest"
+mkdir -p "${case_dir}/cache"
+printf '[{\"version\":\"go9.99.0\",\"files\":[]}]\n' >"${case_dir}/cache/feed-default.json"
+run_gos "$case_dir" bash "$script" latest
+[ "$status" -eq 0 ] || fail "latest should ignore poisoned default feed cache: ${output}"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "latest with poisoned feed cache did not install the real latest"
+grep -q 'https://go.dev/dl/?mode=json$' "${case_dir}/urls.log" \
+  || fail "latest must fetch fresh default feed metadata instead of reading cache"
+pass "discovery feed cache is TTL-bound and never trusted by installs or completions"
 
 case_dir="${test_root}/use-no-manifest"
 mkdir -p "${case_dir}/empty"

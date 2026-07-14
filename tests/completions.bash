@@ -38,12 +38,16 @@ for shell_name in bash zsh fish; do
 done
 
 bash -n "${test_root}/gos.bash"
+assert_contains "$(<"${test_root}/gos.bash")" "gos __versions --remote-cached" "bash dynamic remote versions"
+assert_contains "$(<"${test_root}/gos.bash")" "gos __versions 2>/dev/null" "bash dynamic installed versions"
 if command -v zsh >/dev/null 2>&1; then
   zsh -n "${test_root}/gos.zsh"
 fi
 if command -v fish >/dev/null 2>&1; then
   fish --no-config --no-execute "${test_root}/gos.fish"
 fi
+assert_contains "$(<"${test_root}/gos.zsh")" "gos __versions --remote-cached" "zsh dynamic remote versions"
+assert_contains "$(<"${test_root}/gos.fish")" "gos __versions --remote-cached" "fish dynamic remote versions"
 
 set +e
 output="$(bash "$script" completions 2>&1)"

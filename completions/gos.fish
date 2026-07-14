@@ -25,6 +25,8 @@ complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable J
 complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version' -l json -d 'Output machine-readable JSON'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
+complete -c gos -n '__fish_seen_subcommand_from install' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
+complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
 complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
 complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
 complete -c gos -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell'
