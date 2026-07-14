@@ -256,6 +256,10 @@ assert(fish_completion, "smoke job must define Fish completion syntax step")
 assert(fish_completion["if"] == "runner.os == 'Linux'", "Fish completion syntax must run on Linux")
 assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion syntax must not be optional once fish is installed")
 
+command_surface_sync = step_named(smoke_steps, "Command surface sync")
+assert(command_surface_sync, "smoke job must check generated command surfaces")
+assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surfaces.bash --check"), "command surface sync must use the orchestrator")
+
 [
   "bash tests/changelog.bash",
   "bash tests/checksum.bash",
@@ -268,6 +272,7 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
   "bash tests/install-ps1.bash",
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
+  "bash scripts/sync-command-surfaces.bash --check",
   "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-bash-command-completions.bash scripts/sync-command-surfaces.bash scripts/sync-embedded-completions.bash scripts/sync-fish-command-completions.bash scripts/sync-readme-usage.bash scripts/sync-zsh-command-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
