@@ -59,7 +59,7 @@ _gos() {
           _arguments '--installed[List locally installed versions]' '--json[Output machine-readable JSON]'
           ;;
         env)
-          _arguments '--fish[Emit fish shell syntax]' '--json[Output machine-readable JSON]'
+          _arguments '--fish[Emit fish shell syntax]' '--auto[Emit opt-in auto-switch hook]' '--json[Output machine-readable JSON]'
           ;;
         completions)
           _values 'shell' bash zsh fish

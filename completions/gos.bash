@@ -46,7 +46,7 @@ _gos_completions() {
         words="--installed --json"
         ;;
       env)
-        words="--fish --json"
+        words="--fish --auto --json"
         ;;
       completions)
         words="bash zsh fish"

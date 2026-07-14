@@ -331,6 +331,7 @@ assert(fish_completion_file.include?("-l json"), "Fish completion must include -
 assert(readme.include?("gos status --json"), "README must document status JSON")
 assert(readme.include?("GOS_FEED_TTL"), "README must document feed cache TTL")
 assert(readme.include?("gos doctor --fix"), "README must document doctor --fix")
+assert(readme.include?("gos env --auto"), "README must document env --auto")
 assert(readme.include?(".gos-lock"), "README must mention the concurrent-operation guard")
 assert(bash_completion.include?("__versions --remote-cached"), "Bash completion must use cached dynamic versions")
 assert(zsh_completion.include?("__versions --remote-cached"), "Zsh completion must use cached dynamic versions")
@@ -341,6 +342,9 @@ assert(fish_completion_file.include?("__fish_seen_subcommand_from install run"),
 assert(bash_completion.include?("--fix"), "Bash completion must include doctor --fix")
 assert(zsh_completion.include?("--fix"), "Zsh completion must include doctor --fix")
 assert(fish_completion_file.include?("-l fix"), "Fish completion must include doctor --fix")
+assert(bash_completion.include?("--auto"), "Bash completion must include env --auto")
+assert(zsh_completion.include?("--auto"), "Zsh completion must include env --auto")
+assert(fish_completion_file.include?("-l auto"), "Fish completion must include env --auto")
 
 [
   "workflow_dispatch",

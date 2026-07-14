@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Add a portable `.gos-lock` around mutating commands so concurrent installs, switches, rollbacks, uninstalls, and rollback pruning fail fast instead of racing.
 - Add `gos doctor --fix` for safe, idempotent setup fixes: create missing install parents/cache directories and print the shell setup line without editing shell files.
 - Add `gos run <version> [--] <command>` to run commands with side-by-side Go versions without changing the active global install.
+- Add `gos env --auto` and `gos env --auto --fish` to emit opt-in per-shell hooks that switch `PATH` to installed project versions without mutating global state.
 
 ### Changed
 

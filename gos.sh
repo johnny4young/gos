@@ -1657,6 +1657,22 @@ cmd_run() {
   PATH="${version_dir}/bin:${PATH}" exec "$@"
 }
 
+cmd___project_version() {
+  local start_dir="${1:-$PWD}" resolved version
+
+  if [ "$#" -gt 1 ]; then
+    echo "Error: unexpected argument for gos __project-version: ${2}" >&2
+    echo "Usage: gos __project-version [path]" >&2
+    return 1
+  fi
+
+  resolved=$(_gos_resolve_project_version "$start_dir" 2>/dev/null) || return 0
+  version="${resolved%%|*}"
+  version="${version#go}"
+  _gos_validate_version "$version" >/dev/null 2>&1 || return 0
+  printf '%s\n' "$version"
+}
+
 cmd_current() {
   local current
   _gos_set_json_from_args "$@" || return 1
@@ -2164,18 +2180,106 @@ _gos_shquote_fish() {
   printf "'%s'" "$s"
 }
 
+_gos_env_auto_posix() {
+  cat <<'GOS_ENV_AUTO_POSIX'
+__gos_auto_switch() {
+  [ -n "${GOS_VERSIONS_DIR:-}" ] || return 0
+
+  local gos_version gos_bin gos_key
+  gos_version=$(gos __project-version 2>/dev/null || true)
+  if [ -n "$gos_version" ]; then
+    gos_bin="${GOS_VERSIONS_DIR%/}/go${gos_version}/bin"
+    if [ -x "${gos_bin}/go" ]; then
+      if [ -z "${GOS_AUTO_PREV+x}" ]; then
+        GOS_AUTO_PREV="$PATH"
+        export GOS_AUTO_PREV
+      fi
+      PATH="${gos_bin}:${GOS_AUTO_PREV}"
+      GOS_AUTO_BIN="$gos_bin"
+      export PATH GOS_AUTO_BIN
+      return 0
+    fi
+
+    gos_key="${PWD}:${gos_version}"
+    if [ "${GOS_AUTO_HINTED:-}" != "$gos_key" ]; then
+      echo "gos: go${gos_version} is not installed; run: gos use" >&2
+      GOS_AUTO_HINTED="$gos_key"
+      export GOS_AUTO_HINTED
+    fi
+  fi
+
+  if [ -n "${GOS_AUTO_PREV+x}" ]; then
+    PATH="$GOS_AUTO_PREV"
+    export PATH
+    unset GOS_AUTO_PREV GOS_AUTO_BIN
+  fi
+}
+
+case "${PROMPT_COMMAND:-}" in
+  *__gos_auto_switch*) ;;
+  "") PROMPT_COMMAND="__gos_auto_switch" ;;
+  *) PROMPT_COMMAND="__gos_auto_switch; ${PROMPT_COMMAND}" ;;
+esac
+export PROMPT_COMMAND
+
+if [ -n "${ZSH_VERSION:-}" ]; then
+  autoload -Uz add-zsh-hook 2>/dev/null || true
+  if command -v add-zsh-hook >/dev/null 2>&1; then
+    add-zsh-hook chpwd __gos_auto_switch 2>/dev/null || true
+  fi
+fi
+
+__gos_auto_switch
+GOS_ENV_AUTO_POSIX
+}
+
+_gos_env_auto_fish() {
+  cat <<'GOS_ENV_AUTO_FISH'
+function __gos_auto_switch --on-variable PWD
+  test -n "$GOS_VERSIONS_DIR"; or return 0
+
+  set -l gos_version (gos __project-version 2>/dev/null)
+  if test -n "$gos_version"
+    set -l gos_bin "$GOS_VERSIONS_DIR/go$gos_version/bin"
+    if test -x "$gos_bin/go"
+      if not set -q GOS_AUTO_PREV
+        set -gx GOS_AUTO_PREV (string join : $PATH)
+      end
+      set -gx PATH "$gos_bin" (string split : "$GOS_AUTO_PREV")
+      set -gx GOS_AUTO_BIN "$gos_bin"
+      return 0
+    end
+
+    set -l gos_key "$PWD:$gos_version"
+    if test "$GOS_AUTO_HINTED" != "$gos_key"
+      echo "gos: go$gos_version is not installed; run: gos use" >&2
+      set -gx GOS_AUTO_HINTED "$gos_key"
+    end
+  end
+
+  if set -q GOS_AUTO_PREV
+    set -gx PATH (string split : "$GOS_AUTO_PREV")
+    set -e GOS_AUTO_PREV GOS_AUTO_BIN
+  end
+end
+
+__gos_auto_switch
+GOS_ENV_AUTO_FISH
+}
+
 # Print the shell configuration needed to put the managed Go on PATH.
 # Usage: eval "$(gos env)"    or    gos env --fish | source
 cmd_env() {
-  local arg shell_kind="posix" go_bin
+  local arg shell_kind="posix" go_bin auto="false"
 
   for arg in "$@"; do
     case "$arg" in
       --json) GOS_OUTPUT_JSON=1 ;;
       --fish) shell_kind="fish" ;;
+      --auto) auto="true" ;;
       *)
         echo "Error: unknown option for gos env: ${arg}" >&2
-        echo "Usage: gos env [--fish] [--json]" >&2
+        echo "Usage: gos env [--fish] [--auto] [--json]" >&2
         return 1
         ;;
     esac
@@ -2188,17 +2292,24 @@ cmd_env() {
     _gos_json_string "$GOS_INSTALL_DIR"
     printf ',"bin_dir":'
     _gos_json_string "$go_bin"
+    printf ',"auto":%s' "$auto"
     printf '}\n'
     return 0
   fi
 
   if [ "$shell_kind" = "fish" ]; then
     printf 'fish_add_path --path %s\n' "$(_gos_shquote_fish "$go_bin")"
+    if [ "$auto" = "true" ]; then
+      _gos_env_auto_fish
+    fi
   else
     # The path is single-quoted so any metacharacter is inert; $PATH is left
     # outside the quotes so the user's shell still expands it.
     # shellcheck disable=SC2016
     printf 'export PATH=%s:"$PATH"\n' "$(_gos_shquote_posix "$go_bin")"
+    if [ "$auto" = "true" ]; then
+      _gos_env_auto_posix
+    fi
   fi
 }
 
@@ -2749,7 +2860,7 @@ _gos_completions() {
         words="--installed --json"
         ;;
       env)
-        words="--fish --json"
+        words="--fish --auto --json"
         ;;
       completions)
         words="bash zsh fish"
@@ -2846,7 +2957,7 @@ _gos() {
           _arguments '--installed[List locally installed versions]' '--json[Output machine-readable JSON]'
           ;;
         env)
-          _arguments '--fish[Emit fish shell syntax]' '--json[Output machine-readable JSON]'
+          _arguments '--fish[Emit fish shell syntax]' '--auto[Emit opt-in auto-switch hook]' '--json[Output machine-readable JSON]'
           ;;
         completions)
           _values 'shell' bash zsh fish
@@ -2905,6 +3016,7 @@ complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List loca
 complete -c gos -n '__fish_seen_subcommand_from install run' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
 complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
 complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
+complete -c gos -n '__fish_seen_subcommand_from env' -l auto -d 'Emit opt-in auto-switch hook'
 complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
 complete -c gos -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell'
 GOS_COMPLETION_FISH
@@ -2960,7 +3072,7 @@ COMMANDS:
   platforms [version] List supported OS/arch archives for a Go version
   status              Show an offline dashboard for gos and the active Go
   which [version]     Show the active or side-by-side Go binary path
-  env [--fish]        Print the PATH setup line for your shell
+  env [--fish] [--auto] Print PATH setup or an opt-in auto-switch hook
   completions <shell> Print a Bash, Zsh, or Fish completion script
   doctor [--fix]      Diagnose gos, Go, PATH, and tool dependencies
   self-update         Update gos itself to the latest release
@@ -3060,6 +3172,7 @@ main() {
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       cmd_env "$@"
       ;;
+    __project-version) cmd___project_version "$@" ;;
     completions) cmd_completions "$@" ;;
     current)   cmd_current "$@" ;;
     list)      cmd_list "$@" ;;

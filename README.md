@@ -85,6 +85,7 @@ Done. That's the whole setup.
 - **Concurrent-operation guard** — mutating commands take a portable `.gos-lock` so overlapping installs fail fast instead of racing
 - **Side-by-side versions (opt-in)** — set `GOS_VERSIONS_DIR` and every version stays installed; switching becomes an instant symlink flip, with `gos list --installed` and `gos uninstall`
 - **Shell setup in one line** — `eval "$(gos env)"` puts the managed Go on PATH
+- **Opt-in auto-switching** — `eval "$(gos env --auto)"` switches this shell to installed project versions as you `cd`, without changing global symlinks
 - **Self-updating** — `gos self-update` upgrades gos itself from the latest verified release
 - **Mirror support** — `GOS_DOWNLOAD_MIRROR` downloads archives from an HTTPS mirror while still verifying official go.dev checksums
 - **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `doctor`, `prune`, and `version`
@@ -271,7 +272,7 @@ exec fish          # for Fish
 | `gos platforms [version]` | List supported OS/arch archives for a Go version |
 | `gos status` | Show an offline dashboard for gos and the active Go |
 | `gos which [version]` | Show the active Go binary path, or a side-by-side version path |
-| `gos env [--fish]` | Print the PATH setup line for your shell |
+| `gos env [--fish] [--auto]` | Print the PATH setup line or an opt-in per-shell auto-switch hook |
 | `gos completions <shell>` | Print a Bash, Zsh, or Fish completion script |
 | `gos doctor [--fix]` | Diagnose gos, Go, PATH, and local tool dependencies; `--fix` creates safe missing directories and prints the shell setup line |
 | `gos self-update` | Update gos itself to the latest verified release |
@@ -415,6 +416,19 @@ PATH line with `gos env`:
 eval "$(gos env)"          # bash / zsh
 gos env --fish | source    # fish
 ```
+
+For per-shell project auto-switching, enable the hook explicitly after setting
+`GOS_VERSIONS_DIR`:
+
+```bash
+eval "$(gos env --auto)"        # bash / zsh
+gos env --auto --fish | source  # fish
+```
+
+The hook is offline and only changes the current shell's `PATH` when the
+project version is already installed under `GOS_VERSIONS_DIR`. If it is missing,
+it prints a one-line hint to run `gos use`; it never edits shell startup files
+or repoints the global `GOS_INSTALL_DIR` symlink.
 
 > **Note:** For safety, `GOS_INSTALL_DIR` must have at least 2 path components and the basename must contain "go" (e.g. `mygo`, `golang`, `.go` all work). System-critical paths like `/usr` or `/etc` are rejected.
 

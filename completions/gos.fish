@@ -30,5 +30,6 @@ complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List loca
 complete -c gos -n '__fish_seen_subcommand_from install run' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
 complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
 complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
+complete -c gos -n '__fish_seen_subcommand_from env' -l auto -d 'Emit opt-in auto-switch hook'
 complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
 complete -c gos -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell'

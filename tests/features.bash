@@ -926,9 +926,68 @@ run_gos "$case_dir" bash "$script" env --json
 [ "$status" -eq 0 ] || fail "env --json failed: ${output}"
 assert_json "$output" "env --json"
 assert_contains "$output" "\"bin_dir\":\"${case_dir}/go/bin\"" "env json"
+assert_contains "$output" '"auto":false' "env json auto flag"
 run_gos "$case_dir" bash "$script" env --bogus
 [ "$status" -ne 0 ] || fail "env with unknown option should fail"
 pass "env prints PATH setup for POSIX shells, fish, and JSON"
+
+case_dir="${test_root}/project-version"
+mkdir -p "${case_dir}/project/sub" "${case_dir}/empty"
+printf 'go1.21.6\n' >"${case_dir}/project/.go-version"
+pushd "${case_dir}/project/sub" >/dev/null
+run_gos "$case_dir" bash "$script" __project-version
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "__project-version failed: ${output}"
+[ "$output" = "1.21.6" ] || fail "__project-version output changed: ${output}"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "__project-version must not reach the network"
+fi
+run_gos "$case_dir" bash "$script" __project-version "${case_dir}/empty"
+[ "$status" -eq 0 ] || fail "__project-version without manifest should exit 0: ${output}"
+[ -z "$output" ] || fail "__project-version without manifest should be empty: ${output}"
+pass "__project-version resolves project manifests offline"
+
+case_dir="${test_root}/env-auto"
+mkdir -p "${case_dir}/project" "${case_dir}/missing" "${case_dir}/versions/go1.21.6/bin" "${case_dir}/bin"
+printf '1.21.6\n' >"${case_dir}/project/.go-version"
+printf '1.99.0\n' >"${case_dir}/missing/.go-version"
+cat >"${case_dir}/versions/go1.21.6/bin/go" <<'AUTO_GO'
+#!/usr/bin/env bash
+echo "go version go1.21.6 darwin/arm64"
+AUTO_GO
+chmod +x "${case_dir}/versions/go1.21.6/bin/go"
+ln -s "$script" "${case_dir}/bin/gos"
+run_gos "$case_dir" bash "$script" env --auto
+[ "$status" -eq 0 ] || fail "env --auto failed: ${output}"
+assert_contains "$output" "__gos_auto_switch" "env auto hook function"
+assert_contains "$output" "PROMPT_COMMAND" "env auto bash prompt hook"
+assert_contains "$output" "GOS_AUTO_PREV" "env auto tracks previous path"
+printf '%s\n' "$output" >"${case_dir}/hook.sh"
+PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
+GOS_INSTALL_DIR="${case_dir}/go" \
+GOS_VERSIONS_DIR="${case_dir}/versions" \
+  bash -c 'set -euo pipefail; source "$1"; cd "$2"; __gos_auto_switch; go version; cd "$3"; __gos_auto_switch; case ":$PATH:" in *":$4:"*) exit 9 ;; esac' \
+    bash "${case_dir}/hook.sh" "${case_dir}/project" "$case_dir" "${case_dir}/versions/go1.21.6/bin" \
+    >"${case_dir}/auto.out" \
+  || fail "env --auto hook did not switch and restore PATH"
+assert_contains "$(<"${case_dir}/auto.out")" "go version go1.21.6" "env auto go version"
+hint_output=$(
+  PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
+  GOS_INSTALL_DIR="${case_dir}/go" \
+  GOS_VERSIONS_DIR="${case_dir}/versions" \
+    bash -c 'source "$1"; cd "$2"; __gos_auto_switch; __gos_auto_switch' bash "${case_dir}/hook.sh" "${case_dir}/missing" 2>&1 >/dev/null
+)
+hint_count=$(printf '%s\n' "$hint_output" | grep -c 'gos: go1.99.0 is not installed' || true)
+[ "$hint_count" -eq 1 ] || fail "env --auto should hint once for a missing version, got ${hint_count}: ${hint_output}"
+run_gos "$case_dir" bash "$script" env --auto --fish
+[ "$status" -eq 0 ] || fail "env --auto --fish failed: ${output}"
+assert_contains "$output" "--on-variable PWD" "env auto fish on PWD"
+assert_contains "$output" "gos __project-version" "env auto fish project lookup"
+if command -v fish >/dev/null 2>&1; then
+  printf '%s\n' "$output" | fish --no-config --no-execute - \
+    || fail "env --auto --fish output is not valid fish syntax"
+fi
+pass "env --auto emits offline per-shell auto-switch hooks"
 
 # Side-by-side mode needs real symlinks; Git Bash's ln -s copies, so probe
 # the filesystem capability instead of sniffing the OS. Probe with a file
