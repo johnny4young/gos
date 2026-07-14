@@ -87,6 +87,14 @@ done <<EOF
 $commands_output
 EOF
 
+while IFS='|' read -r command_name _command_usage command_description; do
+  [ -n "$command_name" ] || continue
+  assert_contains "$fish_completion_text" "-a '${command_name}'" "fish command completion ${command_name}"
+  assert_contains "$fish_completion_text" "-d '${command_description}'" "fish command description ${command_name}"
+done <<EOF
+$commands_details
+EOF
+
 set +e
 output="$(bash "$script" __commands --bogus 2>&1)"
 status=$?
