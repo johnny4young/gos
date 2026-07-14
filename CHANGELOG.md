@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-07-14
+
 ### Added
 
 - Add `gos completions <bash|zsh|fish>` so single-file installs can print shell completions without needing the repository checkout.
@@ -203,7 +205,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Homebrew formula
 
 
-[Unreleased]: https://github.com/johnny4young/gos/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/johnny4young/gos/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/johnny4young/gos/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/johnny4young/gos/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/johnny4young/gos/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/johnny4young/gos/compare/v1.4.2...v1.4.3
