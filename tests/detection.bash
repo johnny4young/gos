@@ -33,6 +33,7 @@ chmod +x "${fake_bin}/uname"
 
 doctor_for() {
   local uname_s="$1" uname_m="$2"
+  status=0
   set +e
   output="$(
     PATH="${fake_bin}:${original_path}" \
@@ -41,6 +42,7 @@ doctor_for() {
       GOS_INSTALL_DIR="${test_root}/install/go" \
       bash "$script" doctor --json 2>&1
   )"
+  status=$?
   set -e
 }
 
@@ -66,12 +68,15 @@ TABLE
 while IFS='|' read -r uname_s uname_m expected; do
   [ -n "$uname_s" ] || continue
   doctor_for "$uname_s" "$uname_m"
+  [ "$status" -eq 0 ] || fail "doctor --json failed for ${uname_s}/${uname_m}: ${output}"
+  assert_json "$output" "detection ${uname_s}/${uname_m}"
   assert_contains "$output" "\"message\":\"detected ${expected} from ${uname_s}/${uname_m}\"" \
     "detection ${uname_s}/${uname_m}"
 done < <(detection_table)
 pass "supported uname pairs map to the expected Go os/arch targets"
 
 doctor_for "Plan9" "mystery"
+assert_json "$output" "unsupported platform"
 assert_contains "$output" '"name":"platform","status":"problem"' "unsupported platform status"
 assert_contains "$output" "unsupported platform detected: Plan9/mystery" "unsupported platform message"
 pass "unsupported uname pairs are reported as a doctor problem"

@@ -253,13 +253,6 @@ FAKE_MV
 chmod +x "${fake_bin}/uname" "${fake_bin}/curl" "${fake_bin}/sha256sum" \
   "${fake_bin}/tar" "${fake_bin}/go" "${fake_bin}/mv"
 
-assert_json() {
-  local json="$1" name="$2"
-  if command -v jq >/dev/null 2>&1; then
-    printf '%s\n' "$json" | jq -e . >/dev/null || fail "${name}: output is not valid JSON: ${json}"
-  fi
-}
-
 run_gos() {
   local case_dir="$1"
   shift
@@ -885,10 +878,12 @@ pass "latest resolves version and checksum from a single feed request"
 case_dir="${test_root}/feed-cache"
 run_gos "$case_dir" bash "$script" list --json
 [ "$status" -eq 0 ] || fail "feed-cache initial list failed: ${output}"
+assert_json "$output" "feed-cache initial list"
 grep -q 'https://go.dev/dl/?mode=json&include=all' "${case_dir}/urls.log" \
   || fail "initial list should fetch the all-versions feed"
 run_gos "$case_dir" bash "$script" list --json
 [ "$status" -eq 0 ] || fail "feed-cache cached list failed: ${output}"
+assert_json "$output" "feed-cache cached list"
 if [ -s "${case_dir}/urls.log" ]; then
   fail "cached list should not reach the network: $(cat "${case_dir}/urls.log")"
 fi
@@ -901,16 +896,19 @@ if [ -s "${case_dir}/urls.log" ]; then
 fi
 GOS_TEST_FEED_TTL=0 run_gos "$case_dir" bash "$script" list --json
 [ "$status" -eq 0 ] || fail "GOS_FEED_TTL=0 list failed: ${output}"
+assert_json "$output" "feed-cache disabled list"
 grep -q 'https://go.dev/dl/?mode=json&include=all' "${case_dir}/urls.log" \
   || fail "GOS_FEED_TTL=0 should disable feed-cache reads"
 
 case_dir="${test_root}/check-feed-cache"
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json
 [ "$status" -eq 0 ] || fail "check feed-cache initial run failed: ${output}"
+assert_json "$output" "check feed-cache initial run"
 grep -q 'https://go.dev/dl/?mode=json$' "${case_dir}/urls.log" \
   || fail "initial check should fetch the default feed"
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json
 [ "$status" -eq 0 ] || fail "check feed-cache cached run failed: ${output}"
+assert_json "$output" "check feed-cache cached run"
 if grep -q 'https://go.dev/dl/?mode=json$' "${case_dir}/urls.log"; then
   fail "cached check should not refetch the Go feed: $(cat "${case_dir}/urls.log")"
 fi

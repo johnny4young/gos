@@ -39,6 +39,18 @@ assert_nonzero_status() {
   fi
 }
 
+assert_json() {
+  local json="$1" name="$2"
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s\n' "$json" | jq -e . >/dev/null || fail "${name}: output is not valid JSON: ${json}"
+  elif command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' "$json" | python3 -c 'import json, sys; json.load(sys.stdin)' >/dev/null \
+      || fail "${name}: output is not valid JSON: ${json}"
+  else
+    pass "${name}: JSON validation skipped (jq/python3 unavailable)"
+  fi
+}
+
 assert_file() {
   [ -f "$1" ] || fail "missing required file $1"
 }
