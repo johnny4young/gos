@@ -50,6 +50,7 @@ ci = workflow(".github/workflows/ci.yml")
 canary = workflow(".github/workflows/canary.yml")
 readme = file_text("README.md")
 releasing = file_text("RELEASING.md")
+contributing = file_text("CONTRIBUTING.md")
 security = file_text("SECURITY.md")
 bash_completion = file_text("completions/gos.bash")
 zsh_completion = file_text("completions/gos.zsh")
@@ -62,6 +63,7 @@ assert(!public_commands.empty?, "gos __commands must list public commands")
 command_surfaces_sync_output = `bash scripts/sync-command-surfaces.bash --check 2>&1`
 assert($?.success?, "Command surfaces must match gos command manifest: #{command_surfaces_sync_output}")
 assert(!releasing.empty?, "repository must include RELEASING.md")
+assert(!contributing.empty?, "repository must include CONTRIBUTING.md")
 assert(!security.empty?, "repository must include SECURITY.md")
 
 release_on = workflow_on(release)
@@ -366,6 +368,10 @@ assert(fish_completion_file.include?("-l fix"), "Fish completion must include do
 assert(bash_completion.include?("--auto"), "Bash completion must include env --auto")
 assert(zsh_completion.include?("--auto"), "Zsh completion must include env --auto")
 assert(fish_completion_file.include?("-l auto"), "Fish completion must include env --auto")
+
+assert(contributing.include?("_gos_command_manifest"), "CONTRIBUTING must point command changes at the manifest")
+assert(contributing.include?("scripts/sync-command-surfaces.bash --write"), "CONTRIBUTING must document command surface sync writes")
+assert(contributing.include?("scripts/sync-command-surfaces.bash --check"), "CONTRIBUTING must document command surface sync checks")
 
 [
   "workflow_dispatch",

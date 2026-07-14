@@ -52,6 +52,25 @@ cd gos
 Most tests use fake commands in a temporary PATH and do not touch your real Go
 installation.
 
+## Command and Completion Surfaces
+
+Public commands are listed in one place: `_gos_command_manifest` in `gos.sh`.
+When you add, rename, remove, or reword a command, update that manifest first
+and then regenerate the derived surfaces:
+
+```bash
+scripts/sync-command-surfaces.bash --write
+```
+
+That command keeps the README Usage table, Bash fallback completions, Fish and
+Zsh command descriptions, and embedded completion blocks in sync. Before you
+commit, verify the generated files are current:
+
+```bash
+scripts/sync-command-surfaces.bash --check
+bash tests/completions.bash
+```
+
 ## Validation
 
 Run the focused checks for your change:
