@@ -53,7 +53,7 @@ _gos_cleanup_tmp() {
          && sudo mv "$GOS_ACTIVATION_BACKUP" "$GOS_INSTALL_DIR" 2>/dev/null; then
         :
       else
-        echo "Warning: could not restore ${GOS_ACTIVATION_BACKUP}; move it back to ${GOS_INSTALL_DIR} manually." >&2
+        _gos_warning "could not restore ${GOS_ACTIVATION_BACKUP}; move it back to ${GOS_INSTALL_DIR} manually."
       fi
     fi
   fi
@@ -121,6 +121,32 @@ _gos_color_text() {
   printf '\033[%sm%s\033[0m' "$code" "$text"
 }
 
+_gos_stderr_color_enabled() {
+  [ "${GOS_OUTPUT_JSON:-0}" != "1" ] || return 1
+  [ -t 2 ] || return 1
+  [ -z "${NO_COLOR:-}" ] || return 1
+  [ "${GOS_NO_COLOR:-0}" != "1" ] || return 1
+  [ "${TERM:-}" != "dumb" ] || return 1
+}
+
+_gos_error() {
+  local message="$1"
+  if _gos_stderr_color_enabled; then
+    printf '%s %s\n' "$(_gos_color_text 31 '✗')" "$(_gos_color_text 31 "Error: ${message}")" >&2
+  else
+    printf 'Error: %s\n' "$message" >&2
+  fi
+}
+
+_gos_warning() {
+  local message="$1"
+  if _gos_stderr_color_enabled; then
+    printf '%s %s\n' "$(_gos_color_text 33 '!')" "$(_gos_color_text 33 "Warning: ${message}")" >&2
+  else
+    printf 'Warning: %s\n' "$message" >&2
+  fi
+}
+
 # Parse the flags shared by commands that take only [--json]. Unknown arguments
 # are rejected rather than silently ignored, so `gos check --bogus` errors like
 # the hand-rolled parsers in list/env/prune already do.
@@ -130,7 +156,7 @@ _gos_set_json_from_args() {
     case "$arg" in
       --json) GOS_OUTPUT_JSON=1 ;;
       *)
-        echo "Error: unexpected argument: ${arg}" >&2
+        _gos_error "unexpected argument: ${arg}"
         return 1
         ;;
     esac
@@ -142,7 +168,7 @@ _gos_set_json_from_args() {
 _gos_validate_version() {
   local version="$1"
   if ! printf '%s\n' "$version" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$'; then
-    echo "Error: invalid version format '${version}'." >&2
+    _gos_error "invalid version format '${version}'."
     echo "Expected format: X.Y[.Z][rcN|betaN]  e.g. 1.22.0, 1.23rc1" >&2
     return 1
   fi
@@ -157,7 +183,7 @@ _gos_reject_unsafe_path() {
   # Reject control characters that make paths ambiguous in logs and commands.
   case "$value" in
     *$'\n'*|*$'\r'*|*$'\t'*)
-      echo "Error: ${label} must not contain control characters." >&2
+      _gos_error "${label} must not contain control characters."
       return 1
       ;;
   esac
@@ -165,7 +191,7 @@ _gos_reject_unsafe_path() {
   # like /usr/local/../../etc/go slip past the system-critical denylist.
   case "/${value}/" in
     *"/../"*|*"/./"*)
-      echo "Error: ${label}='${value}' must not contain . or .. path components." >&2
+      _gos_error "${label}='${value}' must not contain . or .. path components."
       return 1
       ;;
   esac
@@ -176,14 +202,14 @@ _gos_validate_install_dir() {
   local dir="$1"
   # Reject empty
   if [ -z "$dir" ]; then
-    echo "Error: GOS_INSTALL_DIR is empty." >&2
+    _gos_error "GOS_INSTALL_DIR is empty."
     return 1
   fi
   # Require an absolute path so install/cleanup never depends on the CWD
   case "$dir" in
     /*) ;;
     *)
-      echo "Error: GOS_INSTALL_DIR='${dir}' must be an absolute path." >&2
+      _gos_error "GOS_INSTALL_DIR='${dir}' must be an absolute path."
       return 1
       ;;
   esac
@@ -191,7 +217,7 @@ _gos_validate_install_dir() {
   # Reject known system-critical roots
   case "$dir" in
     /|/usr|/etc|/home|/var|/bin|/sbin|/lib|/opt|/tmp|/root|/sys|/proc|/dev)
-      echo "Error: GOS_INSTALL_DIR='${dir}' is a system-critical path. Refusing." >&2
+      _gos_error "GOS_INSTALL_DIR='${dir}' is a system-critical path. Refusing."
       return 1
       ;;
   esac
@@ -199,7 +225,7 @@ _gos_validate_install_dir() {
   local depth
   depth=$(printf '%s' "$dir" | tr -cd '/' | wc -c | tr -d ' ')
   if [ "$depth" -lt 2 ]; then
-    echo "Error: GOS_INSTALL_DIR='${dir}' is too shallow. Use a path like /usr/local/go." >&2
+    _gos_error "GOS_INSTALL_DIR='${dir}' is too shallow. Use a path like /usr/local/go."
     return 1
   fi
   # Require basename to contain "go" to prevent accidental misconfiguration
@@ -208,7 +234,7 @@ _gos_validate_install_dir() {
   case "$base" in
     *go*) ;;
     *)
-      echo "Error: GOS_INSTALL_DIR basename '${base}' does not contain 'go'. Refusing." >&2
+      _gos_error "GOS_INSTALL_DIR basename '${base}' does not contain 'go'. Refusing."
       return 1
       ;;
   esac
@@ -220,13 +246,13 @@ _gos_validate_versions_dir() {
   # Git Bash's ln -s copies instead of linking, which would silently turn
   # "instant switching" into full copies with broken uninstall semantics.
   if [ "$(_gos_os)" = "windows" ]; then
-    echo "Error: GOS_VERSIONS_DIR (side-by-side mode) requires real symlinks and is not supported on Git Bash. Use WSL, or unset GOS_VERSIONS_DIR." >&2
+    _gos_error "GOS_VERSIONS_DIR (side-by-side mode) requires real symlinks and is not supported on Git Bash. Use WSL, or unset GOS_VERSIONS_DIR."
     return 1
   fi
   case "$GOS_VERSIONS_DIR" in
     /*) ;;
     *)
-      echo "Error: GOS_VERSIONS_DIR='${GOS_VERSIONS_DIR}' must be an absolute path." >&2
+      _gos_error "GOS_VERSIONS_DIR='${GOS_VERSIONS_DIR}' must be an absolute path."
       return 1
       ;;
   esac
@@ -251,7 +277,7 @@ _gos_warn_orphaned_versions_link() {
   case "$base" in
     go[0-9]*)
       if _gos_validate_version "${base#go}" 2>/dev/null; then
-        echo "Warning: ${GOS_INSTALL_DIR} is a side-by-side symlink (-> ${target}) but GOS_VERSIONS_DIR is not set in this shell." >&2
+        _gos_warning "${GOS_INSTALL_DIR} is a side-by-side symlink (-> ${target}) but GOS_VERSIONS_DIR is not set in this shell."
         echo "         Proceeding will convert it to a flat install; export GOS_VERSIONS_DIR to keep managing versions side by side." >&2
       fi
       ;;
@@ -271,7 +297,7 @@ _gos_validate_mirror() {
   case "$GOS_DOWNLOAD_MIRROR" in
     https://*[!/]*) ;;
     *)
-      echo "Error: GOS_DOWNLOAD_MIRROR='${GOS_DOWNLOAD_MIRROR}' must be an https:// URL." >&2
+      _gos_error "GOS_DOWNLOAD_MIRROR='${GOS_DOWNLOAD_MIRROR}' must be an https:// URL."
       return 1
       ;;
   esac
@@ -311,7 +337,7 @@ _gos_download() {
       wget --https-only --timeout=15 --tries=3 -qO "$output" "$url"
     fi
   else
-    echo "Error: neither curl nor wget found. Install one and try again." >&2
+    _gos_error "neither curl nor wget found. Install one and try again."
     return 1
   fi
 }
@@ -324,7 +350,7 @@ _gos_download_stdout() {
   elif command -v wget &>/dev/null; then
     wget --https-only --timeout=15 --tries=3 -qO- "$url"
   else
-    echo "Error: neither curl nor wget found. Install one and try again." >&2
+    _gos_error "neither curl nor wget found. Install one and try again."
     return 1
   fi
 }
@@ -383,21 +409,21 @@ _gos_write_feed_cache() {
   _gos_feed_cache_enabled || return 0
   cache_file=$(_gos_feed_cache_path "$include_all")
   if ! mkdir -p "$GOS_CACHE_DIR" 2>/dev/null; then
-    echo "Warning: could not write Go downloads feed cache at ${GOS_CACHE_DIR}." >&2
+    _gos_warning "could not write Go downloads feed cache at ${GOS_CACHE_DIR}."
     return 0
   fi
   tmp_file=$(mktemp "${cache_file}.XXXXXX" 2>/dev/null) || {
-    echo "Warning: could not write Go downloads feed cache at ${GOS_CACHE_DIR}." >&2
+    _gos_warning "could not write Go downloads feed cache at ${GOS_CACHE_DIR}."
     return 0
   }
   printf '%s\n' "$json" >"$tmp_file" || {
     rm -f "$tmp_file"
-    echo "Warning: could not write Go downloads feed cache at ${GOS_CACHE_DIR}." >&2
+    _gos_warning "could not write Go downloads feed cache at ${GOS_CACHE_DIR}."
     return 0
   }
   mv "$tmp_file" "$cache_file" 2>/dev/null || {
     rm -f "$tmp_file"
-    echo "Warning: could not write Go downloads feed cache at ${GOS_CACHE_DIR}." >&2
+    _gos_warning "could not write Go downloads feed cache at ${GOS_CACHE_DIR}."
     return 0
   }
 }
@@ -513,7 +539,7 @@ _gos_store_cache() {
     return 0
   fi
 
-  echo "Warning: could not write Go archive cache at ${GOS_CACHE_DIR}." >&2
+  _gos_warning "could not write Go archive cache at ${GOS_CACHE_DIR}."
 }
 
 _gos_try_cache() {
@@ -524,23 +550,23 @@ _gos_try_cache() {
   [ -f "$cache_file" ] || return 1
 
   if [ -z "$expected_sha" ]; then
-    echo "Warning: cached ${pkg} was not reused because checksum metadata is unavailable." >&2
+    _gos_warning "cached ${pkg} was not reused because checksum metadata is unavailable."
     return 1
   fi
 
   actual_sha=$(_gos_sha256 "$cache_file")
   if [ -z "$actual_sha" ]; then
-    echo "Warning: cached ${pkg} was not reused because no SHA256 tool output was available." >&2
+    _gos_warning "cached ${pkg} was not reused because no SHA256 tool output was available."
     return 1
   fi
 
   if [ "$actual_sha" != "$expected_sha" ]; then
-    echo "Warning: cached ${pkg} checksum mismatch; downloading a fresh archive." >&2
+    _gos_warning "cached ${pkg} checksum mismatch; downloading a fresh archive."
     return 1
   fi
 
   if ! cp "$cache_file" "$output"; then
-    echo "Warning: cached ${pkg} could not be copied; downloading a fresh archive." >&2
+    _gos_warning "cached ${pkg} could not be copied; downloading a fresh archive."
     return 1
   fi
   echo "Using cached ${pkg}."
@@ -568,11 +594,11 @@ _gos_checksum_unavailable() {
   local reason="$1"
 
   if _gos_require_checksum; then
-    echo "Error: checksum verification required but ${reason}." >&2
+    _gos_error "checksum verification required but ${reason}."
     return 1
   fi
 
-  echo "Warning: skipping integrity verification (${reason})." >&2
+  _gos_warning "skipping integrity verification (${reason})."
 }
 
 _gos_fetch_checksum() {
@@ -789,12 +815,12 @@ _gos_report_existing_lock() {
   [ -f "${lock_dir}/pid" ] && pid=$(sed -n '1p' "${lock_dir}/pid" 2>/dev/null || true)
 
   if _gos_pid_is_running "$pid"; then
-    echo "Error: another gos operation is running (pid ${pid})." >&2
+    _gos_error "another gos operation is running (pid ${pid})."
     echo "Lock: ${lock_dir}" >&2
     return 1
   fi
 
-  echo "Error: stale gos lock found at ${lock_dir}." >&2
+  _gos_error "stale gos lock found at ${lock_dir}."
   if [ -n "$pid" ]; then
     echo "The recorded pid (${pid}) is not running." >&2
   fi
@@ -813,7 +839,7 @@ _gos_acquire_lock() {
   fi
 
   if [ ! -d "$lock_parent" ] && ! _gos_ensure_dir "$lock_parent"; then
-    echo "Error: failed to create parent directory for GOS_INSTALL_DIR: ${lock_parent}" >&2
+    _gos_error "failed to create parent directory for GOS_INSTALL_DIR: ${lock_parent}"
     return 1
   fi
 
@@ -828,7 +854,7 @@ _gos_acquire_lock() {
     _gos_report_existing_lock "$lock_dir"
     return 1
   else
-    echo "Error: could not create gos lock at ${lock_dir}." >&2
+    _gos_error "could not create gos lock at ${lock_dir}."
     return 1
   fi
 
@@ -855,7 +881,7 @@ _gos_prepare_install_parent() {
   parent=$(dirname "$GOS_INSTALL_DIR")
 
   if ! _gos_ensure_dir "$parent"; then
-    echo "Error: failed to create parent directory for GOS_INSTALL_DIR: ${parent}" >&2
+    _gos_error "failed to create parent directory for GOS_INSTALL_DIR: ${parent}"
     return 1
   fi
 }
@@ -872,11 +898,11 @@ _gos_extract_archive() {
       tar -xf "$tmp_file" -C "$stage_dir"
     elif command -v powershell.exe &>/dev/null && command -v cygpath &>/dev/null; then
       ps_archive=$(cygpath -w "$tmp_file") || {
-        echo "Error: failed to convert archive path for PowerShell." >&2
+        _gos_error "failed to convert archive path for PowerShell."
         return 1
       }
       ps_stage=$(cygpath -w "$stage_dir") || {
-        echo "Error: failed to convert stage path for PowerShell." >&2
+        _gos_error "failed to convert stage path for PowerShell."
         return 1
       }
       # The PowerShell command intentionally receives literal $env: lookups.
@@ -886,7 +912,7 @@ _gos_extract_archive() {
         powershell.exe -NoProfile -NonInteractive -Command \
           'Expand-Archive -LiteralPath $env:GOS_PS_ARCHIVE -DestinationPath $env:GOS_PS_DESTINATION -Force'
     else
-      echo "Error: no extraction tool found (unzip, tar, or powershell with cygpath)." >&2
+      _gos_error "no extraction tool found (unzip, tar, or powershell with cygpath)."
       return 1
     fi
   else
@@ -899,7 +925,7 @@ _gos_validate_staged_install() {
   local staged_go_bin="${staged_go_dir}/bin/go"
 
   if [ ! -x "$staged_go_bin" ]; then
-    echo "Error: archive did not contain an executable go/bin/go." >&2
+    _gos_error "archive did not contain an executable go/bin/go."
     return 1
   fi
 }
@@ -924,9 +950,9 @@ _gos_rollback_dir() {
 _gos_warn_rollback_unavailable() {
   local backup_dir="$1" rollback_dir="$2"
 
-  echo "Warning: rollback was not saved automatically." >&2
-  echo "Warning: previous Go installation remains at: ${backup_dir}" >&2
-  echo "Warning: to enable rollback manually, run: sudo mv \"${backup_dir}\" \"${rollback_dir}\"" >&2
+  _gos_warning "rollback was not saved automatically."
+  _gos_warning "previous Go installation remains at: ${backup_dir}"
+  _gos_warning "to enable rollback manually, run: sudo mv \"${backup_dir}\" \"${rollback_dir}\""
 }
 
 _gos_save_rollback_backup() {
@@ -937,13 +963,13 @@ _gos_save_rollback_backup() {
   # it pointed at; without removing that path first, the mv below fails and the
   # otherwise-good backup is stranded outside the rollback slot.
   if { [ -e "$rollback_dir" ] || [ -L "$rollback_dir" ]; } && ! _gos_sudo rm -rf "$rollback_dir"; then
-    echo "Warning: failed to remove existing rollback installation at ${rollback_dir}." >&2
+    _gos_warning "failed to remove existing rollback installation at ${rollback_dir}."
     _gos_warn_rollback_unavailable "$backup_dir" "$rollback_dir"
     return 0
   fi
 
   if ! _gos_sudo mv "$backup_dir" "$rollback_dir"; then
-    echo "Warning: failed to save rollback installation at ${rollback_dir}." >&2
+    _gos_warning "failed to save rollback installation at ${rollback_dir}."
     _gos_warn_rollback_unavailable "$backup_dir" "$rollback_dir"
     return 0
   fi
@@ -968,7 +994,7 @@ _gos_activate_install() {
   if [ -e "$GOS_INSTALL_DIR" ] || [ -L "$GOS_INSTALL_DIR" ]; then
     backup_dir="${GOS_INSTALL_DIR}.gos-backup.$$"
     if [ -e "$backup_dir" ] || [ -L "$backup_dir" ]; then
-      echo "Error: backup path already exists: ${backup_dir}" >&2
+      _gos_error "backup path already exists: ${backup_dir}"
       return 1
     fi
     # Replacing one symlink with another is silent; a real install is not.
@@ -983,7 +1009,7 @@ _gos_activate_install() {
   if [ "$activate_kind" = "link" ]; then
     echo "Activating go from ${source}..."
     if ! _gos_sudo ln -s "$source" "$GOS_INSTALL_DIR"; then
-      echo "Error: failed to link new Go installation into place." >&2
+      _gos_error "failed to link new Go installation into place."
       _gos_restore_backup "$backup_dir" || true
       GOS_ACTIVATION_BACKUP=""
       return 1
@@ -991,7 +1017,7 @@ _gos_activate_install() {
   else
     echo "Activating new Go installation..."
     if ! _gos_sudo mv "$source" "$GOS_INSTALL_DIR"; then
-      echo "Error: failed to move new Go installation into place." >&2
+      _gos_error "failed to move new Go installation into place."
       _gos_restore_backup "$backup_dir" || true
       GOS_ACTIVATION_BACKUP=""
       return 1
@@ -1003,14 +1029,14 @@ _gos_activate_install() {
   # that can put the previous install back. Clearing it here would disarm that.
   go_bin="${GOS_INSTALL_DIR}/bin/go"
   if [ ! -x "$go_bin" ]; then
-    echo "Error: activated Go installation is missing bin/go." >&2
+    _gos_error "activated Go installation is missing bin/go."
     _gos_restore_backup "$backup_dir" || true
     GOS_ACTIVATION_BACKUP=""
     return 1
   fi
 
   if ! version_output=$("$go_bin" version 2>&1); then
-    echo "Error: activated Go failed validation: ${version_output}" >&2
+    _gos_error "activated Go failed validation: ${version_output}"
     _gos_restore_backup "$backup_dir" || true
     GOS_ACTIVATION_BACKUP=""
     return 1
@@ -1033,7 +1059,7 @@ _gos_activate_rollback() {
   current_backup="${GOS_INSTALL_DIR}.gos-current.$$"
 
   if [ ! -d "$rollback_dir" ]; then
-    echo "Error: no rollback installation found at ${rollback_dir}." >&2
+    _gos_error "no rollback installation found at ${rollback_dir}."
     return 1
   fi
 
@@ -1044,7 +1070,7 @@ _gos_activate_rollback() {
   fi
 
   if ! _gos_sudo mv "$rollback_dir" "$GOS_INSTALL_DIR"; then
-    echo "Error: failed to restore rollback installation." >&2
+    _gos_error "failed to restore rollback installation."
     if [ -e "$current_backup" ]; then
       _gos_sudo mv "$current_backup" "$GOS_INSTALL_DIR" || true
     fi
@@ -1053,13 +1079,13 @@ _gos_activate_rollback() {
 
   go_bin="${GOS_INSTALL_DIR}/bin/go"
   if [ ! -x "$go_bin" ]; then
-    echo "Error: rollback installation is missing bin/go." >&2
+    _gos_error "rollback installation is missing bin/go."
     _gos_restore_backup "$current_backup" || true
     return 1
   fi
 
   if ! version_output=$("$go_bin" version 2>&1); then
-    echo "Error: rollback Go failed validation: ${version_output}" >&2
+    _gos_error "rollback Go failed validation: ${version_output}"
     _gos_restore_backup "$current_backup" || true
     return 1
   fi
@@ -1096,7 +1122,7 @@ _gos_install_version() {
   fi
 
   if [ "$activate" != "true" ] && ! _gos_versions_mode; then
-    echo "Error: installing without activation requires side-by-side mode (set GOS_VERSIONS_DIR)." >&2
+    _gos_error "installing without activation requires side-by-side mode (set GOS_VERSIONS_DIR)."
     return 1
   fi
 
@@ -1105,7 +1131,7 @@ _gos_install_version() {
   ext=$(_gos_ext)
 
   if [ "$os" = "unsupported" ] || [ "$arch" = "unsupported" ]; then
-    echo "Error: unsupported OS or architecture: detected $(uname -s)/$(uname -m) (mapped to ${os}/${arch})." >&2
+    _gos_error "unsupported OS or architecture: detected $(uname -s)/$(uname -m) (mapped to ${os}/${arch})."
     return 1
   fi
 
@@ -1116,7 +1142,7 @@ _gos_install_version() {
 
   # Use a unique temp directory to prevent symlink/TOCTOU attacks.
   # The EXIT/INT/TERM trap removes it on every exit path.
-  tmp_dir=$(mktemp -d) || { echo "Error: failed to create temp directory." >&2; return 1; }
+  tmp_dir=$(mktemp -d) || { _gos_error "failed to create temp directory."; return 1; }
   GOS_TMP_DIR="$tmp_dir"
   tmp_file="${tmp_dir}/${pkg}"
   stage_dir="${tmp_dir}/stage"
@@ -1133,7 +1159,7 @@ _gos_install_version() {
     [ -n "$expected_sha" ] && sha_source="feed"
   fi
   if _gos_require_feed_checksum && [ "$sha_source" != "feed" ]; then
-    echo "Error: GOS_REQUIRE_CHECKSUM=feed but no checksum was found in the go.dev downloads feed for ${pkg}." >&2
+    _gos_error "GOS_REQUIRE_CHECKSUM=feed but no checksum was found in the go.dev downloads feed for ${pkg}."
     echo "Install jq or python3 so feed metadata can be parsed, or use GOS_REQUIRE_CHECKSUM=1 to accept the .sha256 fallback." >&2
     return 1
   fi
@@ -1144,7 +1170,7 @@ _gos_install_version() {
   # Mirror downloads are only trusted when they can be verified against the
   # official go.dev checksum metadata; never fall back to unverified bytes.
   if [ -n "$GOS_DOWNLOAD_MIRROR" ] && [ -z "$expected_sha" ]; then
-    echo "Error: GOS_DOWNLOAD_MIRROR is set but no official checksum is available for ${pkg}." >&2
+    _gos_error "GOS_DOWNLOAD_MIRROR is set but no official checksum is available for ${pkg}."
     echo "Refusing to download unverifiable bytes from a mirror. Install jq or python3, or unset GOS_DOWNLOAD_MIRROR." >&2
     return 1
   fi
@@ -1155,7 +1181,7 @@ _gos_install_version() {
   else
     echo "Downloading ${pkg}..."
     _gos_download "$url" "$tmp_file" || {
-      echo "Error: download failed. Version '${version}' may not exist." >&2
+      _gos_error "download failed. Version '${version}' may not exist."
       return 1
     }
   fi
@@ -1165,13 +1191,13 @@ _gos_install_version() {
     actual_sha=$(_gos_sha256 "$tmp_file")
     if [ -z "$actual_sha" ]; then
       if [ -n "$GOS_DOWNLOAD_MIRROR" ]; then
-        echo "Error: GOS_DOWNLOAD_MIRROR is set but no SHA256 tool is available to verify ${pkg}." >&2
+        _gos_error "GOS_DOWNLOAD_MIRROR is set but no SHA256 tool is available to verify ${pkg}."
         echo "Install sha256sum or shasum, or unset GOS_DOWNLOAD_MIRROR." >&2
         return 1
       fi
       _gos_checksum_unavailable "no SHA256 tool output was available" || return 1
     elif [ "$actual_sha" != "$expected_sha" ]; then
-      echo "Error: checksum mismatch! Expected ${expected_sha}, got ${actual_sha}." >&2
+      _gos_error "checksum mismatch! Expected ${expected_sha}, got ${actual_sha}."
       echo "The download may be corrupted. Aborting." >&2
       return 1
     else
@@ -1193,7 +1219,7 @@ _gos_install_version() {
   echo "Extracting..."
   mkdir -p "$stage_dir"
   if ! _gos_extract_archive "$ext" "$tmp_file" "$stage_dir"; then
-    echo "Error: extraction failed." >&2
+    _gos_error "extraction failed."
     return 1
   fi
 
@@ -1204,16 +1230,16 @@ _gos_install_version() {
   if _gos_versions_mode; then
     version_dir=$(_gos_version_dir_for "$version")
     if ! _gos_ensure_dir "$GOS_VERSIONS_DIR"; then
-      echo "Error: failed to create GOS_VERSIONS_DIR: ${GOS_VERSIONS_DIR}" >&2
+      _gos_error "failed to create GOS_VERSIONS_DIR: ${GOS_VERSIONS_DIR}"
       return 1
     fi
     # A partial or broken previous copy (no executable bin/go) is replaced.
     if [ -e "$version_dir" ] && ! _gos_sudo rm -rf "$version_dir"; then
-      echo "Error: failed to replace existing ${version_dir}." >&2
+      _gos_error "failed to replace existing ${version_dir}."
       return 1
     fi
     if ! _gos_sudo mv "$staged_go_dir" "$version_dir"; then
-      echo "Error: failed to move new Go installation into ${GOS_VERSIONS_DIR}." >&2
+      _gos_error "failed to move new Go installation into ${GOS_VERSIONS_DIR}."
       return 1
     fi
     if [ "$activate" = "true" ]; then
@@ -1378,7 +1404,7 @@ _gos_sort_versions() {
 _gos_list_versions() {
   local json
   json=$(_gos_feed_json true true) || {
-    echo "Error: could not fetch the Go version list. Check your internet connection." >&2
+    _gos_error "could not fetch the Go version list. Check your internet connection."
     return 1
   }
 
@@ -1392,7 +1418,7 @@ _gos_platforms_for_version() {
   local version="$1" json go_version
   go_version="go${version#go}"
   json=$(_gos_feed_json true true) || {
-    echo "Error: could not fetch the Go downloads feed. Check your internet connection." >&2
+    _gos_error "could not fetch the Go downloads feed. Check your internet connection."
     return 1
   }
 
@@ -1478,7 +1504,7 @@ _gos_cache_archive_stats() {
 
 cmd_latest() {
   if [ "$#" -gt 0 ]; then
-    echo "Error: unexpected argument for gos latest: ${1}" >&2
+    _gos_error "unexpected argument for gos latest: ${1}"
     echo "Usage: gos latest" >&2
     return 1
   fi
@@ -1492,7 +1518,7 @@ cmd_latest() {
 
   latest=$(_gos_fetch_latest) || latest=""
   if [ -z "$latest" ]; then
-    echo "Error: could not fetch latest version. Check your internet connection." >&2
+    _gos_error "could not fetch latest version. Check your internet connection."
     return 1
   fi
 
@@ -1525,7 +1551,7 @@ cmd_check() {
 
   latest=$(_gos_fetch_latest true) || latest=""
   if [ -z "$latest" ]; then
-    echo "Error: could not fetch latest version. Check your internet connection." >&2
+    _gos_error "could not fetch latest version. Check your internet connection."
     return 1
   fi
 
@@ -1569,7 +1595,7 @@ cmd_install() {
     return 1
   fi
   if [ "$#" -gt 1 ]; then
-    echo "Error: unexpected argument for gos install: ${2}" >&2
+    _gos_error "unexpected argument for gos install: ${2}"
     echo "Usage: gos install <version>  e.g. gos install 1.26.1" >&2
     return 1
   fi
@@ -1620,7 +1646,7 @@ cmd_run() {
   fi
   shift
   if [ "$version" = "--json" ]; then
-    echo "Error: gos run does not support --json." >&2
+    _gos_error "gos run does not support --json."
     return 1
   fi
   if [ "${1:-}" = "--" ]; then
@@ -1635,7 +1661,7 @@ cmd_run() {
   _gos_validate_version "$version" || return 1
 
   if ! _gos_versions_mode; then
-    echo "Error: gos run requires side-by-side mode (set GOS_VERSIONS_DIR)." >&2
+    _gos_error "gos run requires side-by-side mode (set GOS_VERSIONS_DIR)."
     echo "Example: export GOS_INSTALL_DIR=\"\$HOME/.gos/go\"; export GOS_VERSIONS_DIR=\"\$HOME/.gos/versions\"" >&2
     return 1
   fi
@@ -1674,7 +1700,7 @@ cmd_run() {
     _gos_install_version "$version" true false || return 1
   fi
   if [ ! -x "${version_dir}/bin/go" ]; then
-    echo "Error: go${version} is not installed under ${GOS_VERSIONS_DIR}." >&2
+    _gos_error "go${version} is not installed under ${GOS_VERSIONS_DIR}."
     return 1
   fi
 
@@ -1687,7 +1713,7 @@ cmd___project_version() {
   local start_dir="${1:-$PWD}" resolved version
 
   if [ "$#" -gt 1 ]; then
-    echo "Error: unexpected argument for gos __project-version: ${2}" >&2
+    _gos_error "unexpected argument for gos __project-version: ${2}"
     echo "Usage: gos __project-version [path]" >&2
     return 1
   fi
@@ -1759,7 +1785,7 @@ _gos_resolve_installed_bare_minor() {
     return 0
   fi
   if [ "$match_count" -gt 1 ]; then
-    echo "Error: '${version}' matches multiple installed Go versions; re-run with an exact version:" >&2
+    _gos_error "'${version}' matches multiple installed Go versions; re-run with an exact version:"
     for installed in $(_gos_installed_versions); do
       case "$installed" in "$version"|"$version".*) echo "  go${installed}" >&2 ;; esac
     done
@@ -1775,7 +1801,7 @@ cmd___versions() {
     case "$arg" in
       --remote-cached) include_remote_cached="true" ;;
       *)
-        echo "Error: unknown option for gos __versions: ${arg}" >&2
+        _gos_error "unknown option for gos __versions: ${arg}"
         echo "Usage: gos __versions [--remote-cached]" >&2
         return 1
         ;;
@@ -1801,7 +1827,7 @@ cmd_list() {
       --json) GOS_OUTPUT_JSON=1 ;;
       --installed) installed="true" ;;
       *)
-        echo "Error: unknown option for gos list: ${arg}" >&2
+        _gos_error "unknown option for gos list: ${arg}"
         echo "Usage: gos list [--installed] [--json]" >&2
         return 1
         ;;
@@ -1850,7 +1876,7 @@ cmd_platforms() {
     elif [ -z "$version" ]; then
       version="${arg#go}"
     else
-      echo "Error: unexpected argument for gos platforms: ${arg}" >&2
+      _gos_error "unexpected argument for gos platforms: ${arg}"
       echo "Usage: gos platforms [version] [--json]" >&2
       return 1
     fi
@@ -1859,7 +1885,7 @@ cmd_platforms() {
   if [ -z "$version" ]; then
     version=$(_gos_fetch_latest true) || version=""
     if [ -z "$version" ]; then
-      echo "Error: could not fetch latest version. Check your internet connection." >&2
+      _gos_error "could not fetch latest version. Check your internet connection."
       return 1
     fi
   fi
@@ -1868,7 +1894,7 @@ cmd_platforms() {
   platforms=$(_gos_platforms_for_version "$version") || platforms=""
 
   if [ -z "$platforms" ]; then
-    echo "Error: no supported platforms found for go${version}." >&2
+    _gos_error "no supported platforms found for go${version}."
     return 1
   fi
 
@@ -1895,7 +1921,7 @@ cmd_which() {
         if [ -z "$version" ]; then
           version="${arg#go}"
         else
-          echo "Error: unexpected argument for gos which: ${arg}" >&2
+          _gos_error "unexpected argument for gos which: ${arg}"
           echo "Usage: gos which [version] [--json]" >&2
           return 1
         fi
@@ -1906,20 +1932,20 @@ cmd_which() {
   if [ -n "$version" ]; then
     _gos_validate_version "$version" || return 1
     if ! _gos_versions_mode; then
-      echo "Error: gos which <version> requires side-by-side mode (set GOS_VERSIONS_DIR)." >&2
+      _gos_error "gos which <version> requires side-by-side mode (set GOS_VERSIONS_DIR)."
       return 1
     fi
     _gos_validate_versions_dir || return 1
     version_dir=$(_gos_version_dir_for "$version")
     go_path="${version_dir}/bin/go"
     if [ ! -x "$go_path" ]; then
-      echo "Error: go${version} is not installed under ${GOS_VERSIONS_DIR}." >&2
+      _gos_error "go${version} is not installed under ${GOS_VERSIONS_DIR}."
       return 1
     fi
     managed="true"
   else
     if ! go_path=$(_gos_active_go_path); then
-      echo "Error: no go binary found on PATH." >&2
+      _gos_error "no go binary found on PATH."
       return 1
     fi
     if _gos_path_is_under "$go_path" "$GOS_INSTALL_DIR"; then
@@ -2067,18 +2093,18 @@ cmd_use() {
   local start_dir="${1:-$PWD}" resolved version source
 
   if [ "$#" -gt 1 ]; then
-    echo "Error: unexpected argument for gos use: ${2}" >&2
+    _gos_error "unexpected argument for gos use: ${2}"
     echo "Usage: gos use [path]" >&2
     return 1
   fi
 
   if [ "$start_dir" = "--json" ]; then
-    echo "Error: gos use does not support --json." >&2
+    _gos_error "gos use does not support --json."
     return 1
   fi
 
   if ! resolved=$(_gos_resolve_project_version "$start_dir"); then
-    echo "Error: no .go-version or go.mod found from ${start_dir} upward." >&2
+    _gos_error "no .go-version or go.mod found from ${start_dir} upward."
     return 1
   fi
 
@@ -2098,7 +2124,7 @@ cmd_pin() {
     return 1
   fi
   if [ "$#" -gt 1 ]; then
-    echo "Error: unexpected argument for gos pin: ${2}" >&2
+    _gos_error "unexpected argument for gos pin: ${2}"
     echo "Usage: gos pin <version>  e.g. gos pin 1.24.0" >&2
     return 1
   fi
@@ -2111,7 +2137,7 @@ cmd_pin() {
 
 cmd_rollback() {
   if [ "$#" -gt 0 ]; then
-    echo "Error: unexpected argument for gos rollback: ${1}" >&2
+    _gos_error "unexpected argument for gos rollback: ${1}"
     echo "Usage: gos rollback" >&2
     return 1
   fi
@@ -2127,7 +2153,7 @@ cmd_uninstall() {
     return 1
   fi
   if [ "$#" -gt 1 ]; then
-    echo "Error: unexpected argument for gos uninstall: ${2}" >&2
+    _gos_error "unexpected argument for gos uninstall: ${2}"
     echo "Usage: gos uninstall <version>  e.g. gos uninstall 1.24.0" >&2
     return 1
   fi
@@ -2135,7 +2161,7 @@ cmd_uninstall() {
   _gos_validate_version "$version" || return 1
 
   if ! _gos_versions_mode; then
-    echo "Error: gos uninstall requires side-by-side mode (set GOS_VERSIONS_DIR)." >&2
+    _gos_error "gos uninstall requires side-by-side mode (set GOS_VERSIONS_DIR)."
     echo "In the classic layout there is only one install; replace it with gos install/latest." >&2
     return 1
   fi
@@ -2156,7 +2182,7 @@ cmd_uninstall() {
       if [ "$match_count" -eq 1 ]; then
         version="$resolved"
       elif [ "$match_count" -gt 1 ]; then
-        echo "Error: '${version}' matches multiple installed Go versions; re-run with an exact version:" >&2
+        _gos_error "'${version}' matches multiple installed Go versions; re-run with an exact version:"
         for installed in $(_gos_installed_versions); do
           case "$installed" in "$version"|"$version".*) echo "  go${installed}" >&2 ;; esac
         done
@@ -2167,7 +2193,7 @@ cmd_uninstall() {
 
   version_dir=$(_gos_version_dir_for "$version")
   if [ ! -d "$version_dir" ]; then
-    echo "Error: go${version} is not installed under ${GOS_VERSIONS_DIR}." >&2
+    _gos_error "go${version} is not installed under ${GOS_VERSIONS_DIR}."
     return 1
   fi
 
@@ -2175,13 +2201,13 @@ cmd_uninstall() {
   # but filesystem-equivalent path (case-insensitive FS, symlinked component)
   # would otherwise bypass the guard and delete the live Go.
   if [ "$GOS_INSTALL_DIR" -ef "$version_dir" ]; then
-    echo "Error: go${version} is the active version. Switch to another version first." >&2
+    _gos_error "go${version} is the active version. Switch to another version first."
     return 1
   fi
 
   rollback_dir=$(_gos_rollback_dir)
   if [ -e "$rollback_dir" ] && [ "$rollback_dir" -ef "$version_dir" ]; then
-    echo "Warning: the rollback link points at go${version}; gos rollback will not work until the next install." >&2
+    _gos_warning "the rollback link points at go${version}; gos rollback will not work until the next install."
   fi
 
   _gos_sudo rm -rf "$version_dir" || return 1
@@ -2304,7 +2330,7 @@ cmd_env() {
       --fish) shell_kind="fish" ;;
       --auto) auto="true" ;;
       *)
-        echo "Error: unknown option for gos env: ${arg}" >&2
+        _gos_error "unknown option for gos env: ${arg}"
         echo "Usage: gos env [--fish] [--auto] [--json]" >&2
         return 1
         ;;
@@ -2374,13 +2400,13 @@ cmd_self_update() {
   local expected_sha actual_sha new_version
 
   if [ "$#" -gt 0 ]; then
-    echo "Error: unexpected argument for gos self-update: ${1}" >&2
+    _gos_error "unexpected argument for gos self-update: ${1}"
     echo "Usage: gos self-update" >&2
     return 1
   fi
 
   script_path=$(_gos_self_path) || {
-    echo "Error: could not resolve the path of the running gos script." >&2
+    _gos_error "could not resolve the path of the running gos script."
     return 1
   }
   script_dir=$(dirname "$script_path")
@@ -2388,29 +2414,29 @@ cmd_self_update() {
   # Package-manager installs own this file; self-updating would fight them.
   case "$script_path" in
     */Cellar/*|*/homebrew/*|*/linuxbrew/*)
-      echo "Error: this gos was installed with Homebrew. Update it with: brew upgrade gos" >&2
+      _gos_error "this gos was installed with Homebrew. Update it with: brew upgrade gos"
       return 1
       ;;
   esac
   if [ -e "${script_dir}/.git" ]; then
-    echo "Error: this gos runs from a git checkout. Update it with: git -C '${script_dir}' pull" >&2
+    _gos_error "this gos runs from a git checkout. Update it with: git -C '${script_dir}' pull"
     return 1
   fi
 
   echo "Checking for the latest gos release..."
-  tmp_dir=$(mktemp -d) || { echo "Error: failed to create temp directory." >&2; return 1; }
+  tmp_dir=$(mktemp -d) || { _gos_error "failed to create temp directory."; return 1; }
   GOS_TMP_DIR="$tmp_dir"
   new_script="${tmp_dir}/gos.sh"
   checksums="${tmp_dir}/checksums.txt"
 
   _gos_download "${GOS_RELEASE_BASE_URL}/gos.sh" "$new_script" || {
-    echo "Error: could not download the latest gos release. Check your internet connection." >&2
+    _gos_error "could not download the latest gos release. Check your internet connection."
     return 1
   }
 
   new_version=$(sed -n 's/^GOS_VERSION="\([^"]*\)"$/\1/p' "$new_script" | head -1)
   if [ -z "$new_version" ]; then
-    echo "Error: the downloaded file does not look like a gos release. Aborting." >&2
+    _gos_error "the downloaded file does not look like a gos release. Aborting."
     return 1
   fi
 
@@ -2431,18 +2457,18 @@ cmd_self_update() {
     expected_sha=$(awk '{ f=$2; sub(/^\*/, "", f); if (f == "gos.sh") { print $1; exit } }' "$checksums")
   fi
   if [ -z "$expected_sha" ]; then
-    echo "Error: could not obtain the published checksum for gos.sh; refusing to self-update from an unverifiable download." >&2
+    _gos_error "could not obtain the published checksum for gos.sh; refusing to self-update from an unverifiable download."
     echo "The release checksums.txt manifest was missing or unreadable. Re-run the installer instead (see the README)." >&2
     return 1
   fi
   actual_sha=$(_gos_sha256 "$new_script")
   if [ -z "$actual_sha" ]; then
-    echo "Error: no SHA256 tool is available to verify the downloaded gos release; refusing to self-update." >&2
+    _gos_error "no SHA256 tool is available to verify the downloaded gos release; refusing to self-update."
     echo "Install sha256sum or shasum, or re-run the installer instead." >&2
     return 1
   fi
   if [ "$actual_sha" != "$expected_sha" ]; then
-    echo "Error: checksum mismatch for the downloaded gos release." >&2
+    _gos_error "checksum mismatch for the downloaded gos release."
     echo "Expected ${expected_sha}, got ${actual_sha}. Aborting." >&2
     return 1
   fi
@@ -2450,7 +2476,7 @@ cmd_self_update() {
 
   # A syntax check catches truncated or mangled downloads before activation.
   if ! bash -n "$new_script" 2>/dev/null; then
-    echo "Error: the downloaded gos release failed a syntax check. Aborting." >&2
+    _gos_error "the downloaded gos release failed a syntax check. Aborting."
     return 1
   fi
 
@@ -2470,17 +2496,17 @@ cmd_self_update() {
       *"Permission denied"*|*"permission denied"*|*"Operation not permitted"*|*"operation not permitted"*)
         if [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null; then
           if ! sudo mv -f "$new_script" "$script_path"; then
-            echo "Error: failed to replace ${script_path} even with sudo." >&2
+            _gos_error "failed to replace ${script_path} even with sudo."
             return 1
           fi
         else
-          echo "Error: failed to replace ${script_path}: ${mv_err}" >&2
+          _gos_error "failed to replace ${script_path}: ${mv_err}"
           echo "Re-run the installer instead (see the README installation section)." >&2
           return 1
         fi
         ;;
       *)
-        echo "Error: failed to replace ${script_path}: ${mv_err}" >&2
+        _gos_error "failed to replace ${script_path}: ${mv_err}"
         echo "Re-run the installer instead (see the README installation section)." >&2
         return 1
         ;;
@@ -2500,7 +2526,7 @@ cmd_prune() {
       --rollback) prune_rollback="true" ;;
       --json) GOS_OUTPUT_JSON=1 ;;
       *)
-        echo "Error: unknown option for gos prune: ${arg}" >&2
+        _gos_error "unknown option for gos prune: ${arg}"
         echo "Usage: gos prune [--rollback] [--json]" >&2
         return 1
         ;;
@@ -2639,12 +2665,12 @@ _gos_doctor_apply_fixes() {
   install_parent=$(dirname "$GOS_INSTALL_DIR")
 
   if ! _gos_validate_install_dir "$GOS_INSTALL_DIR" >/dev/null 2>&1; then
-    echo "Warning: GOS_INSTALL_DIR is invalid; not creating its parent." >&2
+    _gos_warning "GOS_INSTALL_DIR is invalid; not creating its parent."
   elif [ ! -d "$install_parent" ]; then
     if _gos_ensure_dir "$install_parent"; then
       _gos_doctor_record_fix "created install parent: ${install_parent}"
     else
-      echo "Warning: could not create install parent: ${install_parent}" >&2
+      _gos_warning "could not create install parent: ${install_parent}"
     fi
   fi
 
@@ -2652,7 +2678,7 @@ _gos_doctor_apply_fixes() {
     if mkdir -p "$GOS_CACHE_DIR" 2>/dev/null; then
       _gos_doctor_record_fix "created cache dir: ${GOS_CACHE_DIR}"
     else
-      echo "Warning: could not create cache dir: ${GOS_CACHE_DIR}" >&2
+      _gos_warning "could not create cache dir: ${GOS_CACHE_DIR}"
     fi
   fi
 
@@ -2674,7 +2700,7 @@ cmd_doctor() {
       --json) GOS_OUTPUT_JSON=1 ;;
       --fix) doctor_fix="true" ;;
       *)
-        echo "Error: unexpected argument: ${arg}" >&2
+        _gos_error "unexpected argument: ${arg}"
         return 1
         ;;
     esac
@@ -3066,7 +3092,7 @@ cmd_completions() {
     return 1
   fi
   if [ "$#" -gt 1 ]; then
-    echo "Error: unexpected argument for gos completions: ${2}" >&2
+    _gos_error "unexpected argument for gos completions: ${2}"
     echo "Usage: gos completions <bash|zsh|fish>" >&2
     return 1
   fi
@@ -3076,7 +3102,7 @@ cmd_completions() {
     zsh)  _gos_completion_zsh ;;
     fish) _gos_completion_fish ;;
     *)
-      echo "Error: unsupported shell for gos completions: ${shell_name}" >&2
+      _gos_error "unsupported shell for gos completions: ${shell_name}"
       echo "Usage: gos completions <bash|zsh|fish>" >&2
       return 1
       ;;
@@ -3220,7 +3246,7 @@ main() {
     help|--help|-h) cmd_help ;;
     *)
       local suggestion suggestions
-      echo "Error: unknown command: $cmd" >&2
+      _gos_error "unknown command: $cmd"
       suggestions=$(_gos_suggest_command "$cmd")
       if [ -n "$suggestions" ]; then
         echo "Did you mean?" >&2
