@@ -59,12 +59,8 @@ bash tests/features.bash
 bash tests/detection.bash
 bash tests/windows-extract.bash
 bash tests/workflows.bash
-scripts/sync-bash-command-completions.bash --check
-scripts/sync-embedded-completions.bash --check
-scripts/sync-fish-command-completions.bash --check
-scripts/sync-readme-usage.bash --check
-scripts/sync-zsh-command-completions.bash --check
-bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-bash-command-completions.bash scripts/sync-embedded-completions.bash scripts/sync-fish-command-completions.bash scripts/sync-readme-usage.bash scripts/sync-zsh-command-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
+scripts/sync-command-surfaces.bash --check
+bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-bash-command-completions.bash scripts/sync-command-surfaces.bash scripts/sync-embedded-completions.bash scripts/sync-fish-command-completions.bash scripts/sync-readme-usage.bash scripts/sync-zsh-command-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
 zsh -n completions/gos.zsh
 ./gos.sh version
 ./gos.sh help
