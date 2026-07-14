@@ -6,6 +6,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "${repo_root}/tests/lib.bash"
 script="${repo_root}/gos.sh"
 sync_script="${repo_root}/scripts/sync-embedded-completions.bash"
+bash_sync_script="${repo_root}/scripts/sync-bash-command-completions.bash"
 fish_sync_script="${repo_root}/scripts/sync-fish-command-completions.bash"
 zsh_sync_script="${repo_root}/scripts/sync-zsh-command-completions.bash"
 test_root="$(mktemp -d)"
@@ -15,6 +16,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+bash "$bash_sync_script" --check
 bash "$fish_sync_script" --check
 bash "$zsh_sync_script" --check
 bash "$sync_script" --check
@@ -57,7 +59,6 @@ assert_not_contains "$commands_output" "__commands" "__commands public list"
 commands_json="$(bash "$script" __commands --json)"
 assert_json "$commands_json" "__commands --json"
 assert_contains "$commands_json" '"commands":["latest","install","run","use","pin","check","rollback","uninstall","prune","current","list","platforms","status","which","env","completions","doctor","self-update","version","help"]' "__commands json"
-
 commands_details="$(bash "$script" __commands --details)"
 assert_contains "$commands_details" "latest|latest|Install the latest stable Go version" "__commands details latest"
 assert_contains "$commands_details" "self-update|self-update|Update gos itself to the latest verified release" "__commands details self-update"
@@ -71,6 +72,8 @@ help_output="$(bash "$script" help)"
 bash_completion_text="$(<"${test_root}/gos.bash")"
 zsh_completion_text="$(<"${test_root}/gos.zsh")"
 fish_completion_text="$(<"${test_root}/gos.fish")"
+commands_space="$(printf '%s\n' "$commands_output" | tr '\n' ' ' | sed 's/ $//')"
+assert_contains "$bash_completion_text" "local fallback_commands=\"${commands_space}\"" "bash fallback command list"
 assert_not_contains "$help_output" "__commands" "help hides internal command manifest"
 help_commands="$(
   printf '%s\n' "$help_output" | awk '

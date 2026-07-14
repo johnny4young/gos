@@ -3,7 +3,9 @@
 
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
+  # gos-commands:bash:begin
   local fallback_commands="latest install run use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
+  # gos-commands:bash:end
   local commands="$fallback_commands"
   local cmd_index=1 cmd words="" line
   local versions=""
