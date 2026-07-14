@@ -54,6 +54,22 @@ commands_json="$(bash "$script" __commands --json)"
 assert_json "$commands_json" "__commands --json"
 assert_contains "$commands_json" '"commands":["latest","install","run","use","pin","check","rollback","uninstall","prune","current","list","platforms","status","which","env","completions","doctor","self-update","version","help"]' "__commands json"
 
+help_output="$(bash "$script" help)"
+bash_completion_text="$(<"${test_root}/gos.bash")"
+zsh_completion_text="$(<"${test_root}/gos.zsh")"
+fish_completion_text="$(<"${test_root}/gos.fish")"
+assert_not_contains "$help_output" "__commands" "help hides internal command manifest"
+
+while IFS= read -r command_name; do
+  [ -n "$command_name" ] || continue
+  assert_contains "$help_output" "$command_name" "__commands help ${command_name}"
+  assert_contains "$bash_completion_text" "$command_name" "__commands bash completion ${command_name}"
+  assert_contains "$zsh_completion_text" "$command_name" "__commands zsh completion ${command_name}"
+  assert_contains "$fish_completion_text" "$command_name" "__commands fish completion ${command_name}"
+done <<EOF
+$commands_output
+EOF
+
 set +e
 output="$(bash "$script" __commands --bogus 2>&1)"
 status=$?
@@ -62,17 +78,17 @@ set -e
 assert_contains "$output" "Usage: gos __commands [--json]" "__commands usage"
 
 bash -n "${test_root}/gos.bash"
-assert_contains "$(<"${test_root}/gos.bash")" "gos __commands" "bash dynamic command manifest"
-assert_contains "$(<"${test_root}/gos.bash")" "gos __versions --remote-cached" "bash dynamic remote versions"
-assert_contains "$(<"${test_root}/gos.bash")" "gos __versions 2>/dev/null" "bash dynamic installed versions"
+assert_contains "$bash_completion_text" "gos __commands" "bash dynamic command manifest"
+assert_contains "$bash_completion_text" "gos __versions --remote-cached" "bash dynamic remote versions"
+assert_contains "$bash_completion_text" "gos __versions 2>/dev/null" "bash dynamic installed versions"
 if command -v zsh >/dev/null 2>&1; then
   zsh -n "${test_root}/gos.zsh"
 fi
 if command -v fish >/dev/null 2>&1; then
   fish --no-config --no-execute "${test_root}/gos.fish"
 fi
-assert_contains "$(<"${test_root}/gos.zsh")" "gos __versions --remote-cached" "zsh dynamic remote versions"
-assert_contains "$(<"${test_root}/gos.fish")" "gos __versions --remote-cached" "fish dynamic remote versions"
+assert_contains "$zsh_completion_text" "gos __versions --remote-cached" "zsh dynamic remote versions"
+assert_contains "$fish_completion_text" "gos __versions --remote-cached" "fish dynamic remote versions"
 
 set +e
 output="$(bash "$script" completions 2>&1)"
