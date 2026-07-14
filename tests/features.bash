@@ -1133,6 +1133,12 @@ assert_contains "$output" "  platforms" "unknown command suggested platforms"
 run_gos "$case_dir" bash "$script" completion
 [ "$status" -ne 0 ] || fail "singular completion command should fail with a suggestion"
 assert_contains "$output" "  completions" "unknown command suggested completions"
+run_gos "$case_dir" bash "$script" __comm
+[ "$status" -ne 0 ] || fail "hidden command prefix should still fail"
+assert_contains "$output" "Error: unknown command: __comm" "hidden command prefix error"
+assert_not_contains "$output" "__commands" "hidden command prefix suggestions"
+assert_not_contains "$output" "__versions" "hidden command prefix suggestions"
+assert_not_contains "$output" "__project-version" "hidden command prefix suggestions"
 pass "unknown commands suggest matching command prefixes"
 
 case_dir="${test_root}/cli-extra-args"
