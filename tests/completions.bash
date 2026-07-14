@@ -7,6 +7,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="${repo_root}/gos.sh"
 sync_script="${repo_root}/scripts/sync-embedded-completions.bash"
 fish_sync_script="${repo_root}/scripts/sync-fish-command-completions.bash"
+zsh_sync_script="${repo_root}/scripts/sync-zsh-command-completions.bash"
 test_root="$(mktemp -d)"
 
 cleanup() {
@@ -15,6 +16,7 @@ cleanup() {
 trap cleanup EXIT
 
 bash "$fish_sync_script" --check
+bash "$zsh_sync_script" --check
 bash "$sync_script" --check
 
 for shell_name in bash zsh fish; do
@@ -93,6 +95,13 @@ while IFS='|' read -r command_name _command_usage command_description; do
   [ -n "$command_name" ] || continue
   assert_contains "$fish_completion_text" "-a '${command_name}'" "fish command completion ${command_name}"
   assert_contains "$fish_completion_text" "-d '${command_description}'" "fish command description ${command_name}"
+done <<EOF
+$commands_details
+EOF
+
+while IFS='|' read -r command_name _command_usage command_description; do
+  [ -n "$command_name" ] || continue
+  assert_contains "$zsh_completion_text" "'${command_name}:${command_description}'" "zsh command description ${command_name}"
 done <<EOF
 $commands_details
 EOF

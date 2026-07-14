@@ -5,28 +5,30 @@ _gos() {
   local context state state_descr line
   typeset -A opt_args
   local -a commands
+  # gos-commands:zsh:begin
   commands=(
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
-    'run:Run a command with a side-by-side Go version'
-    'use:Install the Go version requested by project manifest'
+    'run:Run a command with a side-by-side Go version without activating it globally'
+    'use:Install the Go version requested by .go-version, .tool-versions, or go.mod'
     'pin:Write .go-version in the current directory'
-    'check:Check whether a newer stable Go is available'
-    'rollback:Restore the previous Go installation'
+    'check:Check whether newer stable Go or gos releases are available (no install)'
+    'rollback:Restore the previous Go installation, if available'
     'uninstall:Remove an installed version (side-by-side mode)'
-    'prune:Remove cached Go archives and optionally the rollback copy'
+    'prune:Remove cached Go archives; --rollback also removes the rollback copy'
     'current:Show the currently active Go version'
-    'list:List available Go versions (or installed ones with --installed)'
+    'list:List available Go versions (or locally installed ones)'
     'platforms:List supported OS/arch archives for a Go version'
     'status:Show an offline dashboard for gos and the active Go'
     'which:Show the active or side-by-side Go binary path'
-    'env:Print the PATH setup line for your shell'
+    'env:Print the PATH setup line or an opt-in per-shell auto-switch hook'
     'completions:Print a Bash, Zsh, or Fish completion script'
-    'doctor:Diagnose gos, Go, PATH, and tool dependencies'
-    'self-update:Update gos itself to the latest release'
+    'doctor:Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
+    'self-update:Update gos itself to the latest verified release'
     'version:Show gos version'
-    'help:Show help message'
+    'help:Show this help message'
   )
+  # gos-commands:zsh:end
 
   _arguments '--json[Output machine-readable JSON where supported]' '1:command:->cmds' '*::arg:->args'
 

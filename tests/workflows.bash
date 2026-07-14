@@ -63,6 +63,8 @@ readme_sync_output = `bash scripts/sync-readme-usage.bash --check 2>&1`
 assert($?.success?, "README Usage table must match gos __commands --details: #{readme_sync_output}")
 fish_sync_output = `bash scripts/sync-fish-command-completions.bash --check 2>&1`
 assert($?.success?, "Fish command completions must match gos __commands --details: #{fish_sync_output}")
+zsh_sync_output = `bash scripts/sync-zsh-command-completions.bash --check 2>&1`
+assert($?.success?, "Zsh command completions must match gos __commands --details: #{zsh_sync_output}")
 assert(!releasing.empty?, "repository must include RELEASING.md")
 assert(!security.empty?, "repository must include SECURITY.md")
 
@@ -270,7 +272,7 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
   "bash tests/install-ps1.bash",
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
-  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-embedded-completions.bash scripts/sync-fish-command-completions.bash scripts/sync-readme-usage.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-embedded-completions.bash scripts/sync-fish-command-completions.bash scripts/sync-readme-usage.bash scripts/sync-zsh-command-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -290,6 +292,7 @@ packaging_text = packaging_files.map { |path| File.read(path) }.join("\n")
   "install.ps1",
   "scripts/build-windows-package.bash",
   "scripts/sync-fish-command-completions.bash",
+  "scripts/sync-zsh-command-completions.bash",
   "scripts/update-changelog.bash",
   "scripts/update-homebrew-tap.sh",
   "scripts/update-packaging.bash",
@@ -384,6 +387,7 @@ assert(fish_completion_file.include?("-l auto"), "Fish completion must include e
   "scripts/sync-embedded-completions.bash --check",
   "scripts/sync-fish-command-completions.bash --check",
   "scripts/sync-readme-usage.bash --check",
+  "scripts/sync-zsh-command-completions.bash --check",
   "shfmt -d -i 2 -ci -bn .",
   "git diff --check",
   "scripts/update-changelog.bash",
