@@ -2,6 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.bash
+. "${repo_root}/tests/lib.bash"
 script="${repo_root}/gos.sh"
 gos_version="$(sed -n 's/^GOS_VERSION="\([^"]*\)"$/\1/p' "$script")"
 [ -n "$gos_version" ] || {
@@ -250,23 +252,6 @@ FAKE_MV
 
 chmod +x "${fake_bin}/uname" "${fake_bin}/curl" "${fake_bin}/sha256sum" \
   "${fake_bin}/tar" "${fake_bin}/go" "${fake_bin}/mv"
-
-fail() {
-  echo "not ok - $*" >&2
-  exit 1
-}
-
-pass() {
-  echo "ok - $*"
-}
-
-assert_contains() {
-  local haystack="$1" needle="$2" name="$3"
-  case "$haystack" in
-    *"$needle"*) ;;
-    *) fail "${name}: missing '${needle}'. Output: ${haystack}" ;;
-  esac
-}
 
 assert_json() {
   local json="$1" name="$2"
