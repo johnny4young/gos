@@ -2933,9 +2933,14 @@ _gos_completion_bash() {
 
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local commands="latest install run use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
+  local fallback_commands="latest install run use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
+  local commands="$fallback_commands"
   local cmd_index=1 cmd words="" line
   local versions=""
+
+  if command -v gos >/dev/null 2>&1; then
+    commands="$(gos __commands 2>/dev/null || printf '%s\n' "$fallback_commands")"
+  fi
 
   # A leading --json shifts the command to the next position (gos --json list).
   if [ "${COMP_WORDS[1]:-}" = "--json" ]; then
@@ -3222,6 +3227,28 @@ _gos_commands() {
     platforms status which env completions doctor self-update version help
 }
 
+cmd___commands() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      *)
+        _gos_error "unknown option for gos __commands: ${arg}"
+        echo "Usage: gos __commands [--json]" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  if _gos_json_enabled; then
+    printf '{"commands":'
+    _gos_commands | _gos_json_array_from_lines
+    printf '}\n'
+  else
+    _gos_commands
+  fi
+}
+
 _gos_suggest_command() {
   local input="$1" command
 
@@ -3288,6 +3315,7 @@ main() {
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       cmd_env "$@"
       ;;
+    __commands) cmd___commands "$@" ;;
     __project-version) cmd___project_version "$@" ;;
     completions) cmd_completions "$@" ;;
     current) cmd_current "$@" ;;

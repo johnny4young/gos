@@ -22,7 +22,47 @@ for shell_name in bash zsh fish; do
     || fail "embedded ${shell_name} completion output differs from completions/gos.${shell_name}"
 done
 
+commands_output="$(bash "$script" __commands)"
+expected_commands="$(
+  cat <<'COMMANDS'
+latest
+install
+run
+use
+pin
+check
+rollback
+uninstall
+prune
+current
+list
+platforms
+status
+which
+env
+completions
+doctor
+self-update
+version
+help
+COMMANDS
+)"
+[ "$commands_output" = "$expected_commands" ] || fail "__commands output changed: ${commands_output}"
+assert_not_contains "$commands_output" "__commands" "__commands public list"
+
+commands_json="$(bash "$script" __commands --json)"
+assert_json "$commands_json" "__commands --json"
+assert_contains "$commands_json" '"commands":["latest","install","run","use","pin","check","rollback","uninstall","prune","current","list","platforms","status","which","env","completions","doctor","self-update","version","help"]' "__commands json"
+
+set +e
+output="$(bash "$script" __commands --bogus 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "gos __commands should reject unknown options"
+assert_contains "$output" "Usage: gos __commands [--json]" "__commands usage"
+
 bash -n "${test_root}/gos.bash"
+assert_contains "$(<"${test_root}/gos.bash")" "gos __commands" "bash dynamic command manifest"
 assert_contains "$(<"${test_root}/gos.bash")" "gos __versions --remote-cached" "bash dynamic remote versions"
 assert_contains "$(<"${test_root}/gos.bash")" "gos __versions 2>/dev/null" "bash dynamic installed versions"
 if command -v zsh >/dev/null 2>&1; then

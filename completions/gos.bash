@@ -3,9 +3,14 @@
 
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local commands="latest install run use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
+  local fallback_commands="latest install run use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
+  local commands="$fallback_commands"
   local cmd_index=1 cmd words="" line
   local versions=""
+
+  if command -v gos >/dev/null 2>&1; then
+    commands="$(gos __commands 2>/dev/null || printf '%s\n' "$fallback_commands")"
+  fi
 
   # A leading --json shifts the command to the next position (gos --json list).
   if [ "${COMP_WORDS[1]:-}" = "--json" ]; then
