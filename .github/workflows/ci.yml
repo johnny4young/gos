@@ -29,6 +29,25 @@ jobs:
         run: |
           shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash
 
+  shfmt:
+    name: shfmt
+    runs-on: ubuntu-latest
+    env:
+      SHFMT_VERSION: v3.13.1
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install shfmt
+        run: |
+          curl -fsSL -o /tmp/shfmt "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64"
+          chmod +x /tmp/shfmt
+          sudo install -m 0755 /tmp/shfmt /usr/local/bin/shfmt
+          shfmt --version
+
+      - name: Run shfmt
+        run: |
+          shfmt -d -i 2 -ci -bn .
+
   smoke:
     name: Smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

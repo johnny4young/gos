@@ -30,7 +30,7 @@ generate_release_notes_from_git() {
 
   # ${previous_tag:+...} keeps this bash 3.2-safe: expanding an empty array
   # with "${range_args[@]}" is an unbound-variable error under set -u there.
-  if ! git log --no-merges --reverse --format='%s' ${previous_tag:+"${previous_tag}..HEAD"} > "$commit_subjects"; then
+  if ! git log --no-merges --reverse --format='%s' ${previous_tag:+"${previous_tag}..HEAD"} >"$commit_subjects"; then
     printf 'error: failed to read git commit subjects for changelog generation\n' >&2
     return 1
   fi
@@ -117,7 +117,7 @@ generate_release_notes_from_git() {
         }
       }
     }
-  ' "$commit_subjects" > "$output_file" || {
+  ' "$commit_subjects" >"$output_file" || {
     printf 'error: ## [Unreleased] has no release-note list items and no release commits were found since %s\n' "${previous_tag:-the beginning of history}" >&2
     return 1
   }
@@ -182,7 +182,7 @@ awk '
       exit 2
     }
   }
-' "$changelog_file" > "$raw_notes" || {
+' "$changelog_file" >"$raw_notes" || {
   printf 'error: CHANGELOG.md must contain ## [Unreleased]\n' >&2
   exit 1
 }
@@ -202,7 +202,7 @@ awk '
       print lines[i]
     }
   }
-' "$raw_notes" > "$release_notes"
+' "$raw_notes" >"$release_notes"
 
 if ! grep -Eq '^[[:space:]]*[-*] ' "$release_notes"; then
   # A non-empty section without bullets (e.g. leftover "### Added" headings)
@@ -218,7 +218,7 @@ if ! grep -Eq '^[[:space:]]*[-*] ' "$release_notes"; then
   }
 fi
 
-if (( check_only )); then
+if ((check_only)); then
   exit 0
 fi
 
@@ -261,7 +261,7 @@ awk -v version="$version" -v release_date="$release_date" -v notes_file="$releas
       exit 2
     }
   }
-' "$changelog_file" > "$body_with_release" || {
+' "$changelog_file" >"$body_with_release" || {
   printf 'error: failed to rewrite CHANGELOG.md\n' >&2
   exit 1
 }
@@ -274,9 +274,9 @@ awk -v links_file="$links_file" '
   {
     print
   }
-' "$body_with_release" > "$body_without_links"
+' "$body_with_release" >"$body_without_links"
 
-trim_trailing_blank_lines "$body_without_links" > "$body_trimmed"
+trim_trailing_blank_lines "$body_without_links" >"$body_trimmed"
 
 unreleased_link="https://github.com/johnny4young/gos/compare/v${version}...HEAD"
 if [[ -n "$previous_tag" ]]; then
@@ -300,6 +300,6 @@ fi
       print
     }
   ' "$links_file"
-} > "$next_file"
+} >"$next_file"
 
 mv "$next_file" "$changelog_file"

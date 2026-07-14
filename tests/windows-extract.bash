@@ -276,11 +276,11 @@ run_install() {
   set +e
   output="$(
     PATH="$case_bin" \
-    GOS_INSTALL_DIR="$install_dir" \
-    GOS_CACHE_DIR="${case_dir}/cache" \
-    GOS_TEST_EXTRACT_LOG="$extract_log" \
-    GOS_TEST_CYGPATH_LOG="$cygpath_log" \
-    bash "$script" install 1.21.6 2>&1
+      GOS_INSTALL_DIR="$install_dir" \
+      GOS_CACHE_DIR="${case_dir}/cache" \
+      GOS_TEST_EXTRACT_LOG="$extract_log" \
+      GOS_TEST_CYGPATH_LOG="$cygpath_log" \
+      bash "$script" install 1.21.6 2>&1
   )"
   status=$?
   set -e

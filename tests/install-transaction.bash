@@ -343,19 +343,19 @@ run_install() {
   set +e
   output="$(
     PATH="${fake_bin}:${original_path}" \
-    GOS_INSTALL_DIR="$install_dir" \
-    GOS_CACHE_DIR="${case_dir}/cache" \
-    GOS_TEST_TAR_LOG="$tar_log" \
-    GOS_TEST_EXTRACT_MODE="$extract_mode" \
-    GOS_TEST_REAL_MKDIR="$real_mkdir" \
-    GOS_TEST_REAL_MV="$real_mv" \
-    GOS_TEST_REAL_RM="$real_rm" \
-    GOS_TEST_REAL_CHMOD="$real_chmod" \
-    GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
-    GOS_TEST_PROTECTED_PARENT="$protected_parent" \
-    GOS_TEST_MV_FAIL_TARGET="$mv_fail_target" \
-    GOS_TEST_RM_FAIL_TARGET="$rm_fail_target" \
-    bash "$script" install 1.21.6 2>&1
+      GOS_INSTALL_DIR="$install_dir" \
+      GOS_CACHE_DIR="${case_dir}/cache" \
+      GOS_TEST_TAR_LOG="$tar_log" \
+      GOS_TEST_EXTRACT_MODE="$extract_mode" \
+      GOS_TEST_REAL_MKDIR="$real_mkdir" \
+      GOS_TEST_REAL_MV="$real_mv" \
+      GOS_TEST_REAL_RM="$real_rm" \
+      GOS_TEST_REAL_CHMOD="$real_chmod" \
+      GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
+      GOS_TEST_PROTECTED_PARENT="$protected_parent" \
+      GOS_TEST_MV_FAIL_TARGET="$mv_fail_target" \
+      GOS_TEST_RM_FAIL_TARGET="$rm_fail_target" \
+      bash "$script" install 1.21.6 2>&1
   )"
   status=$?
   set -e

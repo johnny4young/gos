@@ -39,7 +39,7 @@ sha_one="$(sha256_file "$zip_one")"
 sha_two="$(sha256_file "$zip_two")"
 [ "$sha_one" = "$sha_two" ] || fail "Windows package build must be deterministic"
 
-unzip -l "$zip_one" > "${tmp_dir}/zip-list.txt"
+unzip -l "$zip_one" >"${tmp_dir}/zip-list.txt"
 assert_contains "${tmp_dir}/zip-list.txt" "gos/gos.sh"
 assert_contains "${tmp_dir}/zip-list.txt" "gos/gos.cmd"
 assert_contains "${tmp_dir}/zip-list.txt" "gos/uninstall.ps1"

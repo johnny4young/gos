@@ -219,12 +219,19 @@ assert(ci.dig("permissions", "contents") == "read", "CI must use read-only conte
 assert(ci.dig("defaults", "run", "shell") == "bash", "CI must default to bash shell")
 
 ci_jobs = ci.fetch("jobs") { fail!("CI must define jobs") }
-%w[shellcheck smoke workflow-validation].each do |job|
+%w[shellcheck shfmt smoke workflow-validation].each do |job|
   assert(ci_jobs.key?(job), "CI must define #{job} job")
 end
 
 shellcheck_runs = ci_jobs.dig("shellcheck", "steps").map { |step| step["run"].to_s }.join("\n")
 assert(shellcheck_runs.include?("shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash"), "ShellCheck job must cover scripts and tests")
+
+shfmt_job = ci_jobs.fetch("shfmt") { fail!("CI must define shfmt job") }
+assert(shfmt_job["runs-on"] == "ubuntu-latest", "shfmt job must run on ubuntu")
+assert(shfmt_job.dig("env", "SHFMT_VERSION") == "v3.13.1", "shfmt job must pin mvdan/sh release")
+shfmt_runs = shfmt_job.fetch("steps").map { |step| step["run"].to_s }.join("\n")
+assert(shfmt_runs.include?("mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64"), "shfmt job must install pinned release binary")
+assert(shfmt_runs.include?("shfmt -d -i 2 -ci -bn ."), "shfmt job must enforce repo formatting")
 
 matrix_os = ci_jobs.dig("smoke", "strategy", "matrix", "os") || []
 %w[ubuntu-latest macos-latest windows-latest].each do |os|
@@ -336,8 +343,8 @@ assert(readme.include?(".gos-lock"), "README must mention the concurrent-operati
 assert(bash_completion.include?("__versions --remote-cached"), "Bash completion must use cached dynamic versions")
 assert(zsh_completion.include?("__versions --remote-cached"), "Zsh completion must use cached dynamic versions")
 assert(fish_completion_file.include?("__versions --remote-cached"), "Fish completion must use cached dynamic versions")
-assert(bash_completion.include?("install|run"), "Bash completion must complete install/run versions")
-assert(zsh_completion.include?("install|run"), "Zsh completion must complete install/run versions")
+assert(bash_completion.include?("install | run"), "Bash completion must complete install/run versions")
+assert(zsh_completion.include?("install | run"), "Zsh completion must complete install/run versions")
 assert(fish_completion_file.include?("__fish_seen_subcommand_from install run"), "Fish completion must complete install/run versions")
 assert(bash_completion.include?("--fix"), "Bash completion must include doctor --fix")
 assert(zsh_completion.include?("--fix"), "Zsh completion must include doctor --fix")

@@ -42,15 +42,15 @@ _gos_cleanup_tmp() {
   # side-by-side symlink backup (for which -d would be false) and guards against
   # clobbering a symlink that the activation step already managed to create.
   if [ -n "$GOS_ACTIVATION_BACKUP" ] \
-     && { [ -e "$GOS_ACTIVATION_BACKUP" ] || [ -L "$GOS_ACTIVATION_BACKUP" ]; } \
-     && [ ! -e "$GOS_INSTALL_DIR" ] && [ ! -L "$GOS_INSTALL_DIR" ]; then
+    && { [ -e "$GOS_ACTIVATION_BACKUP" ] || [ -L "$GOS_ACTIVATION_BACKUP" ]; } \
+    && [ ! -e "$GOS_INSTALL_DIR" ] && [ ! -L "$GOS_INSTALL_DIR" ]; then
     echo "Interrupted during activation; restoring the previous Go installation..." >&2
     # The backup was created with sudo for root-owned installs (default
     # /usr/local/go), so a plain mv cannot restore it; escalate on failure or the
     # trap would leave the machine with no Go at all.
     if ! mv "$GOS_ACTIVATION_BACKUP" "$GOS_INSTALL_DIR" 2>/dev/null; then
       if [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null \
-         && sudo mv "$GOS_ACTIVATION_BACKUP" "$GOS_INSTALL_DIR" 2>/dev/null; then
+        && sudo mv "$GOS_ACTIVATION_BACKUP" "$GOS_INSTALL_DIR" 2>/dev/null; then
         :
       else
         _gos_warning "could not restore ${GOS_ACTIVATION_BACKUP}; move it back to ${GOS_INSTALL_DIR} manually."
@@ -69,19 +69,19 @@ trap 'exit 143' TERM
 _gos_os() {
   case "$(uname -s)" in
     Darwin) echo "darwin" ;;
-    Linux)  echo "linux"  ;;
-    MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+    Linux) echo "linux" ;;
+    MINGW* | MSYS* | CYGWIN*) echo "windows" ;;
     *) echo "unsupported" ;;
   esac
 }
 
 _gos_arch() {
   case "$(uname -m)" in
-    x86_64|amd64) echo "amd64" ;;
-    arm64|aarch64) echo "arm64" ;;
+    x86_64 | amd64) echo "amd64" ;;
+    arm64 | aarch64) echo "arm64" ;;
     # Go ships a single 32-bit ARM build (armv6l); armv7l/armv8l CPUs run it.
-    armv6l|armv7l|armv8l) echo "armv6l" ;;
-    i386|i486|i586|i686) echo "386" ;;
+    armv6l | armv7l | armv8l) echo "armv6l" ;;
+    i386 | i486 | i586 | i686) echo "386" ;;
     *) echo "unsupported" ;;
   esac
 }
@@ -182,7 +182,7 @@ _gos_reject_unsafe_path() {
   local label="$1" value="$2"
   # Reject control characters that make paths ambiguous in logs and commands.
   case "$value" in
-    *$'\n'*|*$'\r'*|*$'\t'*)
+    *$'\n'* | *$'\r'* | *$'\t'*)
       _gos_error "${label} must not contain control characters."
       return 1
       ;;
@@ -190,7 +190,7 @@ _gos_reject_unsafe_path() {
   # Reject . and .. components; without canonicalization they would let a path
   # like /usr/local/../../etc/go slip past the system-critical denylist.
   case "/${value}/" in
-    *"/../"*|*"/./"*)
+    *"/../"* | *"/./"*)
       _gos_error "${label}='${value}' must not contain . or .. path components."
       return 1
       ;;
@@ -216,7 +216,7 @@ _gos_validate_install_dir() {
   _gos_reject_unsafe_path "GOS_INSTALL_DIR" "$dir" || return 1
   # Reject known system-critical roots
   case "$dir" in
-    /|/usr|/etc|/home|/var|/bin|/sbin|/lib|/opt|/tmp|/root|/sys|/proc|/dev)
+    / | /usr | /etc | /home | /var | /bin | /sbin | /lib | /opt | /tmp | /root | /sys | /proc | /dev)
       _gos_error "GOS_INSTALL_DIR='${dir}' is a system-critical path. Refusing."
       return 1
       ;;
@@ -365,7 +365,7 @@ GOS_FEED_JSON_ALL=""
 
 _gos_feed_cache_enabled() {
   case "$GOS_FEED_TTL" in
-    ''|*[!0-9]*|0) return 1 ;;
+    '' | *[!0-9]* | 0) return 1 ;;
     *) return 0 ;;
   esac
 }
@@ -390,7 +390,7 @@ _gos_feed_cache_fresh() {
   _gos_feed_cache_enabled || return 1
   [ -f "$cache_file" ] || return 1
   mtime=$(_gos_file_mtime "$cache_file") || return 1
-  case "$mtime" in ''|*[!0-9]*) return 1 ;; esac
+  case "$mtime" in '' | *[!0-9]*) return 1 ;; esac
   now=$(date +%s 2>/dev/null) || return 1
   age=$((now - mtime))
   [ "$age" -ge 0 ] && [ "$age" -le "$GOS_FEED_TTL" ]
@@ -497,10 +497,16 @@ _gos_resolve_bare_minor() {
   local version="$1" json resolved escaped
 
   case "$version" in
-    *rc*|*beta*|*.*.*) printf '%s\n' "$version"; return 0 ;;
+    *rc* | *beta* | *.*.*)
+      printf '%s\n' "$version"
+      return 0
+      ;;
   esac
 
-  json=$(_gos_feed_json true) || { printf '%s\n' "$version"; return 0; }
+  json=$(_gos_feed_json true) || {
+    printf '%s\n' "$version"
+    return 0
+  }
   escaped=${version//./\\.}
   resolved=$(_gos_feed_versions "$json" | grep -E "^${escaped}(\.[0-9]+)?$" | head -1) || resolved=""
 
@@ -611,7 +617,10 @@ _gos_fetch_checksum() {
     return 0
   fi
 
-  json=$(_gos_feed_json "$include_all") || { echo ""; return 0; }
+  json=$(_gos_feed_json "$include_all") || {
+    echo ""
+    return 0
+  }
 
   if command -v jq &>/dev/null; then
     printf '%s\n' "$json" | jq -r --arg pkg "$pkg" '.[].files[] | select(.filename == $pkg) | .sha256'
@@ -760,7 +769,7 @@ _gos_sudo() {
   # Retry with sudo when available and the error looks permission-related.
   if [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null; then
     case "${err}${output}" in
-      *"Permission denied"*|*"permission denied"*|*"Operation not permitted"*|*"operation not permitted"*|*"Access is denied"*|*"access denied"*)
+      *"Permission denied"* | *"permission denied"* | *"Operation not permitted"* | *"operation not permitted"* | *"Access is denied"* | *"access denied"*)
         set +e
         sudo_output=$(LC_ALL=C sudo "$@" 2>"$err_file")
         sudo_status=$?
@@ -806,7 +815,7 @@ _gos_release_lock() {
 
 _gos_pid_is_running() {
   local pid="$1"
-  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  case "$pid" in '' | *[!0-9]*) return 1 ;; esac
   kill -0 "$pid" 2>/dev/null
 }
 
@@ -908,9 +917,9 @@ _gos_extract_archive() {
       # The PowerShell command intentionally receives literal $env: lookups.
       # shellcheck disable=SC2016
       GOS_PS_ARCHIVE="$ps_archive" \
-      GOS_PS_DESTINATION="$ps_stage" \
+        GOS_PS_DESTINATION="$ps_stage" \
         powershell.exe -NoProfile -NonInteractive -Command \
-          'Expand-Archive -LiteralPath $env:GOS_PS_ARCHIVE -DestinationPath $env:GOS_PS_DESTINATION -Force'
+        'Expand-Archive -LiteralPath $env:GOS_PS_ARCHIVE -DestinationPath $env:GOS_PS_DESTINATION -Force'
     else
       _gos_error "no extraction tool found (unzip, tar, or powershell with cygpath)."
       return 1
@@ -1142,7 +1151,10 @@ _gos_install_version() {
 
   # Use a unique temp directory to prevent symlink/TOCTOU attacks.
   # The EXIT/INT/TERM trap removes it on every exit path.
-  tmp_dir=$(mktemp -d) || { _gos_error "failed to create temp directory."; return 1; }
+  tmp_dir=$(mktemp -d) || {
+    _gos_error "failed to create temp directory."
+    return 1
+  }
   GOS_TMP_DIR="$tmp_dir"
   tmp_file="${tmp_dir}/${pkg}"
   stage_dir="${tmp_dir}/stage"
@@ -1284,7 +1296,7 @@ _gos_read_go_version_file() {
     line="${line#go}"
     printf '%s\n' "$line"
     return 0
-  done < "$file"
+  done <"$file"
   return 1
 }
 
@@ -1300,14 +1312,14 @@ _gos_read_tool_versions_file() {
     tool="${1:-}"
     version="${2:-}"
     case "$tool" in
-      go|golang)
+      go | golang)
         [ -n "$version" ] || continue
         version="${version#go}"
         printf '%s\n' "$version"
         return 0
         ;;
     esac
-  done < "$file"
+  done <"$file"
   return 1
 }
 
@@ -1476,7 +1488,7 @@ _gos_path_is_under() {
   local path="$1" dir="$2"
   dir="${dir%/}"
   case "$path" in
-    "$dir"|"$dir"/*) return 0 ;;
+    "$dir" | "$dir"/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -1492,7 +1504,7 @@ _gos_cache_archive_stats() {
     for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip; do
       [ -f "$file" ] || continue
       count=$((count + 1))
-      size=$(wc -c < "$file" | tr -d '[:space:]') || size=0
+      size=$(wc -c <"$file" | tr -d '[:space:]') || size=0
       bytes=$((bytes + size))
     done
   fi
@@ -1647,7 +1659,7 @@ cmd_install() {
   # resolver and the install below share a single feed request.
   local resolved
   case "$version" in
-    *rc*|*beta*|*.*.*) ;;
+    *rc* | *beta* | *.*.*) ;;
     *)
       _gos_feed_json true >/dev/null 2>&1 || true
       resolved=$(_gos_resolve_bare_minor "$version")
@@ -1702,7 +1714,7 @@ cmd_run() {
   _gos_validate_versions_dir || return 1
 
   case "$version" in
-    *rc*|*beta*|*.*.*) ;;
+    *rc* | *beta* | *.*.*) ;;
     *)
       set +e
       resolved=$(_gos_resolve_installed_bare_minor "$version")
@@ -1811,7 +1823,10 @@ _gos_resolve_installed_bare_minor() {
 
   for installed in $(_gos_installed_versions); do
     case "$installed" in
-      "$version"|"$version".*) resolved="$installed"; match_count=$((match_count + 1)) ;;
+      "$version" | "$version".*)
+        resolved="$installed"
+        match_count=$((match_count + 1))
+        ;;
     esac
   done
   if [ "$match_count" -eq 1 ]; then
@@ -1821,7 +1836,7 @@ _gos_resolve_installed_bare_minor() {
   if [ "$match_count" -gt 1 ]; then
     _gos_error "'${version}' matches multiple installed Go versions; re-run with an exact version:"
     for installed in $(_gos_installed_versions); do
-      case "$installed" in "$version"|"$version".*) echo "  go${installed}" >&2 ;; esac
+      case "$installed" in "$version" | "$version".*) echo "  go${installed}" >&2 ;; esac
     done
     return 2
   fi
@@ -2165,7 +2180,7 @@ cmd_pin() {
 
   version="${version#go}"
   _gos_validate_version "$version" || return 1
-  printf '%s\n' "$version" > .go-version
+  printf '%s\n' "$version" >.go-version
   echo "Pinned Go ${version} in .go-version"
 }
 
@@ -2205,12 +2220,15 @@ cmd_uninstall() {
   # `gos install 1.21` (which installs the newest 1.21.x): resolve against
   # what is actually installed so uninstall stays network-free.
   case "$version" in
-    *rc*|*beta*|*.*.*) ;;
+    *rc* | *beta* | *.*.*) ;;
     *)
       local installed match_count=0 resolved=""
       for installed in $(_gos_installed_versions); do
         case "$installed" in
-          "$version"|"$version".*) resolved="$installed"; match_count=$((match_count + 1)) ;;
+          "$version" | "$version".*)
+            resolved="$installed"
+            match_count=$((match_count + 1))
+            ;;
         esac
       done
       if [ "$match_count" -eq 1 ]; then
@@ -2218,7 +2236,7 @@ cmd_uninstall() {
       elif [ "$match_count" -gt 1 ]; then
         _gos_error "'${version}' matches multiple installed Go versions; re-run with an exact version:"
         for installed in $(_gos_installed_versions); do
-          case "$installed" in "$version"|"$version".*) echo "  go${installed}" >&2 ;; esac
+          case "$installed" in "$version" | "$version".*) echo "  go${installed}" >&2 ;; esac
         done
         return 1
       fi
@@ -2422,7 +2440,7 @@ _gos_self_path() {
     link=$(readlink "$src") || break
     case "$link" in
       /*) src="$link" ;;
-      *)  src="$(dirname "$src")/${link}" ;;
+      *) src="$(dirname "$src")/${link}" ;;
     esac
   done
 
@@ -2447,7 +2465,7 @@ cmd_self_update() {
 
   # Package-manager installs own this file; self-updating would fight them.
   case "$script_path" in
-    */Cellar/*|*/homebrew/*|*/linuxbrew/*)
+    */Cellar/* | */homebrew/* | */linuxbrew/*)
       _gos_error "this gos was installed with Homebrew. Update it with: brew upgrade gos"
       return 1
       ;;
@@ -2458,7 +2476,10 @@ cmd_self_update() {
   fi
 
   echo "Checking for the latest gos release..."
-  tmp_dir=$(mktemp -d) || { _gos_error "failed to create temp directory."; return 1; }
+  tmp_dir=$(mktemp -d) || {
+    _gos_error "failed to create temp directory."
+    return 1
+  }
   GOS_TMP_DIR="$tmp_dir"
   new_script="${tmp_dir}/gos.sh"
   checksums="${tmp_dir}/checksums.txt"
@@ -2527,7 +2548,7 @@ cmd_self_update() {
   set -e
   if [ "$mv_status" -ne 0 ]; then
     case "$mv_err" in
-      *"Permission denied"*|*"permission denied"*|*"Operation not permitted"*|*"operation not permitted"*)
+      *"Permission denied"* | *"permission denied"* | *"Operation not permitted"* | *"operation not permitted"*)
         if [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null; then
           if ! sudo mv -f "$new_script" "$script_path"; then
             _gos_error "failed to replace ${script_path} even with sudo."
@@ -2657,10 +2678,10 @@ _gos_doctor_check() {
 
   if _gos_color_enabled; then
     case "$status" in
-      ok)      printf '%s %s - %s: %s\n' "$(_gos_color_text 32 '✓')" "$(_gos_color_text 32 "$status")" "$name" "$message" ;;
-      warn)    printf '%s %s - %s: %s\n' "$(_gos_color_text 33 '!')" "$(_gos_color_text 33 "$status")" "$name" "$message" ;;
+      ok) printf '%s %s - %s: %s\n' "$(_gos_color_text 32 '✓')" "$(_gos_color_text 32 "$status")" "$name" "$message" ;;
+      warn) printf '%s %s - %s: %s\n' "$(_gos_color_text 33 '!')" "$(_gos_color_text 33 "$status")" "$name" "$message" ;;
       problem) printf '%s %s - %s: %s\n' "$(_gos_color_text 31 '✗')" "$(_gos_color_text 31 "$status")" "$name" "$message" ;;
-      *)       printf '%s - %s: %s\n' "$status" "$name" "$message" ;;
+      *) printf '%s - %s: %s\n' "$status" "$name" "$message" ;;
     esac
   else
     printf '%s - %s: %s\n' "$status" "$name" "$message"
@@ -2776,7 +2797,7 @@ cmd_doctor() {
   go_bin="${GOS_INSTALL_DIR}/bin"
   if [ -d "$go_bin" ] && go_path=$(command -v go 2>/dev/null); then
     case "$go_path" in
-      "${go_bin}/go"|"${go_bin}/go.exe")
+      "${go_bin}/go" | "${go_bin}/go.exe")
         _gos_doctor_check "ok" "path-order" "PATH resolves go from ${go_bin}"
         ;;
       *)
@@ -2933,7 +2954,7 @@ _gos_completions() {
       prune)
         words="--rollback --json"
         ;;
-      install|run)
+      install | run)
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions --remote-cached 2>/dev/null || true)
         fi
@@ -2963,7 +2984,7 @@ _gos_completions() {
       doctor)
         words="--fix --json"
         ;;
-      check|current|platforms|status|version)
+      check | current | platforms | status | version)
         words="--json"
         ;;
       use)
@@ -3032,7 +3053,7 @@ _gos() {
         prune)
           _arguments '--rollback[Also remove the rollback installation]' '--json[Output machine-readable JSON]'
           ;;
-        install|run)
+        install | run)
           if command -v gos >/dev/null 2>&1; then
             _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
           fi
@@ -3060,7 +3081,7 @@ _gos() {
         doctor)
           _arguments '--fix[Apply safe non-destructive fixes]' '--json[Output machine-readable JSON]'
           ;;
-        check|current|platforms|status|version)
+        check | current | platforms | status | version)
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)
@@ -3133,7 +3154,7 @@ cmd_completions() {
 
   case "$shell_name" in
     bash) _gos_completion_bash ;;
-    zsh)  _gos_completion_zsh ;;
+    zsh) _gos_completion_zsh ;;
     fish) _gos_completion_fish ;;
     *)
       _gos_error "unsupported shell for gos completions: ${shell_name}"
@@ -3246,7 +3267,7 @@ main() {
       _gos_acquire_lock || return 1
       cmd_use "$@"
       ;;
-    pin)       cmd_pin "$@" ;;
+    pin) cmd_pin "$@" ;;
     rollback)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       _gos_acquire_lock || return 1
@@ -3256,8 +3277,8 @@ main() {
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       cmd_prune "$@"
       ;;
-    check)     cmd_check "$@" ;;
-    self-update|selfupdate) cmd_self_update "$@" ;;
+    check) cmd_check "$@" ;;
+    self-update | selfupdate) cmd_self_update "$@" ;;
     uninstall)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       _gos_acquire_lock || return 1
@@ -3269,15 +3290,15 @@ main() {
       ;;
     __project-version) cmd___project_version "$@" ;;
     completions) cmd_completions "$@" ;;
-    current)   cmd_current "$@" ;;
-    list)      cmd_list "$@" ;;
+    current) cmd_current "$@" ;;
+    list) cmd_list "$@" ;;
     platforms) cmd_platforms "$@" ;;
-    status)    cmd_status "$@" ;;
-    which)     cmd_which "$@" ;;
+    status) cmd_status "$@" ;;
+    which) cmd_which "$@" ;;
     __versions) cmd___versions "$@" ;;
-    doctor)    cmd_doctor "$@" ;;
-    version)   cmd_version "$@" ;;
-    help|--help|-h) cmd_help ;;
+    doctor) cmd_doctor "$@" ;;
+    version) cmd_version "$@" ;;
+    help | --help | -h) cmd_help ;;
     *)
       local suggestion suggestions
       _gos_error "unknown command: $cmd"

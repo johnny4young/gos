@@ -13,6 +13,7 @@
 ## Validation
 
 - [ ] `bash -n gos.sh install.sh`
+- [ ] `shfmt -d -i 2 -ci -bn .`
 - [ ] `bash tests/install-transaction.bash`
 - [ ] `bash tests/checksum.bash`
 - [ ] `bash tests/features.bash`

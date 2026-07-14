@@ -51,10 +51,10 @@ doctor_for() {
   set +e
   output="$(
     PATH="${fake_bin}:${original_path}" \
-    GOS_TEST_UNAME_S="$uname_s" \
-    GOS_TEST_UNAME_M="$uname_m" \
-    GOS_INSTALL_DIR="${test_root}/install/go" \
-    bash "$script" doctor --json 2>&1
+      GOS_TEST_UNAME_S="$uname_s" \
+      GOS_TEST_UNAME_M="$uname_m" \
+      GOS_INSTALL_DIR="${test_root}/install/go" \
+      bash "$script" doctor --json 2>&1
   )"
   set -e
 }

@@ -4,7 +4,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="${repo_root}/gos.sh"
 gos_version="$(sed -n 's/^GOS_VERSION="\([^"]*\)"$/\1/p' "$script")"
-[ -n "$gos_version" ] || { echo "not ok - could not read GOS_VERSION from gos.sh" >&2; exit 1; }
+[ -n "$gos_version" ] || {
+  echo "not ok - could not read GOS_VERSION from gos.sh" >&2
+  exit 1
+}
 test_root="$(mktemp -d)"
 fake_bin="${test_root}/bin"
 original_path="$PATH"
@@ -265,20 +268,20 @@ run_gos() {
   set +e
   output="$(
     PATH="${fake_bin}:${original_path}" \
-    GOS_INSTALL_DIR="${GOS_TEST_INSTALL_DIR:-${case_dir}/go}" \
-    GOS_CACHE_DIR="${case_dir}/cache" \
-    GOS_DOWNLOAD_MIRROR="${GOS_TEST_MIRROR:-}" \
-    GOS_VERSIONS_DIR="${GOS_TEST_VERSIONS_DIR:-}" \
-    GOS_TEST_URL_LOG="${case_dir}/urls.log" \
-    GOS_TEST_CURL_ARGS_LOG="${case_dir}/curl-args.log" \
-    GOS_TEST_DOWNLOAD_MODE="${GOS_TEST_DOWNLOAD_MODE:-ok}" \
-    GOS_TEST_UNSUPPORTED_PLATFORM="${GOS_TEST_UNSUPPORTED_PLATFORM:-0}" \
-    GOS_TEST_GO_VERSION="${GOS_TEST_GO_VERSION:-}" \
-    GOS_TEST_GO_BROKEN="${GOS_TEST_GO_BROKEN:-0}" \
-    GOS_TEST_SELFUPDATE_SCRIPT="${GOS_TEST_SELFUPDATE_SCRIPT:-}" \
-    GOS_REQUIRE_CHECKSUM="${GOS_TEST_REQUIRE_CHECKSUM:-}" \
-    GOS_FEED_TTL="${GOS_TEST_FEED_TTL:-}" \
-    "$@" 2>&1
+      GOS_INSTALL_DIR="${GOS_TEST_INSTALL_DIR:-${case_dir}/go}" \
+      GOS_CACHE_DIR="${case_dir}/cache" \
+      GOS_DOWNLOAD_MIRROR="${GOS_TEST_MIRROR:-}" \
+      GOS_VERSIONS_DIR="${GOS_TEST_VERSIONS_DIR:-}" \
+      GOS_TEST_URL_LOG="${case_dir}/urls.log" \
+      GOS_TEST_CURL_ARGS_LOG="${case_dir}/curl-args.log" \
+      GOS_TEST_DOWNLOAD_MODE="${GOS_TEST_DOWNLOAD_MODE:-ok}" \
+      GOS_TEST_UNSUPPORTED_PLATFORM="${GOS_TEST_UNSUPPORTED_PLATFORM:-0}" \
+      GOS_TEST_GO_VERSION="${GOS_TEST_GO_VERSION:-}" \
+      GOS_TEST_GO_BROKEN="${GOS_TEST_GO_BROKEN:-0}" \
+      GOS_TEST_SELFUPDATE_SCRIPT="${GOS_TEST_SELFUPDATE_SCRIPT:-}" \
+      GOS_REQUIRE_CHECKSUM="${GOS_TEST_REQUIRE_CHECKSUM:-}" \
+      GOS_FEED_TTL="${GOS_TEST_FEED_TTL:-}" \
+      "$@" 2>&1
   )"
   status=$?
   set -e
@@ -340,7 +343,8 @@ assert_contains "$output" '"versions":["go1.20.0","go1.21rc1","go1.21.6","go1.22
 
 run_gos "$case_dir" bash "$script" list
 [ "$status" -eq 0 ] || fail "list failed: ${output}"
-expected_list_output="$(cat <<'LIST_OUTPUT'
+expected_list_output="$(
+  cat <<'LIST_OUTPUT'
 Fetching available Go versions...
 go1.20.0
 go1.21rc1
@@ -739,7 +743,7 @@ GOS_TEST_INSTALL_DIR="$evil_dir" run_gos "$case_dir" bash "$script" env
 [ "$status" -eq 0 ] || fail "env with a hostile install dir failed: ${output}"
 env_line="$output"
 # Run the emitted line the way the README tells users to.
-( eval "$env_line" ) >/dev/null 2>&1 || true
+(eval "$env_line") >/dev/null 2>&1 || true
 [ -f "${case_dir}/pwned" ] && fail "gos env output executed injected command via eval"
 assert_contains "$env_line" "export PATH='" "env single-quotes the path"
 pass "gos env output is injection-safe under eval"
@@ -752,7 +756,10 @@ hostile_dir="${case_dir}/team go/it'\\\$weird;go"
 GOS_TEST_INSTALL_DIR="$hostile_dir" run_gos "$case_dir" bash "$script" env
 [ "$status" -eq 0 ] || fail "env with hostile quoting matrix failed: ${output}"
 env_line="$output"
-( eval "$env_line"; case ":$PATH:" in *":${hostile_dir}/bin:"*) ;; *) exit 1 ;; esac ) \
+(
+  eval "$env_line"
+  case ":$PATH:" in *":${hostile_dir}/bin:"*) ;; *) exit 1 ;; esac
+) \
   || fail "env POSIX quoting did not preserve the hostile path exactly"
 GOS_TEST_INSTALL_DIR="$hostile_dir" run_gos "$case_dir" bash "$script" env --fish
 [ "$status" -eq 0 ] || fail "env --fish with hostile quoting matrix failed: ${output}"
@@ -1206,17 +1213,17 @@ assert_contains "$output" "PROMPT_COMMAND" "env auto bash prompt hook"
 assert_contains "$output" "GOS_AUTO_PREV" "env auto tracks previous path"
 printf '%s\n' "$output" >"${case_dir}/hook.sh"
 PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
-GOS_INSTALL_DIR="${case_dir}/go" \
-GOS_VERSIONS_DIR="${case_dir}/versions" \
+  GOS_INSTALL_DIR="${case_dir}/go" \
+  GOS_VERSIONS_DIR="${case_dir}/versions" \
   bash -c 'set -euo pipefail; source "$1"; cd "$2"; __gos_auto_switch; go version; cd "$3"; __gos_auto_switch; case ":$PATH:" in *":$4:"*) exit 9 ;; esac' \
-    bash "${case_dir}/hook.sh" "${case_dir}/project" "$case_dir" "${case_dir}/versions/go1.21.6/bin" \
-    >"${case_dir}/auto.out" \
+  bash "${case_dir}/hook.sh" "${case_dir}/project" "$case_dir" "${case_dir}/versions/go1.21.6/bin" \
+  >"${case_dir}/auto.out" \
   || fail "env --auto hook did not switch and restore PATH"
 assert_contains "$(<"${case_dir}/auto.out")" "go version go1.21.6" "env auto go version"
 hint_output=$(
   PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
-  GOS_INSTALL_DIR="${case_dir}/go" \
-  GOS_VERSIONS_DIR="${case_dir}/versions" \
+    GOS_INSTALL_DIR="${case_dir}/go" \
+    GOS_VERSIONS_DIR="${case_dir}/versions" \
     bash -c 'source "$1"; cd "$2"; __gos_auto_switch; __gos_auto_switch' bash "${case_dir}/hook.sh" "${case_dir}/missing" 2>&1 >/dev/null
 )
 hint_count=$(printf '%s\n' "$hint_output" | grep -c 'gos: go1.99.0 is not installed' || true)
@@ -1238,105 +1245,105 @@ symlink_probe="${test_root}/symlink-probe"
 if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
   rm -f "$symlink_probe"
 
-case_dir="${test_root}/versions-mode"
-versions_dir="${case_dir}/versions"
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
-[ "$status" -eq 0 ] || fail "versions-mode install failed: ${output}"
-[ -x "${versions_dir}/go1.21.6/bin/go" ] || fail "versions-mode did not install under GOS_VERSIONS_DIR"
-[ -L "${case_dir}/go" ] || fail "versions-mode did not create an install-dir symlink"
-[ "$(readlink "${case_dir}/go")" = "${versions_dir}/go1.21.6" ] || fail "install-dir symlink points at the wrong version"
-[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "active symlink does not serve the new version"
+  case_dir="${test_root}/versions-mode"
+  versions_dir="${case_dir}/versions"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
+  [ "$status" -eq 0 ] || fail "versions-mode install failed: ${output}"
+  [ -x "${versions_dir}/go1.21.6/bin/go" ] || fail "versions-mode did not install under GOS_VERSIONS_DIR"
+  [ -L "${case_dir}/go" ] || fail "versions-mode did not create an install-dir symlink"
+  [ "$(readlink "${case_dir}/go")" = "${versions_dir}/go1.21.6" ] || fail "install-dir symlink points at the wrong version"
+  [ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "active symlink does not serve the new version"
 
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.20.0
-[ "$status" -eq 0 ] || fail "versions-mode second install failed: ${output}"
-[ -x "${versions_dir}/go1.21.6/bin/go" ] || fail "previous version was removed by a new install"
-[ "$(readlink "${case_dir}/go")" = "${versions_dir}/go1.20.0" ] || fail "symlink did not switch to the new version"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.20.0
+  [ "$status" -eq 0 ] || fail "versions-mode second install failed: ${output}"
+  [ -x "${versions_dir}/go1.21.6/bin/go" ] || fail "previous version was removed by a new install"
+  [ "$(readlink "${case_dir}/go")" = "${versions_dir}/go1.20.0" ] || fail "symlink did not switch to the new version"
 
-: >"${case_dir}/urls.log"
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
-[ "$status" -eq 0 ] || fail "versions-mode switch back failed: ${output}"
-assert_contains "$output" "Using installed go1.21.6" "versions-mode fast path"
-[ "$(readlink "${case_dir}/go")" = "${versions_dir}/go1.21.6" ] || fail "fast path did not repoint the symlink"
-if grep -q 'dl/go1' "${case_dir}/urls.log"; then
-  fail "switching to an installed version must not download anything"
-fi
+  : >"${case_dir}/urls.log"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
+  [ "$status" -eq 0 ] || fail "versions-mode switch back failed: ${output}"
+  assert_contains "$output" "Using installed go1.21.6" "versions-mode fast path"
+  [ "$(readlink "${case_dir}/go")" = "${versions_dir}/go1.21.6" ] || fail "fast path did not repoint the symlink"
+  if grep -q 'dl/go1' "${case_dir}/urls.log"; then
+    fail "switching to an installed version must not download anything"
+  fi
 
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" list --installed
-[ "$status" -eq 0 ] || fail "list --installed failed: ${output}"
-assert_contains "$output" "go1.20.0" "list installed old"
-assert_contains "$output" "go1.21.6" "list installed new"
-GOS_TEST_VERSIONS_DIR="$versions_dir" GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" list --installed --json
-[ "$status" -eq 0 ] || fail "list --installed --json failed: ${output}"
-assert_json "$output" "list --installed --json"
-assert_contains "$output" '"installed":["go1.20.0","go1.21.6"]' "list installed json"
-assert_contains "$output" '"active":"go1.21.6"' "list installed json active"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" list --installed
+  [ "$status" -eq 0 ] || fail "list --installed failed: ${output}"
+  assert_contains "$output" "go1.20.0" "list installed old"
+  assert_contains "$output" "go1.21.6" "list installed new"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" list --installed --json
+  [ "$status" -eq 0 ] || fail "list --installed --json failed: ${output}"
+  assert_json "$output" "list --installed --json"
+  assert_contains "$output" '"installed":["go1.20.0","go1.21.6"]' "list installed json"
+  assert_contains "$output" '"active":"go1.21.6"' "list installed json active"
 
-: >"${case_dir}/urls.log"
-active_before=$(readlink "${case_dir}/go")
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 go version
-[ "$status" -eq 0 ] || fail "run installed exact version failed: ${output}"
-assert_contains "$output" "go version go1.20.0 darwin/arm64" "run exact version output"
-[ "$(readlink "${case_dir}/go")" = "$active_before" ] || fail "run exact version changed the active symlink"
-if [ -s "${case_dir}/urls.log" ]; then
-  fail "run with an installed exact version must not reach the network"
-fi
+  : >"${case_dir}/urls.log"
+  active_before=$(readlink "${case_dir}/go")
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 go version
+  [ "$status" -eq 0 ] || fail "run installed exact version failed: ${output}"
+  assert_contains "$output" "go version go1.20.0 darwin/arm64" "run exact version output"
+  [ "$(readlink "${case_dir}/go")" = "$active_before" ] || fail "run exact version changed the active symlink"
+  if [ -s "${case_dir}/urls.log" ]; then
+    fail "run with an installed exact version must not reach the network"
+  fi
 
-: >"${case_dir}/urls.log"
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20 go version
-[ "$status" -eq 0 ] || fail "run installed bare minor failed: ${output}"
-assert_contains "$output" "go version go1.20.0 darwin/arm64" "run bare minor output"
-[ "$(readlink "${case_dir}/go")" = "$active_before" ] || fail "run bare minor changed the active symlink"
-if [ -s "${case_dir}/urls.log" ]; then
-  fail "run with an installed bare minor must not reach the network"
-fi
+  : >"${case_dir}/urls.log"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20 go version
+  [ "$status" -eq 0 ] || fail "run installed bare minor failed: ${output}"
+  assert_contains "$output" "go version go1.20.0 darwin/arm64" "run bare minor output"
+  [ "$(readlink "${case_dir}/go")" = "$active_before" ] || fail "run bare minor changed the active symlink"
+  if [ -s "${case_dir}/urls.log" ]; then
+    fail "run with an installed bare minor must not reach the network"
+  fi
 
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 bash -c 'exit 7'
-[ "$status" -eq 7 ] || fail "run should propagate command exit status 7, got ${status}. Output: ${output}"
-pass "run uses installed side-by-side versions without switching and propagates exit codes"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 bash -c 'exit 7'
+  [ "$status" -eq 7 ] || fail "run should propagate command exit status 7, got ${status}. Output: ${output}"
+  pass "run uses installed side-by-side versions without switching and propagates exit codes"
 
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.21.6
-[ "$status" -ne 0 ] || fail "uninstalling the active version should fail"
-assert_contains "$output" "is the active version" "uninstall active guard"
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.20.0
-[ "$status" -eq 0 ] || fail "uninstall failed: ${output}"
-[ ! -d "${versions_dir}/go1.20.0" ] || fail "uninstall left the version directory"
-[ -L "${case_dir}/go.gos-rollback" ] || fail "rollback link should remain as a dangling symlink after uninstalling its target"
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.20.0
-[ "$status" -eq 0 ] || fail "install after dangling rollback failed: ${output}"
-if printf '%s\n' "$output" | grep -q "rollback was not saved"; then
-  fail "dangling rollback symlink should be replaced before saving a new rollback"
-fi
-[ -L "${case_dir}/go.gos-rollback" ] || fail "install after dangling rollback did not save a rollback link"
-[ "$(readlink "${case_dir}/go.gos-rollback")" = "${versions_dir}/go1.21.6" ] || fail "rollback link was not refreshed after replacing a dangling symlink"
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
-[ "$status" -eq 0 ] || fail "switch back after dangling rollback test failed: ${output}"
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.19.0
-[ "$status" -ne 0 ] || fail "uninstalling a missing version should fail"
-assert_contains "$output" "is not installed" "uninstall missing version"
-# uninstall rejects trailing arguments, symmetric with install (the guard runs
-# before the active-version check, so this fails on the extra arg).
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.21.6 extra
-[ "$status" -ne 0 ] || fail "uninstall should reject trailing arguments"
-assert_contains "$output" "unexpected argument for gos uninstall" "uninstall trailing args"
-# a bare X.Y resolves to the matching installed patch release, like install.
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.20.0
-[ "$status" -eq 0 ] || fail "reinstall 1.20.0 failed: ${output}"
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
-[ "$status" -eq 0 ] || fail "switch back to 1.21.6 failed: ${output}"
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.20
-[ "$status" -eq 0 ] || fail "uninstall of a bare minor failed: ${output}"
-[ ! -d "${versions_dir}/go1.20.0" ] || fail "bare-minor uninstall did not remove go1.20.0"
-assert_contains "$output" "Uninstalled go1.20.0" "uninstall resolves bare X.Y to installed patch"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.21.6
+  [ "$status" -ne 0 ] || fail "uninstalling the active version should fail"
+  assert_contains "$output" "is the active version" "uninstall active guard"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.20.0
+  [ "$status" -eq 0 ] || fail "uninstall failed: ${output}"
+  [ ! -d "${versions_dir}/go1.20.0" ] || fail "uninstall left the version directory"
+  [ -L "${case_dir}/go.gos-rollback" ] || fail "rollback link should remain as a dangling symlink after uninstalling its target"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.20.0
+  [ "$status" -eq 0 ] || fail "install after dangling rollback failed: ${output}"
+  if printf '%s\n' "$output" | grep -q "rollback was not saved"; then
+    fail "dangling rollback symlink should be replaced before saving a new rollback"
+  fi
+  [ -L "${case_dir}/go.gos-rollback" ] || fail "install after dangling rollback did not save a rollback link"
+  [ "$(readlink "${case_dir}/go.gos-rollback")" = "${versions_dir}/go1.21.6" ] || fail "rollback link was not refreshed after replacing a dangling symlink"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
+  [ "$status" -eq 0 ] || fail "switch back after dangling rollback test failed: ${output}"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.19.0
+  [ "$status" -ne 0 ] || fail "uninstalling a missing version should fail"
+  assert_contains "$output" "is not installed" "uninstall missing version"
+  # uninstall rejects trailing arguments, symmetric with install (the guard runs
+  # before the active-version check, so this fails on the extra arg).
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.21.6 extra
+  [ "$status" -ne 0 ] || fail "uninstall should reject trailing arguments"
+  assert_contains "$output" "unexpected argument for gos uninstall" "uninstall trailing args"
+  # a bare X.Y resolves to the matching installed patch release, like install.
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.20.0
+  [ "$status" -eq 0 ] || fail "reinstall 1.20.0 failed: ${output}"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
+  [ "$status" -eq 0 ] || fail "switch back to 1.21.6 failed: ${output}"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.20
+  [ "$status" -eq 0 ] || fail "uninstall of a bare minor failed: ${output}"
+  [ ! -d "${versions_dir}/go1.20.0" ] || fail "bare-minor uninstall did not remove go1.20.0"
+  assert_contains "$output" "Uninstalled go1.20.0" "uninstall resolves bare X.Y to installed patch"
 
-active_before=$(readlink "${case_dir}/go")
-GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 go version
-[ "$status" -eq 0 ] || fail "run missing version install failed: ${output}"
-assert_contains "$output" "Installed go1.20.0 at ${versions_dir}/go1.20.0" "run missing version install"
-assert_contains "$output" "go version go1.20.0 darwin/arm64" "run missing version command output"
-[ -x "${versions_dir}/go1.20.0/bin/go" ] || fail "run missing version did not install into GOS_VERSIONS_DIR"
-[ "$(readlink "${case_dir}/go")" = "$active_before" ] || fail "run missing version changed the active symlink"
-[ ! -e "${case_dir}/go.gos-lock" ] || fail "run missing version left the gos lock behind"
-pass "side-by-side mode installs, switches instantly, lists, and uninstalls versions"
+  active_before=$(readlink "${case_dir}/go")
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 go version
+  [ "$status" -eq 0 ] || fail "run missing version install failed: ${output}"
+  assert_contains "$output" "Installed go1.20.0 at ${versions_dir}/go1.20.0" "run missing version install"
+  assert_contains "$output" "go version go1.20.0 darwin/arm64" "run missing version command output"
+  [ -x "${versions_dir}/go1.20.0/bin/go" ] || fail "run missing version did not install into GOS_VERSIONS_DIR"
+  [ "$(readlink "${case_dir}/go")" = "$active_before" ] || fail "run missing version changed the active symlink"
+  [ ! -e "${case_dir}/go.gos-lock" ] || fail "run missing version left the gos lock behind"
+  pass "side-by-side mode installs, switches instantly, lists, and uninstalls versions"
 
 else
   rm -f "$symlink_probe"
@@ -1367,7 +1374,7 @@ pass "current --json reports found:false when no working Go exists"
 
 case_dir="${test_root}/cache-write-failure"
 mkdir -p "$case_dir"
-: >"${case_dir}/cache"   # a file where the cache dir should go: mkdir -p fails
+: >"${case_dir}/cache" # a file where the cache dir should go: mkdir -p fails
 run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "install with unwritable cache failed: ${output}"
 assert_contains "$output" "could not write Go archive cache" "cache write warning"

@@ -48,27 +48,75 @@ take_value() {
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --kind) kind=$(take_value "$1" "${2:-}"); shift 2 ;;
-    --name) name=$(take_value "$1" "${2:-}"); shift 2 ;;
-    --version) version=$(take_value "$1" "${2:-}"); shift 2 ;;
-    --sha256) sha256=$(take_value "$1" "${2:-}"); shift 2 ;;
-    --template) template=$(take_value "$1" "${2:-}"); shift 2 ;;
-    --url) url=$(take_value "$1" "${2:-}"); shift 2 ;;
-    --tap-repo) tap_repo=$(take_value "$1" "${2:-}"); shift 2 ;;
-    --deploy-key-file) key_file=$(take_value "$1" "${2:-}"); shift 2 ;;
-    *) echo "::error::update-homebrew-tap: unknown argument '$1'" >&2; exit 2 ;;
+    --kind)
+      kind=$(take_value "$1" "${2:-}")
+      shift 2
+      ;;
+    --name)
+      name=$(take_value "$1" "${2:-}")
+      shift 2
+      ;;
+    --version)
+      version=$(take_value "$1" "${2:-}")
+      shift 2
+      ;;
+    --sha256)
+      sha256=$(take_value "$1" "${2:-}")
+      shift 2
+      ;;
+    --template)
+      template=$(take_value "$1" "${2:-}")
+      shift 2
+      ;;
+    --url)
+      url=$(take_value "$1" "${2:-}")
+      shift 2
+      ;;
+    --tap-repo)
+      tap_repo=$(take_value "$1" "${2:-}")
+      shift 2
+      ;;
+    --deploy-key-file)
+      key_file=$(take_value "$1" "${2:-}")
+      shift 2
+      ;;
+    *)
+      echo "::error::update-homebrew-tap: unknown argument '$1'" >&2
+      exit 2
+      ;;
   esac
 done
 
 # --- validate inputs -------------------------------------------------------------
-[ -n "$name" ] || { echo "::error::--name is required" >&2; exit 2; }
-[ -n "$version" ] || { echo "::error::--version is required" >&2; exit 2; }
-[ -n "$template" ] || { echo "::error::--template is required" >&2; exit 2; }
-[ -f "$template" ] || { echo "::error::template not found: $template" >&2; exit 2; }
+[ -n "$name" ] || {
+  echo "::error::--name is required" >&2
+  exit 2
+}
+[ -n "$version" ] || {
+  echo "::error::--version is required" >&2
+  exit 2
+}
+[ -n "$template" ] || {
+  echo "::error::--template is required" >&2
+  exit 2
+}
+[ -f "$template" ] || {
+  echo "::error::template not found: $template" >&2
+  exit 2
+}
 case "$kind" in
-  cask) subdir="Casks"; start_marker='/^cask "/' ;;
-  formula) subdir="Formula"; start_marker='/^class /' ;;
-  *) echo "::error::--kind must be 'cask' or 'formula', got '$kind'" >&2; exit 2 ;;
+  cask)
+    subdir="Casks"
+    start_marker='/^cask "/'
+    ;;
+  formula)
+    subdir="Formula"
+    start_marker='/^class /'
+    ;;
+  *)
+    echo "::error::--kind must be 'cask' or 'formula', got '$kind'" >&2
+    exit 2
+    ;;
 esac
 if [ "$kind" = "formula" ] && [ -z "$url" ]; then
   echo "::error::--url is required for a formula (the versioned source tarball)" >&2
@@ -93,7 +141,7 @@ if [ -z "$key_file" ]; then
   fi
   key_file="$(mktemp)"
   cleanup_key="1"
-  printf '%s\n' "$TAP_DEPLOY_KEY" > "$key_file"
+  printf '%s\n' "$TAP_DEPLOY_KEY" >"$key_file"
   chmod 600 "$key_file"
 fi
 # Remove the key we created on exit. The hosted runner is ephemeral, but this keeps
@@ -117,7 +165,7 @@ if [ -n "${GOS_TAP_REMOTE:-}" ]; then
   : # local test remote: SSH is never used, skip the host-key fetch
 elif command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
   && curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 https://api.github.com/meta 2>/dev/null \
-     | jq -r '.ssh_keys[] | "github.com \(.)"' > "$known_hosts_file" 2>/dev/null \
+  | jq -r '.ssh_keys[] | "github.com \(.)"' >"$known_hosts_file" 2>/dev/null \
   && [ -s "$known_hosts_file" ]; then
   host_key_policy="yes"
 else
@@ -139,24 +187,33 @@ git clone --depth 1 "$tap_remote" "$tap_dir"
 tap_file="${tap_dir}/${subdir}/${name}.rb"
 # First-time publish to a tap that never shipped this kind before.
 mkdir -p "${tap_dir}/${subdir}"
-sed_args=(-e "s|^  version \".*\"|  version \"${version}\"|" \
-          -e "s|^  sha256 \".*\"|  sha256 \"${sha256}\"|")
+sed_args=(-e "s|^  version \".*\"|  version \"${version}\"|"
+  -e "s|^  sha256 \".*\"|  sha256 \"${sha256}\"|")
 if [ -n "$url" ]; then
   sed_args+=(-e "s|^  url \".*\"|  url \"${url}\"|")
 fi
-awk "${start_marker},0" "$template" | sed "${sed_args[@]}" > "$tap_file"
+awk "${start_marker},0" "$template" | sed "${sed_args[@]}" >"$tap_file"
 
 # --- validate before it can reach users ------------------------------------------
 # The substitution must have produced exactly the expected stanzas, and the Ruby must
 # parse — so a mangled template/sed fails the release instead of publishing a broken
 # entry that `brew install` cannot use.
 grep -Fxq "  version \"${version}\"" "$tap_file" \
-  || { echo "::error::generated ${kind} is missing the expected version stanza" >&2; exit 1; }
+  || {
+    echo "::error::generated ${kind} is missing the expected version stanza" >&2
+    exit 1
+  }
 grep -Fxq "  sha256 \"${sha256}\"" "$tap_file" \
-  || { echo "::error::generated ${kind} is missing the expected sha256 stanza" >&2; exit 1; }
+  || {
+    echo "::error::generated ${kind} is missing the expected sha256 stanza" >&2
+    exit 1
+  }
 if [ -n "$url" ]; then
   grep -Fxq "  url \"${url}\"" "$tap_file" \
-    || { echo "::error::generated ${kind} is missing the expected url stanza" >&2; exit 1; }
+    || {
+      echo "::error::generated ${kind} is missing the expected url stanza" >&2
+      exit 1
+    }
 fi
 ruby -c "$tap_file"
 
@@ -195,5 +252,5 @@ done
 
 echo "Updated ${tap_repo} → ${name} ${version}."
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-  echo "Homebrew tap updated to \`${version}\` (${name})." >> "$GITHUB_STEP_SUMMARY"
+  echo "Homebrew tap updated to \`${version}\` (${name})." >>"$GITHUB_STEP_SUMMARY"
 fi

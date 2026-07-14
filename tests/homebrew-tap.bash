@@ -65,10 +65,10 @@ run_tap() {
   status=0
   set +e
   output="$(
-    cd "$repo_root" && \
-    GOS_TAP_REMOTE="$tap_remote" \
-    TAP_DEPLOY_KEY="${GOS_TEST_TAP_KEY-dummy-key}" \
-    bash "$script" "$@" 2>&1
+    cd "$repo_root" \
+      && GOS_TAP_REMOTE="$tap_remote" \
+        TAP_DEPLOY_KEY="${GOS_TEST_TAP_KEY-dummy-key}" \
+        bash "$script" "$@" 2>&1
   )"
   status=$?
   set -e

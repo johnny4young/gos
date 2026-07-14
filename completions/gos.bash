@@ -24,7 +24,7 @@ _gos_completions() {
       prune)
         words="--rollback --json"
         ;;
-      install|run)
+      install | run)
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions --remote-cached 2>/dev/null || true)
         fi
@@ -54,7 +54,7 @@ _gos_completions() {
       doctor)
         words="--fix --json"
         ;;
-      check|current|platforms|status|version)
+      check | current | platforms | status | version)
         words="--json"
         ;;
       use)

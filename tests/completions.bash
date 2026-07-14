@@ -32,7 +32,7 @@ bash "$sync_script" --check
 
 for shell_name in bash zsh fish; do
   output_file="${test_root}/gos.${shell_name}"
-  bash "$script" completions "$shell_name" > "$output_file"
+  bash "$script" completions "$shell_name" >"$output_file"
   cmp -s "${repo_root}/completions/gos.${shell_name}" "$output_file" \
     || fail "embedded ${shell_name} completion output differs from completions/gos.${shell_name}"
 done

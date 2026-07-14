@@ -11,8 +11,11 @@ if [ "$#" -gt 1 ]; then
   exit 2
 fi
 case "$mode" in
-  --check|--write) ;;
-  *) usage; exit 2 ;;
+  --check | --write) ;;
+  *)
+    usage
+    exit 2
+    ;;
 esac
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

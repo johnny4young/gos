@@ -137,7 +137,10 @@ main() {
 
   # Use a unique temp directory to prevent symlink/TOCTOU attacks; the trap
   # cleans it on every exit path, including interrupts.
-  tmp_dir=$(mktemp -d) || { echo "Error: failed to create temp directory." >&2; return 1; }
+  tmp_dir=$(mktemp -d) || {
+    echo "Error: failed to create temp directory." >&2
+    return 1
+  }
   GOS_TMP_DIR="$tmp_dir"
   tmp_file="${tmp_dir}/gos"
   trap _cleanup_tmp EXIT

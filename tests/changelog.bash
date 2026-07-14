@@ -34,7 +34,7 @@ unreleased_notes() {
 write_fixture() {
   local file="$1"
 
-  cat > "$file" <<'CHANGELOG'
+  cat >"$file" <<'CHANGELOG'
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -61,7 +61,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 [1.0.0]: https://github.com/johnny4young/gos/releases/tag/v1.0.0
 CHANGELOG
 }
-
 
 current_changelog_requires_unreleased_notes_when_ahead_of_latest_tag() {
   local changelog latest_tag notes commit_count
@@ -122,7 +121,7 @@ test_empty_unreleased_without_commits_fails_without_mutation() {
   trap 'rm -rf "$tmp_dir"' RETURN
   changelog="$tmp_dir/CHANGELOG.md"
 
-  cat > "$changelog" <<'CHANGELOG'
+  cat >"$changelog" <<'CHANGELOG'
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -167,25 +166,25 @@ test_empty_unreleased_generates_notes_from_git() {
   git -C "$repo" config user.name "Test User"
   git -C "$repo" config user.email "test@example.com"
 
-  printf 'initial\n' > "$repo/file.txt"
+  printf 'initial\n' >"$repo/file.txt"
   git -C "$repo" add file.txt
   git -C "$repo" commit -q -m "release: v1.0.0"
   git -C "$repo" tag v1.0.0
 
-  printf 'feature\n' >> "$repo/file.txt"
+  printf 'feature\n' >>"$repo/file.txt"
   git -C "$repo" add file.txt
   git -C "$repo" commit -q -m "feat(dx): add project-aware version switching"
 
-  printf 'fix\n' >> "$repo/file.txt"
+  printf 'fix\n' >>"$repo/file.txt"
   git -C "$repo" add file.txt
   git -C "$repo" commit -q -m "fix(installer): preserve rollback backups"
 
-  printf 'docs\n' >> "$repo/file.txt"
+  printf 'docs\n' >>"$repo/file.txt"
   git -C "$repo" add file.txt
   git -C "$repo" commit -q -m "docs: clarify release checklist"
 
   changelog="$repo/CHANGELOG.md"
-  cat > "$changelog" <<'CHANGELOG'
+  cat >"$changelog" <<'CHANGELOG'
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -248,7 +247,7 @@ test_check_mode_empty_unreleased_fails_without_mutation() {
   trap 'rm -rf "$tmp_dir"' RETURN
   changelog="$tmp_dir/CHANGELOG.md"
 
-  cat > "$changelog" <<'CHANGELOG'
+  cat >"$changelog" <<'CHANGELOG'
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -301,7 +300,7 @@ test_heading_only_unreleased_fails_without_mutation() {
   trap 'rm -rf "$tmp_dir"' RETURN
   changelog="$tmp_dir/CHANGELOG.md"
 
-  cat > "$changelog" <<'CHANGELOG'
+  cat >"$changelog" <<'CHANGELOG'
 # Changelog
 
 All notable changes to this project will be documented in this file.

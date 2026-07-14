@@ -206,14 +206,14 @@ run_installer() {
   set +e
   output="$(
     PATH="${fake_bin}:${original_path}" \
-    GOS_BIN_DIR="$bin_dir" \
-    GOS_TEST_URL_LOG="$url_log" \
-    GOS_TEST_SUDO_LOG="$sudo_log" \
-    GOS_TEST_REAL_MKDIR="$real_mkdir" \
-    GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
-    GOS_TEST_MKDIR_MODE="$mkdir_mode" \
-    GOS_REQUIRE_CHECKSUM="$require_checksum" \
-    bash "${script_under_test:-$script}" 2>&1
+      GOS_BIN_DIR="$bin_dir" \
+      GOS_TEST_URL_LOG="$url_log" \
+      GOS_TEST_SUDO_LOG="$sudo_log" \
+      GOS_TEST_REAL_MKDIR="$real_mkdir" \
+      GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
+      GOS_TEST_MKDIR_MODE="$mkdir_mode" \
+      GOS_REQUIRE_CHECKSUM="$require_checksum" \
+      bash "${script_under_test:-$script}" 2>&1
   )"
   status=$?
   set -e
@@ -261,8 +261,8 @@ pass "GOS_REQUIRE_CHECKSUM=1 fails closed for unpinned installers"
 # The fake sha256sum reports 'unusedsha' for any file.
 pinned_script="${test_root}/install-pinned.sh"
 sed -e 's|^GOS_RELEASE_TAG=.*|GOS_RELEASE_TAG="v9.9.9"|' \
-    -e 's|^GOS_EXPECTED_SHA256=.*|GOS_EXPECTED_SHA256="unusedsha"|' \
-    "$script" >"$pinned_script"
+  -e 's|^GOS_EXPECTED_SHA256=.*|GOS_EXPECTED_SHA256="unusedsha"|' \
+  "$script" >"$pinned_script"
 script_under_test="$pinned_script"
 run_installer "pinned_verified" "existing"
 assert_status 0 "$status" "pinned verified"
@@ -273,8 +273,8 @@ pass "release-pinned installer downloads the release asset and verifies its chec
 
 pinned_bad_script="${test_root}/install-pinned-bad.sh"
 sed -e 's|^GOS_RELEASE_TAG=.*|GOS_RELEASE_TAG="v9.9.9"|' \
-    -e 's|^GOS_EXPECTED_SHA256=.*|GOS_EXPECTED_SHA256="1111111111111111111111111111111111111111111111111111111111111111"|' \
-    "$script" >"$pinned_bad_script"
+  -e 's|^GOS_EXPECTED_SHA256=.*|GOS_EXPECTED_SHA256="1111111111111111111111111111111111111111111111111111111111111111"|' \
+  "$script" >"$pinned_bad_script"
 script_under_test="$pinned_bad_script"
 run_installer "pinned_mismatch" "existing"
 assert_nonzero_status "$status" "pinned mismatch"
