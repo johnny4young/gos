@@ -429,11 +429,33 @@ pass "use prefers go.mod toolchain over go directive"
 case_dir="${test_root}/cache"
 run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "initial cache install failed: ${output}"
+[ ! -e "${case_dir}/go.gos-lock" ] || fail "install left the gos lock behind"
 rm -rf "${case_dir}/go"
 GOS_TEST_DOWNLOAD_MODE="fail-archives" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "cached install failed: ${output}"
 assert_contains "$output" "Using cached go1.21.6.darwin-arm64.tar.gz." "cache reuse"
 pass "install reuses verified cached archives"
+
+case_dir="${test_root}/lock-held"
+mkdir -p "${case_dir}/go.gos-lock"
+printf '%s\n' "$$" >"${case_dir}/go.gos-lock/pid"
+run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "install should fail when another gos lock is held"
+assert_contains "$output" "another gos operation is running" "held lock error"
+assert_contains "$output" "${case_dir}/go.gos-lock" "held lock path"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "lock acquisition failure must happen before network access"
+fi
+
+case_dir="${test_root}/lock-stale"
+mkdir -p "${case_dir}/go.gos-lock"
+printf '99999999\n' >"${case_dir}/go.gos-lock/pid"
+run_gos "$case_dir" bash "$script" rollback
+[ "$status" -ne 0 ] || fail "rollback should fail on a stale gos lock"
+assert_contains "$output" "stale gos lock found" "stale lock error"
+assert_contains "$output" "rm -rf \"${case_dir}/go.gos-lock\"" "stale lock removal hint"
+[ -d "${case_dir}/go.gos-lock" ] || fail "stale lock should not be auto-removed"
+pass "mutating commands use a clear mkdir-based gos lock"
 
 case_dir="${test_root}/rollback"
 mkdir -p "$case_dir"
@@ -454,6 +476,21 @@ assert_json "$output" "doctor --json"
 assert_contains "$output" '"status":"ok"' "doctor json"
 assert_contains "$output" '"name":"checksum-hash"' "doctor json checks"
 pass "doctor emits machine-readable diagnostics"
+
+case_dir="${test_root}/doctor-fix"
+GOS_TEST_INSTALL_DIR="${case_dir}/nested/go" run_gos "$case_dir" bash "$script" doctor --fix --json
+[ "$status" -eq 0 ] || fail "doctor --fix --json failed: ${output}"
+assert_json "$output" "doctor --fix --json"
+assert_contains "$output" '"fixed":["created install parent:' "doctor fix json fixed install parent"
+assert_contains "$output" "created cache dir: ${case_dir}/cache" "doctor fix json fixed cache"
+assert_contains "$output" "\"path_setup\":\"export PATH='${case_dir}/nested/go/bin':\\\"\$PATH\\\"\"" "doctor fix json path setup"
+[ -d "${case_dir}/nested" ] || fail "doctor --fix did not create the install parent"
+[ -d "${case_dir}/cache" ] || fail "doctor --fix did not create the cache dir"
+GOS_TEST_INSTALL_DIR="${case_dir}/nested/go" run_gos "$case_dir" bash "$script" doctor --fix
+[ "$status" -eq 0 ] || fail "idempotent doctor --fix failed: ${output}"
+assert_contains "$output" "fix - no safe automatic fixes needed" "doctor fix idempotent"
+assert_contains "$output" "fix - shell setup: export PATH='${case_dir}/nested/go/bin':\"\$PATH\"" "doctor fix shell setup"
+pass "doctor --fix applies only safe idempotent setup fixes"
 
 case_dir="${test_root}/unsupported"
 GOS_TEST_UNSUPPORTED_PLATFORM=1 run_gos "$case_dir" bash "$script" install 1.21.6

@@ -63,7 +63,10 @@ _gos() {
         completions)
           _values 'shell' bash zsh fish
           ;;
-        check|current|platforms|status|doctor|version)
+        doctor)
+          _arguments '--fix[Apply safe non-destructive fixes]' '--json[Output machine-readable JSON]'
+          ;;
+        check|current|platforms|status|version)
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)

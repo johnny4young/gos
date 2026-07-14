@@ -51,7 +51,10 @@ _gos_completions() {
       completions)
         words="bash zsh fish"
         ;;
-      check|current|platforms|status|doctor|version)
+      doctor)
+        words="--fix --json"
+        ;;
+      check|current|platforms|status|version)
         words="--json"
         ;;
       use)

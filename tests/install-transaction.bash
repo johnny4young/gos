@@ -160,6 +160,24 @@ if [ -n "${GOS_TEST_MKDIR_FAIL_PATH:-}" ] && [ "$target" = "$GOS_TEST_MKDIR_FAIL
   exit 1
 fi
 
+if [ -n "${GOS_TEST_PROTECTED_PARENT:-}" ]; then
+  case "$target" in
+    "${GOS_TEST_PROTECTED_PARENT}"/*)
+      if [ "${GOS_TEST_UNDER_SUDO:-}" != "1" ]; then
+        echo "fake mkdir permission denied: $target" >&2
+        exit 1
+      fi
+      "$GOS_TEST_REAL_CHMOD" u+w "$GOS_TEST_PROTECTED_PARENT"
+      set +e
+      "$GOS_TEST_REAL_MKDIR" "$@"
+      status=$?
+      set -e
+      "$GOS_TEST_REAL_CHMOD" u-w "$GOS_TEST_PROTECTED_PARENT"
+      exit "$status"
+      ;;
+  esac
+fi
+
 exec "$GOS_TEST_REAL_MKDIR" "$@"
 FAKE_MKDIR
 
@@ -495,7 +513,7 @@ assert_not_contains "$output" "Activating new Go installation" "parent creation 
 if [ -e "$install_dir" ]; then
   fail "parent creation failure: install dir was created unexpectedly"
 fi
-if [ ! -s "$tar_log" ]; then
-  fail "parent creation failure: extraction did not run before parent check"
+if [ -s "$tar_log" ]; then
+  fail "parent creation failure: extraction should not run when the install parent cannot be locked"
 fi
-pass "parent directory creation failure aborts before activation"
+pass "parent directory creation failure aborts before download or activation"

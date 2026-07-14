@@ -78,9 +78,10 @@ Done. That's the whole setup.
 - **Pin any version** — `gos install 1.21.6` gets exactly what you need; `gos install 1.21` resolves to the newest patch release
 - **Project-aware switching** — `gos use` reads `.go-version`, `.tool-versions`, `toolchain`, or `go` directives
 - **Update checks** — `gos check` reports whether a newer stable Go is available without installing anything
-- **Doctor diagnostics** — `gos doctor` checks Go, PATH, permissions, checksum tools, and extraction tools
+- **Doctor diagnostics** — `gos doctor` checks Go, PATH, permissions, checksum tools, and extraction tools; `gos doctor --fix` applies only safe, non-destructive fixes
 - **Offline status dashboard** — `gos status` summarizes the active Go, project manifest, rollback, cache, and layout without network access
 - **Cache and rollback** — verified archives are cached, `gos rollback` restores the previous install, and `gos prune` reclaims the disk space
+- **Concurrent-operation guard** — mutating commands take a portable `.gos-lock` so overlapping installs fail fast instead of racing
 - **Side-by-side versions (opt-in)** — set `GOS_VERSIONS_DIR` and every version stays installed; switching becomes an instant symlink flip, with `gos list --installed` and `gos uninstall`
 - **Shell setup in one line** — `eval "$(gos env)"` puts the managed Go on PATH
 - **Self-updating** — `gos self-update` upgrades gos itself from the latest verified release
@@ -270,7 +271,7 @@ exec fish          # for Fish
 | `gos which [version]` | Show the active Go binary path, or a side-by-side version path |
 | `gos env [--fish]` | Print the PATH setup line for your shell |
 | `gos completions <shell>` | Print a Bash, Zsh, or Fish completion script |
-| `gos doctor` | Diagnose gos, Go, PATH, and local tool dependencies |
+| `gos doctor [--fix]` | Diagnose gos, Go, PATH, and local tool dependencies; `--fix` creates safe missing directories and prints the shell setup line |
 | `gos self-update` | Update gos itself to the latest verified release |
 | `gos version` | Show gos version |
 | `gos help` | Show help message |
@@ -326,11 +327,12 @@ go1.23.2
 go1.24rc1
 go1.24.1
 
-$ gos doctor
+$ gos doctor --fix
 ok - platform: detected darwin/arm64 from Darwin/arm64
 ok - install-dir: /usr/local/go can be created or updated
 ok - go: /usr/local/go/bin/go reports: go version go1.24.1 darwin/arm64
 ...
+fix - shell setup: export PATH='/usr/local/go/bin':"$PATH"
 
 $ gos check
 Checking for Go updates...

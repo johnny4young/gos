@@ -26,6 +26,7 @@ done
 GOS_RELEASE_BASE_URL="https://github.com/johnny4young/gos/releases/latest/download"
 GOS_OUTPUT_JSON=0
 GOS_TMP_DIR=""
+GOS_LOCK_DIR=""
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,10 @@ _gos_cleanup_tmp() {
   fi
   if [ -n "$GOS_TMP_DIR" ] && [ -d "$GOS_TMP_DIR" ]; then
     rm -rf "$GOS_TMP_DIR"
+  fi
+  if [ -n "$GOS_LOCK_DIR" ] && [ -d "$GOS_LOCK_DIR" ]; then
+    _gos_sudo rm -rf "$GOS_LOCK_DIR" 2>/dev/null || rm -rf "$GOS_LOCK_DIR" 2>/dev/null || true
+    GOS_LOCK_DIR=""
   fi
 }
 trap _gos_cleanup_tmp EXIT
@@ -737,6 +742,72 @@ _gos_sudo() {
   fi
   printf '%s' "$err" >&2
   return "$status"
+}
+
+_gos_lock_dir() {
+  printf '%s.gos-lock' "$GOS_INSTALL_DIR"
+}
+
+_gos_pid_is_running() {
+  local pid="$1"
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null
+}
+
+_gos_report_existing_lock() {
+  local lock_dir="$1" pid=""
+  [ -f "${lock_dir}/pid" ] && pid=$(sed -n '1p' "${lock_dir}/pid" 2>/dev/null || true)
+
+  if _gos_pid_is_running "$pid"; then
+    echo "Error: another gos operation is running (pid ${pid})." >&2
+    echo "Lock: ${lock_dir}" >&2
+    return 1
+  fi
+
+  echo "Error: stale gos lock found at ${lock_dir}." >&2
+  if [ -n "$pid" ]; then
+    echo "The recorded pid (${pid}) is not running." >&2
+  fi
+  echo "Remove it manually if no gos install/update is active: rm -rf \"${lock_dir}\"" >&2
+  return 1
+}
+
+_gos_acquire_lock() {
+  local lock_dir lock_parent pid_file
+  lock_dir=$(_gos_lock_dir)
+  lock_parent=$(dirname "$lock_dir")
+  pid_file="${lock_dir}/pid"
+
+  if [ -n "$GOS_LOCK_DIR" ]; then
+    return 0
+  fi
+
+  if [ ! -d "$lock_parent" ] && ! _gos_ensure_dir "$lock_parent"; then
+    echo "Error: failed to create parent directory for GOS_INSTALL_DIR: ${lock_parent}" >&2
+    return 1
+  fi
+
+  if mkdir "$lock_dir" 2>/dev/null; then
+    :
+  elif [ -d "$lock_dir" ]; then
+    _gos_report_existing_lock "$lock_dir"
+    return 1
+  elif _gos_sudo mkdir "$lock_dir" 2>/dev/null; then
+    :
+  elif [ -d "$lock_dir" ]; then
+    _gos_report_existing_lock "$lock_dir"
+    return 1
+  else
+    echo "Error: could not create gos lock at ${lock_dir}." >&2
+    return 1
+  fi
+
+  GOS_LOCK_DIR="$lock_dir"
+  if ! printf '%s\n' "$$" >"$pid_file" 2>/dev/null; then
+    if [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null; then
+      printf '%s\n' "$$" | sudo tee "$pid_file" >/dev/null 2>&1 || true
+    fi
+  fi
 }
 
 # Create a directory, escalating to sudo only when the plain mkdir fails. One
@@ -2189,6 +2260,10 @@ cmd_prune() {
     esac
   done
 
+  if [ "$prune_rollback" = "true" ]; then
+    _gos_acquire_lock || return 1
+  fi
+
   # Delete only files that look like cached Go archives. GOS_CACHE_DIR is
   # user-controlled, so prune never runs rm -rf against it.
   if [ -d "$GOS_CACHE_DIR" ]; then
@@ -2288,12 +2363,70 @@ _gos_parent_writable_or_sudo() {
   return 1
 }
 
+_gos_doctor_record_fix() {
+  local item="$1"
+
+  if [ -n "${GOS_DOCTOR_FIXED_JSON:-}" ]; then
+    GOS_DOCTOR_FIXED_JSON="${GOS_DOCTOR_FIXED_JSON},"
+  fi
+  GOS_DOCTOR_FIXED_JSON="${GOS_DOCTOR_FIXED_JSON}$(_gos_json_string "$item")"
+  GOS_DOCTOR_FIXED_LINES="${GOS_DOCTOR_FIXED_LINES}${item}"$'\n'
+}
+
+_gos_doctor_path_setup_line() {
+  # shellcheck disable=SC2016 # The emitted line must leave $PATH for the user's shell.
+  printf 'export PATH=%s:"$PATH"' "$(_gos_shquote_posix "${GOS_INSTALL_DIR}/bin")"
+}
+
+_gos_doctor_apply_fixes() {
+  local install_parent path_setup
+  install_parent=$(dirname "$GOS_INSTALL_DIR")
+
+  if ! _gos_validate_install_dir "$GOS_INSTALL_DIR" >/dev/null 2>&1; then
+    echo "Warning: GOS_INSTALL_DIR is invalid; not creating its parent." >&2
+  elif [ ! -d "$install_parent" ]; then
+    if _gos_ensure_dir "$install_parent"; then
+      _gos_doctor_record_fix "created install parent: ${install_parent}"
+    else
+      echo "Warning: could not create install parent: ${install_parent}" >&2
+    fi
+  fi
+
+  if [ ! -d "$GOS_CACHE_DIR" ]; then
+    if mkdir -p "$GOS_CACHE_DIR" 2>/dev/null; then
+      _gos_doctor_record_fix "created cache dir: ${GOS_CACHE_DIR}"
+    else
+      echo "Warning: could not create cache dir: ${GOS_CACHE_DIR}" >&2
+    fi
+  fi
+
+  path_setup=$(_gos_doctor_path_setup_line)
+  GOS_DOCTOR_PATH_SETUP="$path_setup"
+}
+
 cmd_doctor() {
-  local os arch raw_os raw_arch install_error mirror_error versions_error go_path go_version go_bin
+  local os arch raw_os raw_arch install_error mirror_error versions_error go_path go_version go_bin arg doctor_fix="false"
   GOS_DOCTOR_PROBLEMS=0
   GOS_DOCTOR_WARNINGS=0
   GOS_DOCTOR_JSON_ITEMS=""
-  _gos_set_json_from_args "$@" || return 1
+  GOS_DOCTOR_FIXED_JSON=""
+  GOS_DOCTOR_FIXED_LINES=""
+  GOS_DOCTOR_PATH_SETUP=""
+
+  for arg in "$@"; do
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      --fix) doctor_fix="true" ;;
+      *)
+        echo "Error: unexpected argument: ${arg}" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  if [ "$doctor_fix" = "true" ]; then
+    _gos_doctor_apply_fixes
+  fi
 
   os=$(_gos_os)
   arch=$(_gos_arch)
@@ -2418,10 +2551,26 @@ cmd_doctor() {
 
   if _gos_json_enabled; then
     if [ "$GOS_DOCTOR_PROBLEMS" -gt 0 ]; then
-      printf '{"status":"problem","problems":%s,"warnings":%s,"checks":[%s]}\n' "$GOS_DOCTOR_PROBLEMS" "$GOS_DOCTOR_WARNINGS" "$GOS_DOCTOR_JSON_ITEMS"
+      printf '{"status":"problem","problems":%s,"warnings":%s,"checks":[%s]' "$GOS_DOCTOR_PROBLEMS" "$GOS_DOCTOR_WARNINGS" "$GOS_DOCTOR_JSON_ITEMS"
     else
-      printf '{"status":"ok","problems":0,"warnings":%s,"checks":[%s]}\n' "$GOS_DOCTOR_WARNINGS" "$GOS_DOCTOR_JSON_ITEMS"
+      printf '{"status":"ok","problems":0,"warnings":%s,"checks":[%s]' "$GOS_DOCTOR_WARNINGS" "$GOS_DOCTOR_JSON_ITEMS"
     fi
+    if [ "$doctor_fix" = "true" ]; then
+      printf ',"fixed":[%s],"path_setup":' "$GOS_DOCTOR_FIXED_JSON"
+      _gos_json_string "$GOS_DOCTOR_PATH_SETUP"
+    fi
+    printf '}\n'
+  elif [ "$doctor_fix" = "true" ]; then
+    if [ -n "$GOS_DOCTOR_FIXED_LINES" ]; then
+      while IFS= read -r arg; do
+        [ -n "$arg" ] && printf 'fix - %s\n' "$arg"
+      done <<EOF
+$GOS_DOCTOR_FIXED_LINES
+EOF
+    else
+      printf 'fix - no safe automatic fixes needed\n'
+    fi
+    printf 'fix - shell setup: %s\n' "$GOS_DOCTOR_PATH_SETUP"
   fi
 
   [ "$GOS_DOCTOR_PROBLEMS" -eq 0 ]
@@ -2495,7 +2644,10 @@ _gos_completions() {
       completions)
         words="bash zsh fish"
         ;;
-      check|current|platforms|status|doctor|version)
+      doctor)
+        words="--fix --json"
+        ;;
+      check|current|platforms|status|version)
         words="--json"
         ;;
       use)
@@ -2588,7 +2740,10 @@ _gos() {
         completions)
           _values 'shell' bash zsh fish
           ;;
-        check|current|platforms|status|doctor|version)
+        doctor)
+          _arguments '--fix[Apply safe non-destructive fixes]' '--json[Output machine-readable JSON]'
+          ;;
+        check|current|platforms|status|version)
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)
@@ -2633,6 +2788,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'help'     -d 'Show help message'
 complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable JSON where supported'
 complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version' -l json -d 'Output machine-readable JSON'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
+complete -c gos -n '__fish_seen_subcommand_from doctor' -l fix -d 'Apply safe non-destructive fixes'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
 complete -c gos -n '__fish_seen_subcommand_from install' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
 complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
@@ -2693,7 +2849,7 @@ COMMANDS:
   which [version]     Show the active or side-by-side Go binary path
   env [--fish]        Print the PATH setup line for your shell
   completions <shell> Print a Bash, Zsh, or Fish completion script
-  doctor              Diagnose gos, Go, PATH, and tool dependencies
+  doctor [--fix]      Diagnose gos, Go, PATH, and tool dependencies
   self-update         Update gos itself to the latest release
   version             Show gos version
   help                Show this help message
@@ -2708,7 +2864,7 @@ EXAMPLES:
   gos use
   gos pin 1.24.0
   gos check --json
-  gos doctor
+  gos doctor --fix
   gos current
   gos list --json
   gos status
@@ -2752,19 +2908,23 @@ main() {
   case "$cmd" in
     latest)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_acquire_lock || return 1
       cmd_latest "$@"
       ;;
     install)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_acquire_lock || return 1
       cmd_install "$@"
       ;;
     use)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_acquire_lock || return 1
       cmd_use "$@"
       ;;
     pin)       cmd_pin "$@" ;;
     rollback)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_acquire_lock || return 1
       cmd_rollback "$@"
       ;;
     prune)
@@ -2775,6 +2935,7 @@ main() {
     self-update|selfupdate) cmd_self_update "$@" ;;
     uninstall)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_acquire_lock || return 1
       cmd_uninstall "$@"
       ;;
     env)

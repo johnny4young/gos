@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Add offline introspection commands: `gos status` for a local dashboard and `gos which [version]` for active or side-by-side Go paths.
 - Add a discovery-only Go feed cache for `list`, `platforms`, `check`, and shell completion version suggestions, controlled by `GOS_FEED_TTL`.
 - Add dynamic installed/cached version suggestions to Bash, Zsh, and Fish completions without making completion paths touch the network.
+- Add a portable `.gos-lock` around mutating commands so concurrent installs, switches, rollbacks, uninstalls, and rollback pruning fail fast instead of racing.
+- Add `gos doctor --fix` for safe, idempotent setup fixes: create missing install parents/cache directories and print the shell setup line without editing shell files.
 
 ### Changed
 
