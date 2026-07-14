@@ -354,20 +354,6 @@ run_install() {
   set -e
 }
 
-assert_status() {
-  local expected="$1" actual="$2" name="$3"
-  if [ "$actual" -ne "$expected" ]; then
-    fail "${name}: expected status ${expected}, got ${actual}. Output: ${output}"
-  fi
-}
-
-assert_nonzero_status() {
-  local actual="$1" name="$2"
-  if [ "$actual" -eq 0 ]; then
-    fail "${name}: expected non-zero status. Output: ${output}"
-  fi
-}
-
 assert_old_install_intact() {
   local install_dir="$1" name="$2"
   if [ "$(cat "${install_dir}/VERSION_MARKER")" != "old" ]; then
@@ -408,7 +394,7 @@ assert_backup_left() {
 
 create_old_install "${test_root}/extract_failure/usr/local/go"
 run_install "extract_failure" "fail" "default"
-assert_nonzero_status "$status" "extract failure"
+assert_nonzero_status "$status" "extract failure" "$output"
 assert_contains "$output" "extraction failed" "extract failure"
 assert_old_install_intact "$install_dir" "extract failure"
 assert_no_backup_left "$install_dir" "extract failure"
@@ -416,7 +402,7 @@ pass "extraction failure leaves old install intact"
 
 create_old_install "${test_root}/invalid_archive/usr/local/go"
 run_install "invalid_archive" "invalid" "default"
-assert_nonzero_status "$status" "invalid archive"
+assert_nonzero_status "$status" "invalid archive" "$output"
 assert_contains "$output" "archive did not contain" "invalid archive"
 assert_old_install_intact "$install_dir" "invalid archive"
 assert_no_backup_left "$install_dir" "invalid archive"
@@ -424,7 +410,7 @@ pass "invalid staged archive leaves old install intact"
 
 create_old_install "${test_root}/activation_failure/usr/local/go"
 run_install "activation_failure" "bad-go" "default"
-assert_nonzero_status "$status" "activation failure"
+assert_nonzero_status "$status" "activation failure" "$output"
 assert_contains "$output" "Rolling back Go installation" "activation failure"
 assert_old_install_intact "$install_dir" "activation failure"
 assert_no_backup_left "$install_dir" "activation failure"
@@ -432,7 +418,7 @@ pass "activation validation failure restores backup"
 
 create_old_install "${test_root}/success_existing/custom/golang"
 run_install "success_existing" "ok" "custom"
-assert_status 0 "$status" "success existing"
+assert_status 0 "$status" "success existing" "$output"
 assert_new_install_active "$install_dir" "success existing"
 assert_no_backup_left "$install_dir" "success existing"
 pass "successful install replaces existing custom install"
@@ -441,7 +427,7 @@ create_old_install "${test_root}/protected_parent/usr/local/go"
 chmod u-w "${test_root}/protected_parent/usr/local"
 run_install "protected_parent" "ok" "protected-parent"
 chmod u+w "${test_root}/protected_parent/usr/local"
-assert_status 0 "$status" "protected parent"
+assert_status 0 "$status" "protected parent" "$output"
 assert_new_install_active "$install_dir" "protected parent"
 assert_no_backup_left "$install_dir" "protected parent"
 assert_contains "$output" "sudo mv ${install_dir} ${install_dir}.gos-backup" "protected parent backup sudo"
@@ -451,7 +437,7 @@ pass "install uses sudo for sibling renames when parent is not writable"
 
 create_old_install "${test_root}/rollback_mv_failure/usr/local/go"
 run_install "rollback_mv_failure" "ok" "rollback-mv-fail"
-assert_status 0 "$status" "rollback mv failure"
+assert_status 0 "$status" "rollback mv failure" "$output"
 assert_new_install_active "$install_dir" "rollback mv failure"
 assert_backup_left "$install_dir" "rollback mv failure"
 assert_not_contains "$output" "Rollback available: gos rollback" "rollback mv failure output"
@@ -463,7 +449,7 @@ pass "rollback save mv failure keeps backup and avoids false availability"
 create_old_install "${test_root}/rollback_rm_failure/usr/local/go"
 mkdir -p "${test_root}/rollback_rm_failure/usr/local/go.gos-rollback"
 run_install "rollback_rm_failure" "ok" "rollback-rm-fail"
-assert_status 0 "$status" "rollback rm failure"
+assert_status 0 "$status" "rollback rm failure" "$output"
 assert_new_install_active "$install_dir" "rollback rm failure"
 assert_backup_left "$install_dir" "rollback rm failure"
 assert_not_contains "$output" "Rollback available: gos rollback" "rollback rm failure output"
@@ -472,19 +458,19 @@ assert_contains "$output" "previous Go installation remains at:" "rollback rm fa
 pass "rollback save rm failure keeps backup and avoids false availability"
 
 run_install "success_empty" "ok" "default"
-assert_status 0 "$status" "success empty"
+assert_status 0 "$status" "success empty" "$output"
 assert_new_install_active "$install_dir" "success empty"
 assert_no_backup_left "$install_dir" "success empty"
 pass "successful install works without previous install"
 
 run_install "success_missing_parent" "ok" "missing-parent"
-assert_status 0 "$status" "success missing parent"
+assert_status 0 "$status" "success missing parent" "$output"
 assert_new_install_active "$install_dir" "success missing parent"
 assert_no_backup_left "$install_dir" "success missing parent"
 pass "successful install creates missing parent directory"
 
 run_install "parent_creation_failure" "ok" "mkdir-fail"
-assert_nonzero_status "$status" "parent creation failure"
+assert_nonzero_status "$status" "parent creation failure" "$output"
 assert_contains "$output" "failed to create parent directory" "parent creation failure"
 assert_not_contains "$output" "Activating new Go installation" "parent creation failure"
 if [ -e "$install_dir" ]; then

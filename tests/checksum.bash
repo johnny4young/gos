@@ -167,20 +167,6 @@ FAKE_GO
 chmod +x "${fake_bin}/uname" "${fake_bin}/curl" "${fake_bin}/jq" \
   "${fake_bin}/sha256sum" "${fake_bin}/tar" "${fake_bin}/go"
 
-assert_status() {
-  local expected="$1" actual="$2" name="$3"
-  if [ "$actual" -ne "$expected" ]; then
-    fail "${name}: expected status ${expected}, got ${actual}. Output: ${output}"
-  fi
-}
-
-assert_nonzero_status() {
-  local actual="$1" name="$2"
-  if [ "$actual" -eq 0 ]; then
-    fail "${name}: expected non-zero status. Output: ${output}"
-  fi
-}
-
 assert_file_contains() {
   local file="$1" needle="$2" name="$3"
   if ! grep -Fq "$needle" "$file"; then
@@ -256,51 +242,51 @@ run_install() {
 }
 
 run_install "full_feed" "present" "ok" "default"
-assert_status 0 "$status" "full feed"
+assert_status 0 "$status" "full feed" "$output"
 assert_file_contains "$url_log" "https://go.dev/dl/?mode=json&include=all" "full feed"
 assert_contains "$output" "Checksum verified." "full feed"
 assert_tar_called "$tar_log" "full feed"
 pass "explicit install verifies checksum from include=all"
 
 run_install "feed_required" "present" "ok" "feed"
-assert_status 0 "$status" "feed required"
+assert_status 0 "$status" "feed required" "$output"
 assert_contains "$output" "Checksum verified." "feed required"
 assert_tar_called "$tar_log" "feed required"
 pass "GOS_REQUIRE_CHECKSUM=feed accepts feed metadata"
 
 run_install "mismatch" "present" "mismatch" "default"
-assert_nonzero_status "$status" "mismatch"
+assert_nonzero_status "$status" "mismatch" "$output"
 assert_contains "$output" "checksum mismatch" "mismatch"
 assert_tar_not_called "$tar_log" "mismatch"
 pass "checksum mismatch aborts before extraction"
 
 run_install "missing_hash_default" "present" "empty" "default"
-assert_status 0 "$status" "missing hash default"
+assert_status 0 "$status" "missing hash default" "$output"
 assert_contains "$output" "Warning: skipping integrity verification" "missing hash default"
 assert_not_contains "$output" "Checksum verified." "missing hash default"
 assert_tar_called "$tar_log" "missing hash default"
 pass "missing hash output warns by default"
 
 run_install "missing_hash_strict" "present" "empty" "strict"
-assert_nonzero_status "$status" "missing hash strict"
+assert_nonzero_status "$status" "missing hash strict" "$output"
 assert_contains "$output" "checksum verification required" "missing hash strict"
 assert_tar_not_called "$tar_log" "missing hash strict"
 pass "missing hash output fails in strict mode"
 
 run_install "missing_metadata_default" "missing" "ok" "default"
-assert_status 0 "$status" "missing metadata default"
+assert_status 0 "$status" "missing metadata default" "$output"
 assert_contains "$output" "checksum metadata was not found" "missing metadata default"
 assert_tar_called "$tar_log" "missing metadata default"
 pass "missing metadata warns by default"
 
 run_install "missing_metadata_strict" "missing" "ok" "strict"
-assert_nonzero_status "$status" "missing metadata strict"
+assert_nonzero_status "$status" "missing metadata strict" "$output"
 assert_contains "$output" "checksum verification required" "missing metadata strict"
 assert_tar_not_called "$tar_log" "missing metadata strict"
 pass "missing metadata fails in strict mode"
 
 run_install "sha_file_fallback" "missing" "ok" "default" "valid"
-assert_status 0 "$status" "sha file fallback"
+assert_status 0 "$status" "sha file fallback" "$output"
 assert_file_contains "$url_log" "https://dl.google.com/go/go1.21.6.darwin-arm64.tar.gz.sha256" "sha file fallback"
 assert_contains "$output" "Checksum verified." "sha file fallback"
 assert_not_contains "$output" "skipping integrity verification" "sha file fallback"
@@ -308,25 +294,25 @@ assert_tar_called "$tar_log" "sha file fallback"
 pass "missing feed metadata falls back to the .sha256 companion file"
 
 run_install "sha_file_fallback_feed_required" "missing" "ok" "feed" "valid"
-assert_nonzero_status "$status" "sha file fallback feed required"
+assert_nonzero_status "$status" "sha file fallback feed required" "$output"
 assert_contains "$output" "GOS_REQUIRE_CHECKSUM=feed but no checksum was found" "sha file fallback feed required"
 assert_tar_not_called "$tar_log" "sha file fallback feed required"
 pass "GOS_REQUIRE_CHECKSUM=feed rejects the .sha256 fallback"
 
 run_install "sha_file_fallback_mismatch" "missing" "mismatch" "default" "valid"
-assert_nonzero_status "$status" "sha file fallback mismatch"
+assert_nonzero_status "$status" "sha file fallback mismatch" "$output"
 assert_contains "$output" "checksum mismatch" "sha file fallback mismatch"
 assert_tar_not_called "$tar_log" "sha file fallback mismatch"
 pass "a mismatched .sha256 companion checksum aborts before extraction"
 
 run_install "sha_file_garbage" "missing" "ok" "default" "garbage"
-assert_status 0 "$status" "sha file garbage"
+assert_status 0 "$status" "sha file garbage" "$output"
 assert_contains "$output" "Warning: skipping integrity verification" "sha file garbage"
 assert_tar_called "$tar_log" "sha file garbage"
 pass "non-checksum .sha256 content is rejected and treated as unavailable"
 
 run_install "sha_file_garbage_strict" "missing" "ok" "strict" "garbage"
-assert_nonzero_status "$status" "sha file garbage strict"
+assert_nonzero_status "$status" "sha file garbage strict" "$output"
 assert_contains "$output" "checksum verification required" "sha file garbage strict"
 assert_tar_not_called "$tar_log" "sha file garbage strict"
 pass "non-checksum .sha256 content fails closed in strict mode"

@@ -279,20 +279,6 @@ run_install() {
   set -e
 }
 
-assert_status() {
-  local expected="$1" actual="$2" name="$3"
-  if [ "$actual" -ne "$expected" ]; then
-    fail "${name}: expected status ${expected}, got ${actual}. Output: ${output}"
-  fi
-}
-
-assert_nonzero_status() {
-  local actual="$1" name="$2"
-  if [ "$actual" -eq 0 ]; then
-    fail "${name}: expected non-zero status. Output: ${output}"
-  fi
-}
-
 assert_file_contains() {
   local file="$1" needle="$2" name="$3"
   if ! grep -Fq "$needle" "$file"; then
@@ -318,7 +304,7 @@ assert_new_install_active() {
 }
 
 run_install "unzip_first" "unzip"
-assert_status 0 "$status" "unzip first"
+assert_status 0 "$status" "unzip first" "$output"
 assert_file_contains "$extract_log" "unzip" "unzip first"
 assert_file_not_contains "$extract_log" "tar" "unzip first"
 assert_file_not_contains "$extract_log" "powershell" "unzip first"
@@ -326,14 +312,14 @@ assert_new_install_active "unzip first"
 pass "Windows zip extraction prefers unzip"
 
 run_install "tar_second" "tar"
-assert_status 0 "$status" "tar second"
+assert_status 0 "$status" "tar second" "$output"
 assert_file_contains "$extract_log" "tar" "tar second"
 assert_file_not_contains "$extract_log" "powershell" "tar second"
 assert_new_install_active "tar second"
 pass "Windows zip extraction uses tar before PowerShell"
 
 run_install "powershell_env" "powershell"
-assert_status 0 "$status" "powershell env"
+assert_status 0 "$status" "powershell env" "$output"
 assert_file_contains "$extract_log" "powershell" "powershell env"
 assert_file_contains "$extract_log" 'args <-NoProfile> <-NonInteractive> <-Command>' "powershell env"
 assert_file_contains "$extract_log" "\$env:GOS_PS_ARCHIVE" "powershell env"
@@ -343,7 +329,7 @@ assert_new_install_active "powershell env"
 pass "Windows PowerShell fallback uses LiteralPath environment variables"
 
 run_install "no_tools" "none"
-assert_nonzero_status "$status" "no tools"
+assert_nonzero_status "$status" "no tools" "$output"
 case "$output" in
   *"no extraction tool found"*) ;;
   *) fail "no tools: missing extraction error. Output: ${output}" ;;

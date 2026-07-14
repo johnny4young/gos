@@ -25,6 +25,20 @@ assert_not_contains() {
   esac
 }
 
+assert_status() {
+  local expected="$1" actual="$2" name="$3" output_text="$4"
+  if [ "$actual" -ne "$expected" ]; then
+    fail "${name}: expected status ${expected}, got ${actual}. Output: ${output_text}"
+  fi
+}
+
+assert_nonzero_status() {
+  local actual="$1" name="$2" output_text="$3"
+  if [ "$actual" -eq 0 ]; then
+    fail "${name}: expected non-zero status. Output: ${output_text}"
+  fi
+}
+
 assert_file() {
   [ -f "$1" ] || fail "missing required file $1"
 }

@@ -109,20 +109,6 @@ FAKE_SUDO
 chmod +x "${fake_bin}/curl" "${fake_bin}/sha256sum" "${fake_bin}/shasum" \
   "${fake_bin}/mkdir" "${fake_bin}/sudo"
 
-assert_status() {
-  local expected="$1" actual="$2" name="$3"
-  if [ "$actual" -ne "$expected" ]; then
-    fail "${name}: expected status ${expected}, got ${actual}. Output: ${output}"
-  fi
-}
-
-assert_nonzero_status() {
-  local actual="$1" name="$2"
-  if [ "$actual" -eq 0 ]; then
-    fail "${name}: expected non-zero status. Output: ${output}"
-  fi
-}
-
 assert_file_contains() {
   local file="$1" needle="$2" name="$3"
   if ! grep -Fq "$needle" "$file"; then
@@ -206,37 +192,37 @@ run_installer() {
 script_under_test=""
 
 run_installer "missing_custom_bin" "missing"
-assert_status 0 "$status" "missing custom bin"
+assert_status 0 "$status" "missing custom bin" "$output"
 assert_installed "$bin_dir" "missing custom bin"
 assert_file_contains "$url_log" "https://raw.githubusercontent.com/johnny4young/gos/main/gos.sh" "missing custom bin"
 pass "missing custom GOS_BIN_DIR is created"
 
 run_installer "existing_bin" "existing"
-assert_status 0 "$status" "existing bin"
+assert_status 0 "$status" "existing bin" "$output"
 assert_installed "$bin_dir" "existing bin"
 pass "existing GOS_BIN_DIR still works"
 
 run_installer "sudo_created_bin" "sudo-created"
-assert_status 0 "$status" "sudo-created bin"
+assert_status 0 "$status" "sudo-created bin" "$output"
 assert_installed "$bin_dir" "sudo-created bin"
 assert_file_contains "$sudo_log" "sudo mkdir -p ${bin_dir}" "sudo-created bin"
 pass "GOS_BIN_DIR creation retries with sudo"
 
 run_installer "failed_bin" "fail"
-assert_nonzero_status "$status" "failed bin"
+assert_nonzero_status "$status" "failed bin" "$output"
 assert_contains "$output" "failed to create GOS_BIN_DIR" "failed bin"
 assert_not_installed "$bin_dir" "failed bin"
 assert_file_contains "$sudo_log" "sudo mkdir -p ${bin_dir}" "failed bin"
 pass "GOS_BIN_DIR creation failure aborts before install"
 
 run_installer "unpinned_default_warns" "existing"
-assert_status 0 "$status" "unpinned default"
+assert_status 0 "$status" "unpinned default" "$output"
 assert_contains "$output" "Warning: no release checksum configured" "unpinned default"
 assert_installed "$bin_dir" "unpinned default"
 pass "unpinned installer warns but proceeds by default"
 
 run_installer "unpinned_strict" "existing" "strict"
-assert_nonzero_status "$status" "unpinned strict"
+assert_nonzero_status "$status" "unpinned strict" "$output"
 assert_contains "$output" "GOS_REQUIRE_CHECKSUM=1 but this installer is not release-pinned" "unpinned strict"
 assert_not_installed "$bin_dir" "unpinned strict"
 pass "GOS_REQUIRE_CHECKSUM=1 fails closed for unpinned installers"
@@ -250,7 +236,7 @@ sed -e 's|^GOS_RELEASE_TAG=.*|GOS_RELEASE_TAG="v9.9.9"|' \
   "$script" >"$pinned_script"
 script_under_test="$pinned_script"
 run_installer "pinned_verified" "existing"
-assert_status 0 "$status" "pinned verified"
+assert_status 0 "$status" "pinned verified" "$output"
 assert_contains "$output" "Checksum verified." "pinned verified"
 assert_installed "$bin_dir" "pinned verified"
 assert_file_contains "$url_log" "https://github.com/johnny4young/gos/releases/download/v9.9.9/gos.sh" "pinned verified"
@@ -262,7 +248,7 @@ sed -e 's|^GOS_RELEASE_TAG=.*|GOS_RELEASE_TAG="v9.9.9"|' \
   "$script" >"$pinned_bad_script"
 script_under_test="$pinned_bad_script"
 run_installer "pinned_mismatch" "existing"
-assert_nonzero_status "$status" "pinned mismatch"
+assert_nonzero_status "$status" "pinned mismatch" "$output"
 assert_contains "$output" "checksum mismatch" "pinned mismatch"
 assert_not_installed "$bin_dir" "pinned mismatch"
 pass "release-pinned installer aborts on checksum mismatch"
