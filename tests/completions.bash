@@ -59,6 +59,14 @@ bash_completion_text="$(<"${test_root}/gos.bash")"
 zsh_completion_text="$(<"${test_root}/gos.zsh")"
 fish_completion_text="$(<"${test_root}/gos.fish")"
 assert_not_contains "$help_output" "__commands" "help hides internal command manifest"
+help_commands="$(
+  printf '%s\n' "$help_output" | awk '
+    $0 == "COMMANDS:" { in_commands = 1; next }
+    $0 == "OPTIONS:" { in_commands = 0 }
+    in_commands && /^  [^ ]/ { print $1 }
+  '
+)"
+[ "$help_commands" = "$commands_output" ] || fail "help command order must match __commands. Output: ${help_commands}"
 
 while IFS= read -r command_name; do
   [ -n "$command_name" ] || continue
