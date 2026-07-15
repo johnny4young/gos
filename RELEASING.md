@@ -65,7 +65,7 @@ bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bas
 zsh -n completions/gos.zsh
 ./gos.sh version
 ./gos.sh help
-ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); YAML.load_file(".github/workflows/release.yml")'
+ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); YAML.load_file(".github/workflows/release.yml"); YAML.load_file(".github/workflows/canary.yml")'
 git diff --check
 ```
 

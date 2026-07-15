@@ -446,7 +446,8 @@ assert(contributing.include?("optional") && contributing.include?("ShellCheck/sh
   "tests/install-ps1.ps1",
   "run_quiet ./gos.sh help",
   "YAML.load_file(\".github/workflows/ci.yml\")",
-  "YAML.load_file(\".github/workflows/release.yml\")"
+  "YAML.load_file(\".github/workflows/release.yml\")",
+  "YAML.load_file(\".github/workflows/canary.yml\")"
 ].each do |fragment|
   assert(validate_local.include?(fragment), "validate-local must include #{fragment}")
 end
@@ -486,7 +487,8 @@ end
   "shfmt -d -i 2 -ci -bn .",
   "git diff --check",
   "scripts/update-changelog.bash",
-  "scripts/update-packaging.bash"
+  "scripts/update-packaging.bash",
+  "YAML.load_file(\".github/workflows/canary.yml\")"
 ].each do |fragment|
   assert(releasing.include?(fragment), "RELEASING.md must mention #{fragment}")
 end
