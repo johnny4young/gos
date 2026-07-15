@@ -93,6 +93,14 @@ run_tap --kind formula --name gos --version 9.9.9 --sha256 "$good_sha" \
 assert_contains "$output" "nothing to push" "idempotent publish"
 pass "republishing the same version is an idempotent no-op"
 
+query_url="https://github.com/johnny4young/gos/archive/refs/tags/v9.9.9.tar.gz?download=1&mirror=primary"
+run_tap --kind formula --name gos --version 9.9.9 --sha256 "$good_sha" \
+  --url "$query_url" --template packaging/Formula/gos.rb
+[ "$status" -eq 0 ] || fail "URL query rendering failed: ${output}"
+published_formula="$(git --git-dir="$tap_remote" show main:Formula/gos.rb)"
+assert_contains "$published_formula" "  url \"${query_url}\"" "URL query rendering"
+pass "formula URLs render ampersands as data instead of sed syntax"
+
 run_tap --kind formula --name gos --version 9.9.10 --sha256 "$placeholder_sha" \
   --url "$url" --template packaging/Formula/gos.rb
 [ "$status" -ne 0 ] || fail "placeholder sha should be rejected"
@@ -133,6 +141,14 @@ run_tap --kind formula --name gos --version 9.9.10 --sha256 "$good_sha" \
 [ "$status" -eq 2 ] || fail "missing deploy key files should fail with usage status: ${output}"
 assert_contains "$output" "deploy key file not found" "deploy key file validation"
 pass "missing deploy key files fail before cloning the tap"
+
+duplicate_template="${test_root}/duplicate-formula.rb"
+sed '/^  version /p' "${repo_root}/packaging/Formula/gos.rb" >"$duplicate_template"
+run_tap --kind formula --name gos --version 9.9.10 --sha256 "$good_sha" \
+  --url "$url" --template "$duplicate_template"
+[ "$status" -eq 1 ] || fail "duplicate metadata stanzas should fail: ${output}"
+assert_contains "$output" "exactly one version stanza (found 2)" "duplicate version validation"
+pass "templates with duplicate metadata stanzas fail before publication"
 
 GOS_TEST_TAP_KEY="" run_tap --kind formula --name gos --version 9.9.10 \
   --sha256 "$good_sha" --url "$url" --template packaging/Formula/gos.rb

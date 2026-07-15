@@ -117,11 +117,9 @@ esac
 case "$kind" in
   cask)
     subdir="Casks"
-    start_marker='/^cask "/'
     ;;
   formula)
     subdir="Formula"
-    start_marker='/^class /'
     ;;
   *)
     echo "::error::--kind must be 'cask' or 'formula', got '$kind'" >&2
@@ -204,17 +202,39 @@ git clone --depth 1 "$tap_remote" "$tap_dir"
 
 # --- regenerate the tap file from the in-repo template ---------------------------
 # Start at the cask/class line so the template's repo-only header comment is dropped,
-# then substitute the published version + checksum (+ url for a formula). The 2-space
-# indent matches `brew style`'s canonical formatting.
+# then substitute the published version + checksum (+ url for a formula). Ruby treats
+# the argument values as data rather than sed replacement syntax, and it verifies each
+# metadata stanza occurs exactly once before writing the generated file.
 tap_file="${tap_dir}/${subdir}/${name}.rb"
 # First-time publish to a tap that never shipped this kind before.
 mkdir -p "${tap_dir}/${subdir}"
-sed_args=(-e "s|^  version \".*\"|  version \"${version}\"|"
-  -e "s|^  sha256 \".*\"|  sha256 \"${sha256}\"|")
-if [ -n "$url" ]; then
-  sed_args+=(-e "s|^  url \".*\"|  url \"${url}\"|")
-fi
-awk "${start_marker},0" "$template" | sed "${sed_args[@]}" >"$tap_file"
+ruby -EUTF-8 - "$kind" "$template" "$tap_file" "$version" "$sha256" "$url" <<'RUBY'
+kind, template_path, tap_file, version, sha256, url = ARGV
+lines = File.readlines(template_path)
+start_pattern = kind == "cask" ? /^cask "/ : /^class /
+start_index = lines.index { |line| line.match?(start_pattern) }
+
+unless start_index
+  warn "::error::template is missing its #{kind} declaration"
+  exit 1
+end
+
+generated = lines.drop(start_index).join
+updates = [["version", version], ["sha256", sha256]]
+updates << ["url", url] unless url.empty?
+
+updates.each do |label, value|
+  pattern = /^  #{Regexp.escape(label)} ".*"$/
+  count = generated.scan(pattern).length
+  unless count == 1
+    warn "::error::template must contain exactly one #{label} stanza (found #{count})"
+    exit 1
+  end
+  generated.sub!(pattern, %(  #{label} "#{value}"))
+end
+
+File.write(tap_file, generated)
+RUBY
 
 # --- validate before it can reach users ------------------------------------------
 # The substitution must have produced exactly the expected stanzas, and the Ruby must
