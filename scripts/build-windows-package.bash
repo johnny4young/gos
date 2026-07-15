@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  printf 'Usage: %s [output.zip]\n' "${0##*/}" >&2
+}
+
+if [ "$#" -gt 1 ]; then
+  usage
+  exit 2
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 

@@ -20,6 +20,15 @@ metadata_hash() {
   sha256_file "$snapshot"
 }
 
+set +e
+output="$(bash scripts/build-windows-package.bash "${tmp_dir}/unused.zip" extra 2>&1)"
+status=$?
+set -e
+assert_status 2 "$status" "build-windows-package extra arguments" "$output"
+assert_contains "$output" "Usage: build-windows-package.bash [output.zip]" "build-windows-package usage output"
+[ ! -e "${tmp_dir}/unused.zip" ] \
+  || fail "build-windows-package must reject extra arguments before writing the package"
+
 zip_one="${tmp_dir}/gos-windows-1.zip"
 zip_two="${tmp_dir}/gos-windows-2.zip"
 bash scripts/build-windows-package.bash "$zip_one"
