@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Harden Windows package metadata helpers so they reject ambiguous usage, avoid partial Chocolatey/Winget rewrites, and refuse placeholder SHA256 checksums.
 - Harden release-note and Homebrew tap helpers with strict input validation, data-safe template rendering, and exact metadata-stanza checks before publication.
 - Remove temporary Homebrew tap checkouts after successful, failed, and idempotent publication attempts.
+- Preserve changelog permissions during atomic release rewrites, reject invalid release dates and previous tags, and require exactly one Chocolatey, Winget, and workflow version field before publication.
 
 ### Security
 
