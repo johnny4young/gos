@@ -152,7 +152,18 @@ jobs:
           VERSION: ${{ needs.validate-release-ref.outputs.version }}
         run: |
           : "${VERSION:?missing release version}"
-          sed -i "s/^GOS_VERSION=.*/GOS_VERSION=\"${VERSION}\"/" gos.sh
+          ruby -EUTF-8 - "$VERSION" <<'RUBY'
+          version = ARGV.fetch(0)
+          path = "gos.sh"
+          source = File.read(path)
+          pattern = /^GOS_VERSION="[^"]*"$/
+          count = source.scan(pattern).length
+          unless count == 1
+            warn "::error::gos.sh must contain exactly one GOS_VERSION assignment (found #{count})"
+            exit 1
+          end
+          File.write(path, source.sub(pattern, %(GOS_VERSION="#{version}")))
+          RUBY
 
       - name: Update CHANGELOG.md
         env:
@@ -180,10 +191,11 @@ jobs:
           : "${VERSION:?missing release version}"
           : "${TAG:?missing release tag}"
           # The version stamped into gos.sh must match the tag being released.
-          grep -Fq "GOS_VERSION=\"${VERSION}\"" gos.sh || {
-            printf '::error::gos.sh was not stamped with GOS_VERSION=%s\n' "$VERSION"
+          version_count=$(grep -Fxc "GOS_VERSION=\"${VERSION}\"" gos.sh || true)
+          if [ "$version_count" -ne 1 ]; then
+            printf '::error::gos.sh must contain exactly one GOS_VERSION=%s assignment; found %s\n' "$VERSION" "$version_count"
             exit 1
-          }
+          fi
           git add gos.sh CHANGELOG.md packaging/chocolatey/gos.nuspec packaging/chocolatey/tools/chocolateyInstall.ps1 packaging/winget/johnny4young.gos.yaml
           git commit -m "release: ${TAG}"
           git tag "$TAG"

@@ -222,6 +222,11 @@ assert(version_bump_checkout.dig("with", "fetch-depth") == 0, "version-bump must
   step_env = step["env"] || {}
   assert(step_env.values.any? { |value| value.to_s.include?("needs.validate-release-ref.outputs") }, "#{name} must use validated release outputs")
 end
+version_update_run = step_named(version_bump_steps, "Update version in gos.sh")["run"].to_s
+assert(version_update_run.include?("source.scan(pattern).length"), "version-bump must count GOS_VERSION assignments before rewriting gos.sh")
+assert(version_update_run.include?("exactly one GOS_VERSION assignment"), "version-bump must reject missing or duplicate GOS_VERSION assignments")
+commit_and_tag_run = step_named(version_bump_steps, "Commit and tag")["run"].to_s
+assert(commit_and_tag_run.include?('grep -Fxc "GOS_VERSION=\"${VERSION}\""'), "version-bump must verify exactly one stamped GOS_VERSION before commit")
 
 smoke_job = release_jobs.fetch("smoke-test")
 assert(job_needs(smoke_job).include?("validate-release-ref"), "smoke-test must depend on validate-release-ref")

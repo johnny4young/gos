@@ -36,8 +36,13 @@ version, windows_url, windows_sha = ARGV
 
 def replace!(updates, path, pattern, replacement)
   text = updates.fetch(path) { File.read(path) }
-  unless text.match?(pattern)
+  count = text.scan(pattern).length
+  if count == 0
     warn "pattern not found while updating #{path}: #{pattern.inspect}"
+    exit 1
+  end
+  if count != 1
+    warn "expected exactly one match while updating #{path}; found #{count}: #{pattern.inspect}"
     exit 1
   end
   updates[path] = text.gsub(pattern, replacement)
