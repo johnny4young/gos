@@ -467,6 +467,8 @@ end
 
 [
   "scripts/validate-local.bash",
+  "scripts/validate-local.bash --required-only",
+  "optional local-tool skips noted",
   "shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash",
   "scripts/sync-command-surfaces.bash --check",
   "bash tests/completions.bash",

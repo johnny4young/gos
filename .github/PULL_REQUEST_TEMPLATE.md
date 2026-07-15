@@ -12,7 +12,7 @@
 
 ## Validation
 
-- [ ] `scripts/validate-local.bash`
+- [ ] `scripts/validate-local.bash` (or `scripts/validate-local.bash --required-only` with optional local-tool skips noted)
 - [ ] `bash -n gos.sh install.sh`
 - [ ] `shfmt -d -i 2 -ci -bn .`
 - [ ] `shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash`
