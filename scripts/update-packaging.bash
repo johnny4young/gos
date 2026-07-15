@@ -29,46 +29,57 @@ windows_url="https://github.com/johnny4young/gos/releases/download/${tag}/gos-wi
 ruby -EUTF-8 - "$version" "$windows_url" "$windows_sha" <<'RUBY'
 version, windows_url, windows_sha = ARGV
 
-def replace!(path, pattern, replacement)
-  text = File.read(path)
+def replace!(updates, path, pattern, replacement)
+  text = updates.fetch(path) { File.read(path) }
   unless text.match?(pattern)
     warn "pattern not found while updating #{path}: #{pattern.inspect}"
     exit 1
   end
-  updated = text.gsub(pattern, replacement)
-  File.write(path, updated)
+  updates[path] = text.gsub(pattern, replacement)
 end
 
+updates = {}
+
 replace!(
+  updates,
   "packaging/chocolatey/gos.nuspec",
   %r{<version>[^<]+</version>},
   "<version>#{version}</version>"
 )
 
 replace!(
+  updates,
   "packaging/chocolatey/tools/chocolateyInstall.ps1",
   /^\$url = '.*'$/,
   "$url = '#{windows_url}'"
 )
 replace!(
+  updates,
   "packaging/chocolatey/tools/chocolateyInstall.ps1",
   /^\$checksum = '.*'$/,
   "$checksum = '#{windows_sha}'"
 )
 
 replace!(
+  updates,
   "packaging/winget/johnny4young.gos.yaml",
   /^PackageVersion: .*/,
   "PackageVersion: #{version}"
 )
 replace!(
+  updates,
   "packaging/winget/johnny4young.gos.yaml",
   /^\s*InstallerUrl: .*/,
   "    InstallerUrl: #{windows_url}"
 )
 replace!(
+  updates,
   "packaging/winget/johnny4young.gos.yaml",
   /^\s*InstallerSha256: .*/,
   "    InstallerSha256: #{windows_sha}"
 )
+
+updates.each do |path, updated|
+  File.write(path, updated)
+end
 RUBY

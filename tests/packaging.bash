@@ -92,4 +92,22 @@ after_invalid_hash="$(metadata_hash "$invalid_repo" after-invalid)"
 [ "$before_invalid_hash" = "$after_invalid_hash" ] \
   || fail "invalid update-packaging inputs must not mutate package metadata"
 
+broken_repo="${tmp_dir}/broken-repo"
+mkdir -p "$broken_repo"
+cp -R LICENSE gos.sh packaging scripts "$broken_repo/"
+ruby -0pi -e 'sub(/^\s*InstallerSha256: .*\n/, "")' \
+  "${broken_repo}/packaging/winget/johnny4young.gos.yaml"
+before_broken_hash="$(metadata_hash "$broken_repo" before-broken)"
+
+set +e
+output="$(cd "$broken_repo" && bash scripts/update-packaging.bash "9.8.7" "$test_sha" 2>&1)"
+status=$?
+set -e
+assert_status 1 "$status" "update-packaging missing pattern" "$output"
+assert_contains "$output" "pattern not found while updating packaging/winget/johnny4young.gos.yaml" "update-packaging missing pattern output"
+
+after_broken_hash="$(metadata_hash "$broken_repo" after-broken)"
+[ "$before_broken_hash" = "$after_broken_hash" ] \
+  || fail "missing update-packaging patterns must not partially mutate package metadata"
+
 pass "Windows package asset and package metadata automation work"
