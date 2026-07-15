@@ -54,6 +54,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 CHANGELOG
 }
 
+file_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+}
+
 current_changelog_requires_unreleased_notes_when_ahead_of_latest_tag() {
   local changelog latest_tag notes commit_count
   changelog="$repo_root/CHANGELOG.md"
@@ -80,11 +84,13 @@ current_changelog_requires_unreleased_notes_when_ahead_of_latest_tag() {
 }
 
 test_promotes_unreleased_notes() {
-  local tmp_dir changelog notes
+  local tmp_dir changelog notes before_mode after_mode
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' RETURN
   changelog="$tmp_dir/CHANGELOG.md"
   write_fixture "$changelog"
+  chmod 640 "$changelog"
+  before_mode="$(file_mode "$changelog")"
 
   GOS_CHANGELOG_FILE="$changelog" \
     GOS_RELEASE_DATE="2026-05-07" \
@@ -104,7 +110,54 @@ test_promotes_unreleased_notes() {
     exit 1
   fi
 
-  printf 'ok - changelog release promotes curated Unreleased notes\n'
+  after_mode="$(file_mode "$changelog")"
+  if [[ "$after_mode" != "$before_mode" ]]; then
+    printf 'not ok - changelog mode changed from %s to %s\n' "$before_mode" "$after_mode" >&2
+    exit 1
+  fi
+
+  printf 'ok - changelog release promotes notes and preserves file mode\n'
+}
+
+test_invalid_release_date_fails_without_mutation() {
+  local tmp_dir changelog before output status
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' RETURN
+  changelog="$tmp_dir/CHANGELOG.md"
+  write_fixture "$changelog"
+  before="$(<"$changelog")"
+
+  set +e
+  output="$(GOS_CHANGELOG_FILE="$changelog" GOS_RELEASE_DATE="2026-02-30" GOS_PREVIOUS_TAG="v1.0.0" bash "$script" --check "1.1.0" 2>&1)"
+  status=$?
+  set -e
+
+  assert_status 1 "$status" "update-changelog invalid release date" "$output"
+  assert_contains "$output" "invalid release date" "update-changelog invalid release date output"
+  [[ "$(<"$changelog")" == "$before" ]] || fail "invalid release date should not mutate CHANGELOG.md"
+
+  printf 'ok - invalid calendar dates fail check mode without mutation\n'
+}
+
+test_unsafe_previous_tag_fails_without_mutation() {
+  local tmp_dir changelog before output status unsafe_tag
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' RETURN
+  changelog="$tmp_dir/CHANGELOG.md"
+  write_fixture "$changelog"
+  before="$(<"$changelog")"
+  unsafe_tag=$'v1.0.0\n[evil]: https://example.invalid'
+
+  set +e
+  output="$(GOS_CHANGELOG_FILE="$changelog" GOS_RELEASE_DATE="2026-05-07" GOS_PREVIOUS_TAG="$unsafe_tag" bash "$script" --check "1.1.0" 2>&1)"
+  status=$?
+  set -e
+
+  assert_status 1 "$status" "update-changelog unsafe previous tag" "$output"
+  assert_contains "$output" "invalid previous tag" "update-changelog unsafe previous tag output"
+  [[ "$(<"$changelog")" == "$before" ]] || fail "unsafe previous tag should not mutate CHANGELOG.md"
+
+  printf 'ok - unsafe previous tags fail check mode without mutation\n'
 }
 
 test_empty_unreleased_without_commits_fails_without_mutation() {
@@ -380,6 +433,8 @@ CHANGELOG
 
 current_changelog_requires_unreleased_notes_when_ahead_of_latest_tag
 test_promotes_unreleased_notes
+test_invalid_release_date_fails_without_mutation
+test_unsafe_previous_tag_fails_without_mutation
 test_empty_unreleased_without_commits_fails_without_mutation
 test_empty_unreleased_generates_notes_from_git
 test_check_mode_validates_without_mutation

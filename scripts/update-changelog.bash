@@ -20,6 +20,32 @@ trim_trailing_blank_lines() {
   ' "$1"
 }
 
+valid_release_date() {
+  local value="$1" year month day max_day
+
+  if [[ ! "$value" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]]; then
+    return 1
+  fi
+
+  year=$((10#${BASH_REMATCH[1]}))
+  month=$((10#${BASH_REMATCH[2]}))
+  day=$((10#${BASH_REMATCH[3]}))
+
+  case "$month" in
+    1 | 3 | 5 | 7 | 8 | 10 | 12) max_day=31 ;;
+    4 | 6 | 9 | 11) max_day=30 ;;
+    2)
+      max_day=28
+      if ((year % 400 == 0 || (year % 4 == 0 && year % 100 != 0))); then
+        max_day=29
+      fi
+      ;;
+    *) return 1 ;;
+  esac
+
+  ((year >= 1 && day >= 1 && day <= max_day))
+}
+
 generate_release_notes_from_git() {
   local output_file="$1"
 
@@ -152,6 +178,16 @@ changelog_file="${GOS_CHANGELOG_FILE:-CHANGELOG.md}"
 release_date="${GOS_RELEASE_DATE:-$(date +%Y-%m-%d)}"
 previous_tag="${GOS_PREVIOUS_TAG:-$(git describe --tags --abbrev=0 2>/dev/null || true)}"
 
+if ! valid_release_date "$release_date"; then
+  printf 'error: invalid release date %q; use a real YYYY-MM-DD date\n' "$release_date" >&2
+  exit 1
+fi
+
+if [[ -n "$previous_tag" && ! "$previous_tag" =~ ^(HEAD|v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?)$ ]]; then
+  printf 'error: invalid previous tag %q; use HEAD or a v-prefixed semver tag\n' "$previous_tag" >&2
+  exit 1
+fi
+
 if [[ ! -f "$changelog_file" ]]; then
   printf 'error: changelog file not found: %s\n' "$changelog_file" >&2
   exit 1
@@ -169,8 +205,9 @@ body_with_release="$(mktemp)"
 body_without_links="$(mktemp)"
 links_file="$(mktemp)"
 body_trimmed="$(mktemp)"
-next_file="$(mktemp)"
+next_file="$(mktemp "${changelog_file}.tmp.XXXXXX")"
 trap 'rm -f "$raw_notes" "$release_notes" "$commit_subjects" "$body_with_release" "$body_without_links" "$links_file" "$body_trimmed" "$next_file"' EXIT
+cp -p "$changelog_file" "$next_file"
 
 awk '
   $0 == "## [Unreleased]" {
