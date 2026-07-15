@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Harden release-note and Homebrew tap helpers with strict input validation, data-safe template rendering, and exact metadata-stanza checks before publication.
 - Remove temporary Homebrew tap checkouts after successful, failed, and idempotent publication attempts.
 - Preserve changelog permissions during atomic release rewrites, reject invalid release dates and previous tags, and require exactly one Chocolatey, Winget, and workflow version field before publication.
+- Make command-surface regeneration transactional so late generator failures restore README, `gos.sh`, and standalone completions without changing their contents or file modes.
 
 ### Security
 
