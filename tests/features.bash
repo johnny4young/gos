@@ -1113,6 +1113,27 @@ GOS_TEST_MIRROR="http://mirror.test.invalid/dl" run_gos "$case_dir" bash "$scrip
 assert_contains "$output" "must be an https:// URL" "mirror https enforcement"
 pass "plaintext mirrors are rejected"
 
+for candidate in 1.6.9 9.9.9evil; do
+  case_dir="${test_root}/self-update-reject-${candidate}"
+  mkdir -p "${case_dir}/app"
+  cp "$script" "${case_dir}/app/gos"
+  chmod +x "${case_dir}/app/gos"
+  sed "s/^GOS_VERSION=.*/GOS_VERSION=\"${candidate}\"/" "$script" >"${case_dir}/release-gos.sh"
+  original_self_update_sha="$(sha256_file "${case_dir}/app/gos")"
+
+  GOS_TEST_SELFUPDATE_SCRIPT="${case_dir}/release-gos.sh" run_gos "$case_dir" bash "${case_dir}/app/gos" self-update
+  [ "$status" -ne 0 ] || fail "self-update should reject release version ${candidate}"
+  current_self_update_sha="$(sha256_file "${case_dir}/app/gos")"
+  [ "$current_self_update_sha" = "$original_self_update_sha" ] \
+    || fail "self-update changed the installed script for rejected version ${candidate}"
+
+  case "$candidate" in
+    1.6.9) assert_contains "$output" "Refusing to downgrade" "self-update downgrade rejection" ;;
+    *) assert_contains "$output" "invalid version" "self-update malformed version rejection" ;;
+  esac
+done
+pass "self-update rejects older and malformed release versions before replacement"
+
 case_dir="${test_root}/self-update"
 mkdir -p "${case_dir}/app"
 cp "$script" "${case_dir}/app/gos"

@@ -1512,6 +1512,11 @@ _gos_cache_archive_stats() {
   printf '%s|%s\n' "$count" "$bytes"
 }
 
+_gos_semver_is_valid() {
+  printf '%s\n' "$1" \
+    | LC_ALL=C grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+}
+
 _gos_fetch_latest_gos_release() {
   command -v curl >/dev/null 2>&1 || return 1
 
@@ -1527,8 +1532,7 @@ _gos_fetch_latest_gos_release() {
     *) return 1 ;;
   esac
   version="${effective#https://github.com/johnny4young/gos/releases/tag/v}"
-  if ! printf '%s\n' "$version" \
-    | LC_ALL=C grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+  if ! _gos_semver_is_valid "$version"; then
     return 1
   fi
   printf '%s\n' "$version"
@@ -2520,10 +2524,18 @@ cmd_self_update() {
     _gos_error "the downloaded file does not look like a gos release. Aborting."
     return 1
   fi
+  if ! _gos_semver_is_valid "$new_version"; then
+    _gos_error "the downloaded gos release has an invalid version 'v${new_version}'. Aborting."
+    return 1
+  fi
 
   if [ "$new_version" = "$GOS_VERSION" ]; then
     echo "Already on the latest gos (v${GOS_VERSION})."
     return 0
+  fi
+  if ! _gos_semver_is_newer "$new_version" "$GOS_VERSION"; then
+    _gos_error "the downloaded gos release v${new_version} is older than current v${GOS_VERSION}. Refusing to downgrade."
+    return 1
   fi
 
   # Verify against the checksum manifest published with the release. Unlike a
