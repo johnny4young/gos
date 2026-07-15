@@ -29,6 +29,20 @@ set -e
 [ "$status" -eq 2 ] || fail "sync-command-surfaces should reject extra arguments with usage status. Output: ${output}"
 assert_contains "$output" "Usage: sync-command-surfaces.bash [--check|--write]" "sync-command-surfaces extra argument usage"
 
+write_fixture="${test_root}/write-fixture"
+mkdir -p "${write_fixture}/completions" "${write_fixture}/scripts"
+cp "${repo_root}/gos.sh" "${repo_root}/README.md" "${write_fixture}/"
+cp "${repo_root}/completions/gos.bash" \
+  "${repo_root}/completions/gos.fish" \
+  "${repo_root}/completions/gos.zsh" \
+  "${write_fixture}/completions/"
+cp "${repo_root}"/scripts/sync-*.bash "${write_fixture}/scripts/"
+git -C "$write_fixture" init -q
+git -C "$write_fixture" add README.md gos.sh completions scripts
+bash "${write_fixture}/scripts/sync-command-surfaces.bash" --write
+git -C "$write_fixture" diff --exit-code -- README.md gos.sh completions >/dev/null \
+  || fail "sync-command-surfaces --write should be idempotent when generated surfaces are current"
+
 for shell_name in bash zsh fish; do
   output_file="${test_root}/gos.${shell_name}"
   bash "$script" completions "$shell_name" >"$output_file"
