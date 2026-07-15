@@ -27,6 +27,10 @@ assert_validate_help_stdout() {
     || fail_shell "validate-local ${label} must print usage to stdout"
   grep -Fq "workflow YAML syntax" "$stdout_file" \
     || fail_shell "validate-local ${label} must list workflow YAML checks"
+  grep -Fq "Required external tools:" "$stdout_file" \
+    || fail_shell "validate-local ${label} must list required external tools"
+  grep -Fq "ruby (workflow YAML syntax)" "$stdout_file" \
+    || fail_shell "validate-local ${label} must list Ruby as required"
   grep -Fq "CLI smoke checks" "$stdout_file" \
     || fail_shell "validate-local ${label} must list CLI smoke checks"
   grep -Fq "git whitespace checks" "$stdout_file" \
@@ -435,6 +439,7 @@ assert(contributing.include?("scripts/sync-command-surfaces.bash --check"), "CON
 
 assert(contributing.include?("scripts/validate-local.bash"), "CONTRIBUTING validation must use the local validation orchestrator")
 assert(contributing.include?("workflow YAML parse"), "CONTRIBUTING must document workflow YAML validation")
+assert(contributing.include?("Ruby is required for the workflow YAML parse checks"), "CONTRIBUTING must document required Ruby dependency")
 assert(contributing.include?("`./gos.sh version`") && contributing.include?("`./gos.sh help`") && contributing.include?("CLI smoke checks"), "CONTRIBUTING must document local CLI smoke checks")
 assert(contributing.include?("optional") && contributing.include?("ShellCheck/shfmt/zsh/Fish/PowerShell checks"), "CONTRIBUTING must explain optional local validation tools")
 
@@ -445,6 +450,8 @@ assert(contributing.include?("optional") && contributing.include?("ShellCheck/sh
   "packaging/windows/uninstall.ps1",
   "tests/install-ps1.ps1",
   "run_quiet ./gos.sh help",
+  "require_tool ruby",
+  "missing required tool: %s (%s)",
   "YAML.load_file(\".github/workflows/ci.yml\")",
   "YAML.load_file(\".github/workflows/release.yml\")",
   "YAML.load_file(\".github/workflows/canary.yml\")"

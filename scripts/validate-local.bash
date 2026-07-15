@@ -15,6 +15,9 @@ Required checks:
   - CLI smoke checks
   - git whitespace checks
 
+Required external tools:
+  - ruby (workflow YAML syntax)
+
 Optional tools are run when installed:
   - shellcheck
   - shfmt
@@ -121,6 +124,16 @@ run_quiet() {
   "$@" >/dev/null
 }
 
+require_tool() {
+  local tool="$1"
+  local description="$2"
+
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    printf 'missing required tool: %s (%s)\n' "$tool" "$description" >&2
+    return 127
+  fi
+}
+
 run_optional() {
   local tool="$1"
   shift
@@ -175,6 +188,8 @@ foreach ($file in $files) {
   run "${powershell_args[@]}" -Command "$powershell_parse_script"
   run "${powershell_args[@]}" -File tests/install-ps1.ps1
 }
+
+require_tool ruby "workflow YAML syntax validation"
 
 run scripts/sync-command-surfaces.bash --check
 run_optional shfmt -d -i 2 -ci -bn .
