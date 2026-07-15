@@ -21,6 +21,8 @@ cat >"${fake_bin}/curl" <<'FAKE_CURL'
 #!/usr/bin/env bash
 set -euo pipefail
 
+printf '%s\n' "$*" >>"$GOS_TEST_CURL_ARGS_LOG"
+
 output=""
 url=""
 while [ "$#" -gt 0 ]; do
@@ -29,7 +31,7 @@ while [ "$#" -gt 0 ]; do
       output="$2"
       shift 2
       ;;
-    --proto|--connect-timeout|--retry)
+    --proto|--proto-redir|--connect-timeout|--retry)
       shift 2
       ;;
     --tlsv1.2|-fsSL)
@@ -148,6 +150,7 @@ run_installer() {
   fi
   case_dir="${test_root}/${name}"
   url_log="${case_dir}/urls.log"
+  curl_args_log="${case_dir}/curl-args.log"
   sudo_log="${case_dir}/sudo.log"
   mkdir_fail_path=""
   mkdir_mode="fail"
@@ -156,6 +159,7 @@ run_installer() {
 
   mkdir -p "$case_dir"
   : >"$url_log"
+  : >"$curl_args_log"
   : >"$sudo_log"
 
   case "$install_kind" in
@@ -193,6 +197,7 @@ run_installer() {
     PATH="${fake_bin}:${original_path}" \
       GOS_BIN_DIR="$bin_dir" \
       GOS_TEST_URL_LOG="$url_log" \
+      GOS_TEST_CURL_ARGS_LOG="$curl_args_log" \
       GOS_TEST_SUDO_LOG="$sudo_log" \
       GOS_TEST_REAL_MKDIR="$real_mkdir" \
       GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
@@ -276,6 +281,12 @@ assert_status 0 "$status" "pinned verified" "$output"
 assert_contains "$output" "Checksum verified." "pinned verified"
 assert_installed "$bin_dir" "pinned verified"
 assert_file_contains "$url_log" "https://github.com/johnny4young/gos/releases/download/v9.9.9/gos.sh" "pinned verified"
+download_args="$(tail -n 1 "$curl_args_log")"
+assert_contains "$download_args" "--proto =https" "installer HTTPS protocol"
+assert_contains "$download_args" "--proto-redir =https" "installer redirect protocol"
+assert_contains "$download_args" "--tlsv1.2" "installer TLS floor"
+assert_contains "$download_args" "--connect-timeout 15" "installer connect timeout"
+assert_contains "$download_args" "--retry 2" "installer retry policy"
 pass "release-pinned installer downloads the release asset and verifies its checksum"
 
 pinned_bad_script="${test_root}/install-pinned-bad.sh"

@@ -79,7 +79,7 @@ _sha256() {
 _download() {
   local url="$1" output="$2"
   if command -v curl &>/dev/null; then
-    curl --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 2 -fsSL -o "$output" "$url"
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 -fsSL -o "$output" "$url"
   elif command -v wget &>/dev/null; then
     wget --https-only --timeout=15 --tries=3 -qO "$output" "$url"
   else
