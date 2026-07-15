@@ -68,6 +68,49 @@ bash "${write_fixture}/scripts/sync-command-surfaces.bash" --write
 git -C "$write_fixture" diff --exit-code -- README.md gos.sh completions >/dev/null \
   || fail "sync-command-surfaces --write should be idempotent when generated surfaces are current"
 
+# A late generator failure must not leave the earlier completion and README
+# writers committed. Add a real manifest change so every early writer has work,
+# then break the final embedded-completion marker and compare the whole target
+# set against its exact pre-run state.
+ruby - "${write_fixture}/gos.sh" <<'RUBY'
+path = ARGV.fetch(0)
+current = File.read(path)
+abort "command manifest insertion point missing" unless current.include?("help|help|Show this help message\nGOS_COMMANDS")
+abort "embedded fish marker missing" unless current.include?("# gos-completions:fish:end")
+current = current.sub(
+  "help|help|Show this help message\nGOS_COMMANDS",
+  "help|help|Show this help message\nprobe|probe|Probe transactional synchronization\nGOS_COMMANDS"
+)
+current = current.sub(
+  "# gos-completions:fish:end",
+  "# gos-completions:fish:broken-end"
+)
+File.write(path, current)
+RUBY
+
+rollback_snapshot="${test_root}/rollback-snapshot"
+mkdir -p "${rollback_snapshot}/completions"
+sync_targets=(README.md gos.sh completions/gos.bash completions/gos.fish completions/gos.zsh)
+for sync_target in "${sync_targets[@]}"; do
+  cp -p "${write_fixture}/${sync_target}" "${rollback_snapshot}/${sync_target}"
+done
+
+set +e
+output="$(bash "${write_fixture}/scripts/sync-command-surfaces.bash" --write 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "sync-command-surfaces --write should fail when a late embedded marker is missing"
+assert_contains "$output" "embedded fish completion block was not found" "late command surface failure"
+assert_contains "$output" "rolled back command surface changes after sync failure" "command surface rollback notice"
+for sync_target in "${sync_targets[@]}"; do
+  cmp -s "${rollback_snapshot}/${sync_target}" "${write_fixture}/${sync_target}" \
+    || fail "sync-command-surfaces left a partial write in ${sync_target} after a late failure"
+  snapshot_mode="$(ruby -e 'printf "%o", File.stat(ARGV.fetch(0)).mode & 07777' "${rollback_snapshot}/${sync_target}")"
+  restored_mode="$(ruby -e 'printf "%o", File.stat(ARGV.fetch(0)).mode & 07777' "${write_fixture}/${sync_target}")"
+  [ "$snapshot_mode" = "$restored_mode" ] \
+    || fail "sync-command-surfaces changed the mode of ${sync_target} while rolling back"
+done
+
 for shell_name in bash zsh fish; do
   output_file="${test_root}/gos.${shell_name}"
   bash "$script" completions "$shell_name" >"$output_file"
