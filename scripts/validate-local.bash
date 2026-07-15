@@ -9,6 +9,7 @@ Run the local gos validation bundle.
 
 Required checks:
   - generated command surfaces
+  - workflow YAML syntax
   - Bash syntax for scripts/tests
   - repository Bash test suite
   - git whitespace checks
@@ -188,6 +189,7 @@ run_optional fish --no-config --no-execute completions/gos.fish
 run_optional_powershell
 run ./gos.sh version
 run_quiet ./gos.sh help
+run ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); YAML.load_file(".github/workflows/release.yml")'
 run git diff --check
 
 printf 'ok - local validation passed\n'
