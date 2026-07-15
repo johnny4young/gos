@@ -1534,6 +1534,23 @@ _gos_fetch_latest_gos_release() {
   printf '%s\n' "$version"
 }
 
+_gos_semver_is_newer() {
+  local candidate_major candidate_minor candidate_patch
+  local current_major current_minor current_patch
+  IFS=. read -r candidate_major candidate_minor candidate_patch <<<"$1"
+  IFS=. read -r current_major current_minor current_patch <<<"$2"
+
+  if [ "$candidate_major" -ne "$current_major" ]; then
+    [ "$candidate_major" -gt "$current_major" ]
+    return
+  fi
+  if [ "$candidate_minor" -ne "$current_minor" ]; then
+    [ "$candidate_minor" -gt "$current_minor" ]
+    return
+  fi
+  [ "$candidate_patch" -gt "$current_patch" ]
+}
+
 # ─── Commands ─────────────────────────────────────────────────────────────────
 
 cmd_latest() {
@@ -1598,10 +1615,10 @@ cmd_check() {
 
   gos_latest=$(_gos_fetch_latest_gos_release 2>/dev/null) || gos_latest=""
   if [ -n "$gos_latest" ]; then
-    if [ "$gos_latest" = "$GOS_VERSION" ]; then
-      gos_up_to_date="true"
-    else
+    if _gos_semver_is_newer "$gos_latest" "$GOS_VERSION"; then
       gos_up_to_date="false"
+    else
+      gos_up_to_date="true"
     fi
   fi
 

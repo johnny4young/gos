@@ -1004,6 +1004,31 @@ for invalid_release_url in \
     *"gos v"*) fail "check trusted invalid gos release redirect ${invalid_release_url}: ${output}" ;;
   esac
 done
+IFS=. read -r gos_major gos_minor gos_patch <<<"$gos_version"
+if [ "$gos_patch" -gt 0 ]; then
+  older_gos_version="${gos_major}.${gos_minor}.$((gos_patch - 1))"
+elif [ "$gos_minor" -gt 0 ]; then
+  older_gos_version="${gos_major}.$((gos_minor - 1)).999"
+else
+  older_gos_version="$((gos_major - 1)).999.999"
+fi
+older_gos_url="https://github.com/johnny4young/gos/releases/tag/v${older_gos_version}"
+GOS_TEST_GOS_RELEASE_EFFECTIVE_URL="$older_gos_url" \
+  GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
+[ "$status" -eq 0 ] || fail "check with an older gos release failed: ${output}"
+case "$output" in
+  *"gos v"*) fail "check reported older gos v${older_gos_version} as an update: ${output}" ;;
+esac
+GOS_TEST_GOS_RELEASE_EFFECTIVE_URL="$older_gos_url" \
+  GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json
+[ "$status" -eq 0 ] || fail "check --json with an older gos release failed: ${output}"
+assert_contains "$output" "\"gos\":{\"current\":\"v${gos_version}\",\"latest\":\"v${older_gos_version}\",\"up_to_date\":true}" "older gos release json"
+
+newer_gos_version="${gos_major}.$((gos_minor + 10)).0"
+GOS_TEST_GOS_RELEASE_EFFECTIVE_URL="https://github.com/johnny4young/gos/releases/tag/v${newer_gos_version}" \
+  GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
+[ "$status" -eq 0 ] || fail "check with a multi-digit newer gos release failed: ${output}"
+assert_contains "$output" "gos v${newer_gos_version} is available" "multi-digit newer gos release"
 # Unknown flags are rejected, not silently ignored (shared [--json] parser).
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --bogus
 [ "$status" -ne 0 ] || fail "check should reject an unknown flag"
