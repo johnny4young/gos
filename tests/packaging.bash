@@ -9,6 +9,17 @@ cd "$repo_root"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
+metadata_hash() {
+  local repo="$1" label="$2" snapshot
+  snapshot="${tmp_dir}/${label}.metadata"
+  cat \
+    "${repo}/packaging/chocolatey/gos.nuspec" \
+    "${repo}/packaging/chocolatey/tools/chocolateyInstall.ps1" \
+    "${repo}/packaging/winget/johnny4young.gos.yaml" \
+    >"$snapshot"
+  sha256_file "$snapshot"
+}
+
 zip_one="${tmp_dir}/gos-windows-1.zip"
 zip_two="${tmp_dir}/gos-windows-2.zip"
 bash scripts/build-windows-package.bash "$zip_one"
@@ -41,5 +52,35 @@ assert_file_contains "$tmp_repo/packaging/chocolatey/tools/chocolateyInstall.ps1
 assert_file_contains "$tmp_repo/packaging/winget/johnny4young.gos.yaml" "PackageVersion: 9.8.7"
 assert_file_contains "$tmp_repo/packaging/winget/johnny4young.gos.yaml" "InstallerUrl: ${windows_url}"
 assert_file_contains "$tmp_repo/packaging/winget/johnny4young.gos.yaml" "InstallerSha256: ${test_sha}"
+
+invalid_repo="${tmp_dir}/invalid-repo"
+mkdir -p "$invalid_repo"
+cp -R LICENSE gos.sh packaging scripts "$invalid_repo/"
+before_invalid_hash="$(metadata_hash "$invalid_repo" before-invalid)"
+
+set +e
+output="$(cd "$invalid_repo" && bash scripts/update-packaging.bash 2>&1)"
+status=$?
+set -e
+assert_status 2 "$status" "update-packaging usage" "$output"
+assert_contains "$output" "Usage: scripts/update-packaging.bash <version> <gos-windows.zip-sha256>" "update-packaging usage output"
+
+set +e
+output="$(cd "$invalid_repo" && bash scripts/update-packaging.bash "bad/version" "$test_sha" 2>&1)"
+status=$?
+set -e
+assert_status 1 "$status" "update-packaging invalid version" "$output"
+assert_contains "$output" "Error: invalid version 'bad/version'." "update-packaging invalid version output"
+
+set +e
+output="$(cd "$invalid_repo" && bash scripts/update-packaging.bash "9.8.7" "not-a-sha" 2>&1)"
+status=$?
+set -e
+assert_status 1 "$status" "update-packaging invalid sha" "$output"
+assert_contains "$output" "Error: invalid SHA256 'not-a-sha'." "update-packaging invalid sha output"
+
+after_invalid_hash="$(metadata_hash "$invalid_repo" after-invalid)"
+[ "$before_invalid_hash" = "$after_invalid_hash" ] \
+  || fail "invalid update-packaging inputs must not mutate package metadata"
 
 pass "Windows package asset and package metadata automation work"
