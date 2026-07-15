@@ -4,6 +4,39 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+test_root="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$test_root"
+}
+trap cleanup EXIT
+
+fail_shell() {
+  printf 'not ok - %s\n' "$1" >&2
+  exit 1
+}
+
+validate_help_stdout="${test_root}/validate-help.stdout"
+validate_help_stderr="${test_root}/validate-help.stderr"
+bash scripts/validate-local.bash --help >"$validate_help_stdout" 2>"$validate_help_stderr"
+grep -Fq "Usage: validate-local.bash [--help]" "$validate_help_stdout" \
+  || fail_shell "validate-local --help must print usage to stdout"
+[ ! -s "$validate_help_stderr" ] \
+  || fail_shell "validate-local --help must not print stderr"
+
+validate_invalid_stdout="${test_root}/validate-invalid.stdout"
+validate_invalid_stderr="${test_root}/validate-invalid.stderr"
+set +e
+bash scripts/validate-local.bash --bogus >"$validate_invalid_stdout" 2>"$validate_invalid_stderr"
+cmd_status=$?
+set -e
+[ "$cmd_status" -eq 2 ] \
+  || fail_shell "validate-local invalid usage must exit 2"
+[ ! -s "$validate_invalid_stdout" ] \
+  || fail_shell "validate-local invalid usage must not print stdout"
+grep -Fq "Usage: validate-local.bash [--help]" "$validate_invalid_stderr" \
+  || fail_shell "validate-local invalid usage must print usage to stderr"
+
 # -EUTF-8 keeps file parsing locale-independent (repo files contain UTF-8).
 ruby -EUTF-8 <<'RUBY'
 require "yaml"
