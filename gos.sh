@@ -1516,7 +1516,12 @@ _gos_fetch_latest_gos_release() {
   command -v curl >/dev/null 2>&1 || return 1
 
   local effective tag version
-  effective=$(curl -sIL -o /dev/null -w '%{url_effective}' 'https://github.com/johnny4young/gos/releases/latest' 2>/dev/null) || return 1
+  effective=$(
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+      --connect-timeout 5 --max-time 15 --retry 1 \
+      -sIL -o /dev/null -w '%{url_effective}' \
+      'https://github.com/johnny4young/gos/releases/latest' 2>/dev/null
+  ) || return 1
   tag="${effective##*/}"
   version="${tag#v}"
   case "$version" in

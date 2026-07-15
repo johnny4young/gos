@@ -56,7 +56,7 @@ while [ "$#" -gt 0 ]; do
       output="$2"
       shift 2
       ;;
-    --proto|--connect-timeout|--retry|-w)
+    --proto | --proto-redir | --connect-timeout | --max-time | --retry | -w)
       if [ "$1" = "-w" ]; then
         write_out="$2"
       fi
@@ -961,6 +961,13 @@ GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
 [ "$status" -eq 0 ] || fail "check outdated failed: ${output}"
 assert_contains "$output" "Update available. Install it with: gos latest" "check outdated"
 assert_contains "$output" "gos v9.9.9 is available. Update with: gos self-update" "check gos update"
+release_lookup_args="$(grep 'https://github.com/johnny4young/gos/releases/latest' "${case_dir}/curl-args.log" | tail -n 1 || true)"
+assert_contains "$release_lookup_args" "--proto =https" "gos release lookup HTTPS protocol"
+assert_contains "$release_lookup_args" "--proto-redir =https" "gos release lookup redirect protocol"
+assert_contains "$release_lookup_args" "--tlsv1.2" "gos release lookup TLS floor"
+assert_contains "$release_lookup_args" "--connect-timeout 5" "gos release lookup connect timeout"
+assert_contains "$release_lookup_args" "--max-time 15" "gos release lookup total timeout"
+assert_contains "$release_lookup_args" "--retry 1" "gos release lookup retry bound"
 if grep -q 'dl/go1' "${case_dir}/urls.log"; then
   fail "check must never download an archive"
 fi
