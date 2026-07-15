@@ -428,6 +428,8 @@ assert(contributing.include?("scripts/sync-command-surfaces.bash --write"), "CON
 assert(contributing.include?("scripts/sync-command-surfaces.bash --check"), "CONTRIBUTING must document command surface sync checks")
 
 assert(contributing.include?("scripts/validate-local.bash"), "CONTRIBUTING validation must use the local validation orchestrator")
+assert(contributing.include?("workflow YAML parse"), "CONTRIBUTING must document workflow YAML validation")
+assert(contributing.include?("`./gos.sh version`") && contributing.include?("`./gos.sh help`") && contributing.include?("CLI smoke checks"), "CONTRIBUTING must document local CLI smoke checks")
 assert(contributing.include?("optional") && contributing.include?("ShellCheck/shfmt/zsh/Fish/PowerShell checks"), "CONTRIBUTING must explain optional local validation tools")
 
 [

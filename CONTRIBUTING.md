@@ -89,8 +89,9 @@ Before opening a pull request, run the broader local suite when possible:
 scripts/validate-local.bash
 ```
 
-The local validation script runs command-surface checks, Bash syntax checks, the
-repository Bash test suite, `git diff --check`, and optional
+The local validation script runs command-surface checks, workflow YAML parse
+checks, Bash syntax checks, the repository Bash test suite, `./gos.sh version`
+and `./gos.sh help` CLI smoke checks, `git diff --check`, and optional
 ShellCheck/shfmt/zsh/Fish/PowerShell checks when those tools are installed.
 
 ## Pull Request Guidelines
