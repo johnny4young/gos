@@ -9,6 +9,8 @@ cd "$repo_root"
 assert_file install.ps1
 assert_file packaging/windows/gos.cmd
 assert_file packaging/windows/uninstall.ps1
+assert_file packaging/chocolatey/tools/chocolateyInstall.ps1
+assert_file packaging/chocolatey/tools/chocolateyUninstall.ps1
 
 assert_file_contains install.ps1 "\$ErrorActionPreference = 'Stop'"
 assert_file_contains install.ps1 "Set-StrictMode -Version 2.0"
@@ -39,6 +41,21 @@ assert_file_contains packaging/windows/uninstall.ps1 'Remove-Item -LiteralPath $
 assert_file_contains packaging/windows/uninstall.ps1 '$envKey.SetValue('"'"'Path'"'"''
 assert_file_contains packaging/windows/uninstall.ps1 "DoNotExpandEnvironmentNames"
 assert_file_not_contains packaging/windows/uninstall.ps1 "SetEnvironmentVariable('Path'"
+assert_file_contains packaging/chocolatey/tools/chocolateyInstall.ps1 "\$ErrorActionPreference = 'Stop'"
+assert_file_contains packaging/chocolatey/tools/chocolateyInstall.ps1 "Set-StrictMode -Version 2.0"
+assert_file_contains packaging/chocolatey/tools/chocolateyInstall.ps1 "Get-ChocolateyWebFile"
+assert_file_contains packaging/chocolatey/tools/chocolateyInstall.ps1 "-ChecksumType 'sha256'"
+assert_file_contains packaging/chocolatey/tools/chocolateyInstall.ps1 "Get-ChocolateyUnzip"
+assert_file_contains packaging/chocolatey/tools/chocolateyInstall.ps1 "Install-BinFile -Name 'gos'"
+# shellcheck disable=SC2016
+assert_file_contains packaging/chocolatey/tools/chocolateyInstall.ps1 'Remove-Item -LiteralPath $zipPath -Force'
+assert_file_not_contains packaging/chocolatey/tools/chocolateyInstall.ps1 "Invoke-Expression"
+assert_file_contains packaging/chocolatey/tools/chocolateyUninstall.ps1 "\$ErrorActionPreference = 'Stop'"
+assert_file_contains packaging/chocolatey/tools/chocolateyUninstall.ps1 "Set-StrictMode -Version 2.0"
+assert_file_contains packaging/chocolatey/tools/chocolateyUninstall.ps1 "Uninstall-BinFile -Name 'gos'"
+# shellcheck disable=SC2016
+assert_file_contains packaging/chocolatey/tools/chocolateyUninstall.ps1 'Remove-Item -LiteralPath $installDir -Recurse -Force'
+assert_file_not_contains packaging/chocolatey/tools/chocolateyUninstall.ps1 "Invoke-Expression"
 assert_file tests/install-ps1.ps1
 
-pass "PowerShell installer files are present and guarded"
+pass "PowerShell installer and package files are present and guarded"

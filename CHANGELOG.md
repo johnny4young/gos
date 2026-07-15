@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Changed
 
 - Clarify the release checklist around curated `Unreleased` notes, fallback changelog generation, and the current validation bundle.
-- Include Chocolatey PowerShell scripts in local and CI syntax validation, with workflow invariants that keep tracked shell/PowerShell files covered by `scripts/validate-local.bash`.
+- Include and harden Chocolatey PowerShell scripts in local and CI syntax validation, with workflow invariants that keep tracked shell/PowerShell files covered by `scripts/validate-local.bash`.
 
 ## [1.7.0] - 2026-07-14
 
