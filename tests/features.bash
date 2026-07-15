@@ -99,7 +99,7 @@ case "$url" in
       exit 1
     fi
     case "$write_out" in
-      *url_effective*) printf 'https://github.com/johnny4young/gos/releases/tag/v9.9.9' ;;
+      *url_effective*) printf '%s' "${GOS_TEST_GOS_RELEASE_EFFECTIVE_URL:-https://github.com/johnny4young/gos/releases/tag/v9.9.9}" ;;
     esac
     ;;
   'https://go.dev/dl/?mode=json')
@@ -276,6 +276,7 @@ run_gos() {
       GOS_TEST_GO_VERSION="${GOS_TEST_GO_VERSION:-}" \
       GOS_TEST_GO_BROKEN="${GOS_TEST_GO_BROKEN:-0}" \
       GOS_TEST_SELFUPDATE_SCRIPT="${GOS_TEST_SELFUPDATE_SCRIPT:-}" \
+      GOS_TEST_GOS_RELEASE_EFFECTIVE_URL="${GOS_TEST_GOS_RELEASE_EFFECTIVE_URL:-}" \
       GOS_TEST_MV_FAIL_DEST="${GOS_TEST_MV_FAIL_DEST:-}" \
       GOS_TEST_REAL_MV="$real_mv" \
       GOS_REQUIRE_CHECKSUM="${GOS_TEST_REQUIRE_CHECKSUM:-}" \
@@ -991,6 +992,18 @@ assert_contains "$output" "Update available. Install it with: gos latest" "check
 case "$output" in
   *"gos v"*) fail "check should skip gos release line when GitHub lookup fails: ${output}" ;;
 esac
+for invalid_release_url in \
+  'https://releases.example.invalid/tag/v9.9.9' \
+  'https://github.com/johnny4young/gos/releases/tag/v9.9.9evil' \
+  'https://github.com/johnny4young/gos/releases/tag/v01.2.3'; do
+  GOS_TEST_GOS_RELEASE_EFFECTIVE_URL="$invalid_release_url" \
+    GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
+  [ "$status" -eq 0 ] || fail "check should skip invalid gos release redirects: ${output}"
+  assert_contains "$output" "Update available. Install it with: gos latest" "check invalid redirect Go output"
+  case "$output" in
+    *"gos v"*) fail "check trusted invalid gos release redirect ${invalid_release_url}: ${output}" ;;
+  esac
+done
 # Unknown flags are rejected, not silently ignored (shared [--json] parser).
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --bogus
 [ "$status" -ne 0 ] || fail "check should reject an unknown flag"
