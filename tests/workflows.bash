@@ -507,6 +507,9 @@ end
 ].each do |fragment|
   assert(releasing.include?(fragment), "RELEASING.md must mention #{fragment}")
 end
+assert(releasing.include?("Start with the full orchestrator"), "RELEASING.md must explain full local validation orchestration")
+assert(releasing.include?("release-candidate evidence explicit for CI/release parity"), "RELEASING.md must explain expanded release validation commands")
+assert(releasing.include?("scripts/validate-local.bash --required-only") && releasing.include?("only for non-release local") && releasing.include?("triage, and note any optional local-tool skips"), "RELEASING.md must keep required-only out of release-candidate validation")
 assert(releasing.include?("```bash\nscripts/validate-local.bash"), "RELEASING.md validation must start with local validation orchestrator")
 assert(releasing.include?("fallback git commit subjects"), "RELEASING.md must explain fallback changelog generation")
 assert(releasing.include?("tests/changelog.bash` fails a post-tag branch"), "RELEASING.md must explain the curated Unreleased guard")
