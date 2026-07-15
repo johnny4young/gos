@@ -39,6 +39,54 @@ set -e
 assert_contains "$option_value_output" "--kind requires a value" "option-looking value"
 pass "options cannot consume the following option as their value"
 
+network_bin="${test_root}/network-bin"
+network_curl_log="${test_root}/network-curl.log"
+mkdir -p "$network_bin"
+cat >"${network_bin}/curl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >"$GOS_TEST_CURL_LOG"
+printf '{"ssh_keys":["ssh-ed25519 AAAATEST"]}\n'
+SH
+cat >"${network_bin}/jq" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+cat >/dev/null
+printf 'github.com ssh-ed25519 AAAATEST\n'
+SH
+cat >"${network_bin}/git" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+chmod +x "${network_bin}/curl" "${network_bin}/jq" "${network_bin}/git"
+
+set +e
+network_output="$(
+  PATH="${network_bin}:${PATH}" \
+    GOS_TEST_CURL_LOG="$network_curl_log" \
+    TAP_DEPLOY_KEY="test-key" \
+    bash "$script" \
+    --kind formula \
+    --name gos \
+    --version 9.9.9 \
+    --sha256 1111111111111111111111111111111111111111111111111111111111111111 \
+    --url https://github.com/johnny4young/gos/archive/refs/tags/v9.9.9.tar.gz \
+    --template "${repo_root}/packaging/Formula/gos.rb" 2>&1
+)"
+network_status=$?
+set -e
+[ "$network_status" -ne 0 ] || fail "fake git should stop publication after the host-key lookup: ${network_output}"
+network_curl_args="$(cat "$network_curl_log")"
+assert_contains "$network_curl_args" "--proto =https" "GitHub meta HTTPS protocol"
+assert_contains "$network_curl_args" "--proto-redir =https" "GitHub meta redirect protocol"
+assert_contains "$network_curl_args" "--tlsv1.2" "GitHub meta TLS floor"
+assert_contains "$network_curl_args" "--connect-timeout 5" "GitHub meta connect timeout"
+assert_contains "$network_curl_args" "--max-time 15" "GitHub meta total timeout"
+assert_contains "$network_curl_args" "--retry 1" "GitHub meta retry bound"
+pass "GitHub SSH host-key lookup is HTTPS-only and time-bounded"
+
 # Seed a bare "tap" repository with an empty main branch.
 tap_remote="${test_root}/tap.git"
 seed_dir="${test_root}/seed"

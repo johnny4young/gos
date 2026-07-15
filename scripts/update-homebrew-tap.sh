@@ -186,7 +186,8 @@ host_key_policy="accept-new"
 if [ -n "${GOS_TAP_REMOTE:-}" ]; then
   : # local test remote: SSH is never used, skip the host-key fetch
 elif command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
-  && curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 https://api.github.com/meta 2>/dev/null \
+  && curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    --connect-timeout 5 --max-time 15 --retry 1 https://api.github.com/meta 2>/dev/null \
   | jq -r '.ssh_keys[] | "github.com \(.)"' >"$known_hosts_file" 2>/dev/null \
   && [ -s "$known_hosts_file" ]; then
   host_key_policy="yes"
