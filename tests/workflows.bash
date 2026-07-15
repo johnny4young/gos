@@ -375,6 +375,7 @@ assert(contributing.include?("scripts/sync-command-surfaces.bash --check"), "CON
 
 assert(contributing.include?("bash tests/completions.bash"), "CONTRIBUTING validation must include completion tests")
 assert(contributing.include?("bash tests/workflows.bash"), "CONTRIBUTING validation must include workflow invariants")
+assert(contributing.include?("shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash"), "CONTRIBUTING validation must cover all script globs")
 
 [
   "workflow_dispatch",

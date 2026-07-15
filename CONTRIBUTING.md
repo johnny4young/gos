@@ -99,7 +99,7 @@ bash tests/workflows.bash
 If ShellCheck is installed:
 
 ```bash
-shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash tests/*.bash
+shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash
 ```
 
 ## Pull Request Guidelines
