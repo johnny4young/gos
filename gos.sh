@@ -321,14 +321,14 @@ _gos_download_progress_enabled() {
 # Download a URL to a file. Supports curl and wget.
 # Security: HTTPS integrity relies on the system CA certificate store.
 # For hardened environments, set SSL_CERT_FILE or --cacert as needed.
-# --proto '=https' / --https-only disallow any HTTP fallback even via redirect.
+# --proto-redir '=https' / --https-only disallow HTTP fallback via redirects.
 _gos_download() {
   local url="$1" output="$2"
   if command -v curl &>/dev/null; then
     if _gos_download_progress_enabled; then
-      curl --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --progress-bar -fSL -o "$output" "$url"
+      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --progress-bar -fSL -o "$output" "$url"
     else
-      curl --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 2 -fsSL -o "$output" "$url"
+      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 -fsSL -o "$output" "$url"
     fi
   elif command -v wget &>/dev/null; then
     if _gos_download_progress_enabled; then
@@ -346,7 +346,7 @@ _gos_download() {
 _gos_download_stdout() {
   local url="$1"
   if command -v curl &>/dev/null; then
-    curl --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 2 -fsSL "$url"
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 -fsSL "$url"
   elif command -v wget &>/dev/null; then
     wget --https-only --timeout=15 --tries=3 -qO- "$url"
   else

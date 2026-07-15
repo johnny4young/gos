@@ -958,6 +958,9 @@ case_dir="${test_root}/check"
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check
 [ "$status" -eq 0 ] || fail "check up-to-date failed: ${output}"
 assert_contains "$output" "Already up to date." "check up to date"
+feed_lookup_args="$(grep 'https://go.dev/dl/?mode=json' "${case_dir}/curl-args.log" | tail -n 1 || true)"
+assert_contains "$feed_lookup_args" "--proto =https" "Go feed HTTPS protocol"
+assert_contains "$feed_lookup_args" "--proto-redir =https" "Go feed redirect protocol"
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
 [ "$status" -eq 0 ] || fail "check outdated failed: ${output}"
 assert_contains "$output" "Update available. Install it with: gos latest" "check outdated"
@@ -1089,6 +1092,9 @@ grep -q 'https://go.dev/dl/?mode=json' "${case_dir}/urls.log" \
 if grep -q '^https://go.dev/dl/go1' "${case_dir}/urls.log"; then
   fail "mirror install must not download archives from go.dev"
 fi
+archive_download_args="$(grep 'https://mirror.test.invalid/dl/go1.21.6.darwin-arm64.tar.gz' "${case_dir}/curl-args.log" | tail -n 1 || true)"
+assert_contains "$archive_download_args" "--proto =https" "archive download HTTPS protocol"
+assert_contains "$archive_download_args" "--proto-redir =https" "archive download redirect protocol"
 pass "mirror installs download archives from the mirror with go.dev checksums"
 
 case_dir="${test_root}/mirror-trailing-slash"
