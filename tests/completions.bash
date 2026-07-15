@@ -15,6 +15,20 @@ trap cleanup EXIT
 
 bash "$sync_script" --check
 
+set +e
+output="$(bash "$sync_script" --bogus 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 2 ] || fail "sync-command-surfaces should reject unknown options with usage status. Output: ${output}"
+assert_contains "$output" "Usage: sync-command-surfaces.bash [--check|--write]" "sync-command-surfaces unknown option usage"
+
+set +e
+output="$(bash "$sync_script" --check extra 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 2 ] || fail "sync-command-surfaces should reject extra arguments with usage status. Output: ${output}"
+assert_contains "$output" "Usage: sync-command-surfaces.bash [--check|--write]" "sync-command-surfaces extra argument usage"
+
 for shell_name in bash zsh fish; do
   output_file="${test_root}/gos.${shell_name}"
   bash "$script" completions "$shell_name" >"$output_file"
