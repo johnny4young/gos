@@ -127,6 +127,9 @@ check_only=0
 if [[ "${1:-}" == "--check" ]]; then
   check_only=1
   shift
+elif [[ "${1:-}" == --* ]]; then
+  usage
+  exit 2
 fi
 
 version="${1:-}"
