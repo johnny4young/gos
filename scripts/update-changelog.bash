@@ -132,6 +132,11 @@ elif [[ "${1:-}" == --* ]]; then
   exit 2
 fi
 
+if [[ "${1:-}" == --* ]]; then
+  usage
+  exit 2
+fi
+
 version="${1:-}"
 if [[ -z "$version" || $# -ne 1 ]]; then
   usage

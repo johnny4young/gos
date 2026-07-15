@@ -295,6 +295,30 @@ test_unknown_option_fails_with_usage_without_mutation() {
   printf 'ok - unknown update-changelog option fails with usage without mutation\n'
 }
 
+test_check_mode_rejects_option_as_version_without_mutation() {
+  local tmp_dir changelog before output status
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' RETURN
+  changelog="$tmp_dir/CHANGELOG.md"
+  write_fixture "$changelog"
+  before="$(<"$changelog")"
+
+  set +e
+  output="$(GOS_CHANGELOG_FILE="$changelog" GOS_RELEASE_DATE="2026-05-07" GOS_PREVIOUS_TAG="v1.0.0" bash "$script" --check --bogus 2>&1)"
+  status=$?
+  set -e
+
+  assert_status 2 "$status" "update-changelog option after --check" "$output"
+  assert_contains "$output" "Usage: update-changelog.bash [--check] <version>" "update-changelog option after --check usage"
+
+  if [[ "$(<"$changelog")" != "$before" ]]; then
+    printf 'not ok - option after --check should not mutate CHANGELOG.md\n' >&2
+    exit 1
+  fi
+
+  printf 'ok - update-changelog rejects an option as the check-mode version\n'
+}
+
 test_existing_release_section_fails() {
   local tmp_dir changelog
   tmp_dir="$(mktemp -d)"
@@ -361,5 +385,6 @@ test_empty_unreleased_generates_notes_from_git
 test_check_mode_validates_without_mutation
 test_check_mode_empty_unreleased_fails_without_mutation
 test_unknown_option_fails_with_usage_without_mutation
+test_check_mode_rejects_option_as_version_without_mutation
 test_existing_release_section_fails
 test_heading_only_unreleased_fails_without_mutation

@@ -29,6 +29,16 @@ set -e
 [ "$missing_value_status" -eq 2 ] || fail "missing option values should fail with usage status"
 assert_contains "$missing_value_output" "--kind requires a value" "missing option value"
 
+option_value_output=""
+option_value_status=0
+set +e
+option_value_output=$(bash "$script" --kind --name gos 2>&1)
+option_value_status=$?
+set -e
+[ "$option_value_status" -eq 2 ] || fail "option-looking values should fail with usage status"
+assert_contains "$option_value_output" "--kind requires a value" "option-looking value"
+pass "options cannot consume the following option as their value"
+
 # Seed a bare "tap" repository with an empty main branch.
 tap_remote="${test_root}/tap.git"
 seed_dir="${test_root}/seed"
@@ -93,6 +103,36 @@ run_tap --kind formula --name gos --version 9.9.10 --sha256 "not-a-sha" \
   --url "$url" --template packaging/Formula/gos.rb
 [ "$status" -ne 0 ] || fail "malformed sha should be rejected"
 pass "malformed checksums are refused before any push"
+
+GOS_TEST_TAP_KEY="" run_tap --kind formula --name gos --version bad/version --sha256 "$good_sha" \
+  --url "$url" --template packaging/Formula/gos.rb
+[ "$status" -eq 1 ] || fail "invalid versions should fail before the missing-key skip: ${output}"
+assert_contains "$output" "--version must be semver" "version validation"
+pass "invalid release versions are refused before publication"
+
+run_tap --kind formula --name ../gos --version 9.9.10 --sha256 "$good_sha" \
+  --url "$url" --template packaging/Formula/gos.rb
+[ "$status" -eq 1 ] || fail "unsafe Homebrew names should fail: ${output}"
+assert_contains "$output" "--name must be a safe Homebrew token" "name validation"
+pass "unsafe Homebrew tokens cannot escape the tap output path"
+
+run_tap --kind formula --name gos --version 9.9.10 --sha256 "$good_sha" \
+  --url "http://example.invalid/gos.tar.gz" --template packaging/Formula/gos.rb
+[ "$status" -eq 1 ] || fail "non-HTTPS source URLs should fail: ${output}"
+assert_contains "$output" "--url must use https" "source URL validation"
+pass "published Homebrew source URLs must use HTTPS"
+
+run_tap --kind formula --name gos --version 9.9.10 --sha256 "$good_sha" \
+  --url "$url" --template packaging/Formula/gos.rb --tap-repo invalid
+[ "$status" -eq 1 ] || fail "invalid tap repositories should fail: ${output}"
+assert_contains "$output" "--tap-repo must use the owner/repository form" "tap repository validation"
+pass "tap targets must use an explicit owner/repository pair"
+
+run_tap --kind formula --name gos --version 9.9.10 --sha256 "$good_sha" \
+  --url "$url" --template packaging/Formula/gos.rb --deploy-key-file "${test_root}/missing-key"
+[ "$status" -eq 2 ] || fail "missing deploy key files should fail with usage status: ${output}"
+assert_contains "$output" "deploy key file not found" "deploy key file validation"
+pass "missing deploy key files fail before cloning the tap"
 
 GOS_TEST_TAP_KEY="" run_tap --kind formula --name gos --version 9.9.10 \
   --sha256 "$good_sha" --url "$url" --template packaging/Formula/gos.rb

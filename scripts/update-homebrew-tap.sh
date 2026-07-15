@@ -39,7 +39,7 @@ key_file=""
 
 take_value() {
   local opt="$1" value="${2:-}"
-  if [ -z "$value" ]; then
+  if [ -z "$value" ] || [ "${value#--}" != "$value" ]; then
     echo "::error::${opt} requires a value" >&2
     exit 2
   fi
@@ -96,6 +96,16 @@ done
   echo "::error::--version is required" >&2
   exit 2
 }
+if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+  echo "::error::--version must be semver without a v prefix, got '$version'" >&2
+  exit 1
+fi
+case "$name" in
+  .* | *..* | *[!A-Za-z0-9._@+-]*)
+    echo "::error::--name must be a safe Homebrew token, got '$name'" >&2
+    exit 1
+    ;;
+esac
 [ -n "$template" ] || {
   echo "::error::--template is required" >&2
   exit 2
@@ -120,6 +130,18 @@ case "$kind" in
 esac
 if [ "$kind" = "formula" ] && [ -z "$url" ]; then
   echo "::error::--url is required for a formula (the versioned source tarball)" >&2
+  exit 2
+fi
+if [ -n "$url" ] && [[ "$url" != https://* ]]; then
+  echo "::error::--url must use https, got '$url'" >&2
+  exit 1
+fi
+if [[ ! "$tap_repo" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+  echo "::error::--tap-repo must use the owner/repository form, got '$tap_repo'" >&2
+  exit 1
+fi
+if [ -n "$key_file" ] && [ ! -f "$key_file" ]; then
+  echo "::error::deploy key file not found: $key_file" >&2
   exit 2
 fi
 
