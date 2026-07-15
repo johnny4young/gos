@@ -47,6 +47,7 @@ commands, and changelog links aligned.
 8. Run the local validation set:
 
 ```bash
+scripts/validate-local.bash
 bash tests/checksum.bash
 bash tests/completions.bash
 bash tests/install-transaction.bash

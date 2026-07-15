@@ -464,6 +464,7 @@ end
 ].each do |fragment|
   assert(releasing.include?(fragment), "RELEASING.md must mention #{fragment}")
 end
+assert(releasing.include?("```bash\nscripts/validate-local.bash"), "RELEASING.md validation must start with local validation orchestrator")
 assert(releasing.include?("fallback git commit subjects"), "RELEASING.md must explain fallback changelog generation")
 assert(releasing.include?("tests/changelog.bash` fails a post-tag branch"), "RELEASING.md must explain the curated Unreleased guard")
 assert(!releasing.include?("Curated bullets under `Unreleased` are optional"), "RELEASING.md must not describe curated release notes as optional")
