@@ -14,6 +14,10 @@
 
 - [ ] `bash -n gos.sh install.sh`
 - [ ] `shfmt -d -i 2 -ci -bn .`
+- [ ] `shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash`
+- [ ] `scripts/sync-command-surfaces.bash --check`
+- [ ] `bash tests/completions.bash`
+- [ ] `bash tests/workflows.bash`
 - [ ] `bash tests/install-transaction.bash`
 - [ ] `bash tests/checksum.bash`
 - [ ] `bash tests/features.bash`

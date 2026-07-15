@@ -51,6 +51,7 @@ canary = workflow(".github/workflows/canary.yml")
 readme = file_text("README.md")
 releasing = file_text("RELEASING.md")
 contributing = file_text("CONTRIBUTING.md")
+pr_template = file_text(".github/PULL_REQUEST_TEMPLATE.md")
 security = file_text("SECURITY.md")
 bash_completion = file_text("completions/gos.bash")
 zsh_completion = file_text("completions/gos.zsh")
@@ -64,6 +65,7 @@ command_surfaces_sync_output = `bash scripts/sync-command-surfaces.bash --check 
 assert($?.success?, "Command surfaces must match gos command manifest: #{command_surfaces_sync_output}")
 assert(!releasing.empty?, "repository must include RELEASING.md")
 assert(!contributing.empty?, "repository must include CONTRIBUTING.md")
+assert(!pr_template.empty?, "repository must include PULL_REQUEST_TEMPLATE.md")
 assert(!security.empty?, "repository must include SECURITY.md")
 
 release_on = workflow_on(release)
@@ -376,6 +378,15 @@ assert(contributing.include?("scripts/sync-command-surfaces.bash --check"), "CON
 assert(contributing.include?("bash tests/completions.bash"), "CONTRIBUTING validation must include completion tests")
 assert(contributing.include?("bash tests/workflows.bash"), "CONTRIBUTING validation must include workflow invariants")
 assert(contributing.include?("shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash"), "CONTRIBUTING validation must cover all script globs")
+
+[
+  "shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash",
+  "scripts/sync-command-surfaces.bash --check",
+  "bash tests/completions.bash",
+  "bash tests/workflows.bash"
+].each do |command|
+  assert(pr_template.include?(command), "PR template validation must include #{command}")
+end
 
 [
   "workflow_dispatch",
