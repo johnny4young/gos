@@ -86,6 +86,8 @@ bash tests/detection.bash
 Before opening a pull request, run the broader local suite when possible:
 
 ```bash
+scripts/sync-command-surfaces.bash --check
+bash tests/completions.bash
 bash tests/install-sh.bash
 bash tests/install-ps1.bash
 bash tests/packaging.bash

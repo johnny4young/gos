@@ -373,6 +373,9 @@ assert(contributing.include?("_gos_command_manifest"), "CONTRIBUTING must point 
 assert(contributing.include?("scripts/sync-command-surfaces.bash --write"), "CONTRIBUTING must document command surface sync writes")
 assert(contributing.include?("scripts/sync-command-surfaces.bash --check"), "CONTRIBUTING must document command surface sync checks")
 
+assert(contributing.include?("bash tests/completions.bash"), "CONTRIBUTING validation must include completion tests")
+assert(contributing.include?("bash tests/workflows.bash"), "CONTRIBUTING validation must include workflow invariants")
+
 [
   "workflow_dispatch",
   "TAP_DEPLOY_KEY",
