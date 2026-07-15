@@ -88,6 +88,14 @@ set -e
 assert_status 1 "$status" "update-packaging invalid sha" "$output"
 assert_contains "$output" "Error: invalid SHA256 'not-a-sha'." "update-packaging invalid sha output"
 
+zero_sha="0000000000000000000000000000000000000000000000000000000000000000"
+set +e
+output="$(cd "$invalid_repo" && bash scripts/update-packaging.bash "9.8.7" "$zero_sha" 2>&1)"
+status=$?
+set -e
+assert_status 1 "$status" "update-packaging placeholder sha" "$output"
+assert_contains "$output" "Error: placeholder SHA256 is not allowed." "update-packaging placeholder sha output"
+
 after_invalid_hash="$(metadata_hash "$invalid_repo" after-invalid)"
 [ "$before_invalid_hash" = "$after_invalid_hash" ] \
   || fail "invalid update-packaging inputs must not mutate package metadata"

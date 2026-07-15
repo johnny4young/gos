@@ -19,6 +19,11 @@ if [[ ! "$windows_sha" =~ ^[0-9a-fA-F]{64}$ ]]; then
   exit 1
 fi
 
+if [ "$windows_sha" = "0000000000000000000000000000000000000000000000000000000000000000" ]; then
+  echo "Error: placeholder SHA256 is not allowed." >&2
+  exit 1
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
