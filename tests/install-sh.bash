@@ -134,8 +134,15 @@ assert_not_installed() {
 }
 
 run_installer() {
-  local name="$1" install_kind="$2" strict="${3:-default}"
+  local name="$1" install_kind="$2" strict="default"
   local require_checksum=""
+  shift 2
+  case "${1:-}" in
+    default | strict)
+      strict="$1"
+      shift
+      ;;
+  esac
   if [ "$strict" = "strict" ]; then
     require_checksum="1"
   fi
@@ -169,6 +176,12 @@ run_installer() {
       mkdir_fail_path="$bin_dir"
       mkdir_mode="fail"
       ;;
+    relative)
+      bin_dir="relative/bin"
+      ;;
+    dot-component)
+      bin_dir="${case_dir}/nested/../bin"
+      ;;
     *)
       fail "unknown install kind: ${install_kind}"
       ;;
@@ -176,6 +189,7 @@ run_installer() {
 
   set +e
   output="$(
+    cd "$case_dir"
     PATH="${fake_bin}:${original_path}" \
       GOS_BIN_DIR="$bin_dir" \
       GOS_TEST_URL_LOG="$url_log" \
@@ -184,12 +198,34 @@ run_installer() {
       GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
       GOS_TEST_MKDIR_MODE="$mkdir_mode" \
       GOS_REQUIRE_CHECKSUM="$require_checksum" \
-      bash "${script_under_test:-$script}" 2>&1
+      bash "${script_under_test:-$script}" "$@" 2>&1
   )"
   status=$?
   set -e
 }
 script_under_test=""
+
+run_installer "unexpected_argument" "existing" default unexpected
+assert_status 2 "$status" "unexpected installer argument" "$output"
+assert_contains "$output" "unexpected argument: unexpected" "unexpected installer argument"
+assert_contains "$output" "Usage: install.sh" "unexpected installer argument usage"
+assert_not_installed "$bin_dir" "unexpected installer argument"
+[ ! -s "$url_log" ] || fail "unexpected installer argument should fail before downloading"
+pass "installer rejects positional arguments before download"
+
+run_installer "relative_bin" "relative"
+assert_nonzero_status "$status" "relative GOS_BIN_DIR" "$output"
+assert_contains "$output" "must be an absolute path" "relative GOS_BIN_DIR"
+assert_not_installed "${case_dir}/${bin_dir}" "relative GOS_BIN_DIR"
+[ ! -s "$url_log" ] || fail "relative GOS_BIN_DIR should fail before downloading"
+pass "installer rejects relative GOS_BIN_DIR before download"
+
+run_installer "dot_component_bin" "dot-component"
+assert_nonzero_status "$status" "dot-component GOS_BIN_DIR" "$output"
+assert_contains "$output" "must not contain . or .. path components" "dot-component GOS_BIN_DIR"
+assert_not_installed "$bin_dir" "dot-component GOS_BIN_DIR"
+[ ! -s "$url_log" ] || fail "dot-component GOS_BIN_DIR should fail before downloading"
+pass "installer rejects ambiguous GOS_BIN_DIR components before download"
 
 run_installer "missing_custom_bin" "missing"
 assert_status 0 "$status" "missing custom bin" "$output"

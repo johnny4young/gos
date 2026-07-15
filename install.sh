@@ -6,7 +6,7 @@ set -euo pipefail
 #   git clone https://github.com/johnny4young/gos.git
 #   cp gos/gos.sh /usr/local/bin/gos && chmod +x /usr/local/bin/gos
 
-GOS_BIN_DIR="${GOS_BIN_DIR:-/usr/local/bin}"
+GOS_BIN_DIR="${GOS_BIN_DIR-/usr/local/bin}"
 
 # These two values are patched by the release workflow when this script is
 # shipped as a release asset. When unpatched (running from main), we fall back
@@ -19,6 +19,49 @@ if [ "$GOS_RELEASE_TAG" != "UPDATE_ON_RELEASE" ]; then
 else
   GOS_SCRIPT_URL="https://raw.githubusercontent.com/johnny4young/gos/main/gos.sh"
 fi
+
+_usage() {
+  echo "Usage: install.sh" >&2
+}
+
+_validate_inputs() {
+  if [ "$#" -gt 0 ]; then
+    echo "Error: unexpected argument: $1" >&2
+    _usage
+    return 2
+  fi
+
+  if [ -z "$GOS_BIN_DIR" ]; then
+    echo "Error: GOS_BIN_DIR is empty." >&2
+    return 1
+  fi
+  case "$GOS_BIN_DIR" in
+    /*) ;;
+    *)
+      echo "Error: GOS_BIN_DIR='${GOS_BIN_DIR}' must be an absolute path." >&2
+      return 1
+      ;;
+  esac
+  case "$GOS_BIN_DIR" in
+    *$'\n'* | *$'\r'* | *$'\t'*)
+      echo "Error: GOS_BIN_DIR must not contain control characters." >&2
+      return 1
+      ;;
+  esac
+  case "/${GOS_BIN_DIR}/" in
+    *"/../"* | *"/./"*)
+      echo "Error: GOS_BIN_DIR='${GOS_BIN_DIR}' must not contain . or .. path components." >&2
+      return 1
+      ;;
+  esac
+  case "$GOS_BIN_DIR" in
+    *[!/]*) ;;
+    *)
+      echo "Error: GOS_BIN_DIR must not resolve to the filesystem root." >&2
+      return 1
+      ;;
+  esac
+}
 
 # Cross-platform SHA256 helper
 _sha256() {
@@ -134,6 +177,8 @@ _cleanup_tmp() {
 
 main() {
   local tmp_dir tmp_file
+
+  _validate_inputs "$@" || return "$?"
 
   # Use a unique temp directory to prevent symlink/TOCTOU attacks; the trap
   # cleans it on every exit path, including interrupts.
