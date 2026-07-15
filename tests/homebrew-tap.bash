@@ -87,6 +87,9 @@ set -e
 
 [ "$ssh_status" -ne 0 ] || fail "the fake SSH transport should make clone fail"
 [ ! -e "${ssh_test_dir}/GOS_TAP_INJECTED" ] || fail "deploy key paths must not execute shell syntax"
+failed_clone_path="$(printf '%s\n' "$ssh_output" | sed -n "s/^Cloning into '\(.*\)'\.\.\.$/\1/p" | head -1)"
+[ -n "$failed_clone_path" ] || fail "failed SSH clone output should expose its temporary path"
+[ ! -e "$failed_clone_path" ] || fail "failed SSH clones must not leave a temporary checkout"
 assert_file_contains "$ssh_log" "$hostile_key"
 assert_file_contains "$ssh_log" "IdentitiesOnly=yes"
 [ -f "$hostile_key" ] || fail "caller-provided deploy keys must be preserved"
@@ -107,10 +110,18 @@ run_tap() {
   set -e
 }
 
+assert_tap_clone_cleaned() {
+  local command_output="$1" clone_path
+  clone_path="$(printf '%s\n' "$command_output" | sed -n "s/^Cloning into '\(.*\)'\.\.\.$/\1/p" | head -1)"
+  [ -n "$clone_path" ] || fail "tap publish output should expose the temporary clone path"
+  [ ! -e "$clone_path" ] || fail "temporary tap clone should be removed: ${clone_path}"
+}
+
 run_tap --kind formula --name gos --version 9.9.9 --sha256 "$good_sha" \
   --url "$url" --template packaging/Formula/gos.rb
 [ "$status" -eq 0 ] || fail "publish failed: ${output}"
 assert_contains "$output" "Updated johnny4young/homebrew-tap" "publish output"
+assert_tap_clone_cleaned "$output"
 check_dir="${test_root}/check"
 git clone -q "$tap_remote" "$check_dir"
 formula="${check_dir}/Formula/gos.rb"
@@ -123,13 +134,14 @@ if head -1 "$formula" | grep -q '^#'; then
   fail "published formula kept the repo-only header comment"
 fi
 ruby -c "$formula" >/dev/null || fail "published formula is not valid Ruby"
-pass "publish regenerates the formula from the template and pushes it to the tap"
+pass "publish pushes the regenerated formula and removes its temporary clone"
 
 run_tap --kind formula --name gos --version 9.9.9 --sha256 "$good_sha" \
   --url "$url" --template packaging/Formula/gos.rb
 [ "$status" -eq 0 ] || fail "idempotent publish failed: ${output}"
 assert_contains "$output" "nothing to push" "idempotent publish"
-pass "republishing the same version is an idempotent no-op"
+assert_tap_clone_cleaned "$output"
+pass "idempotent publishes remove their temporary clone"
 
 query_url="https://github.com/johnny4young/gos/archive/refs/tags/v9.9.9.tar.gz?download=1&mirror=primary"
 run_tap --kind formula --name gos --version 9.9.9 --sha256 "$good_sha" \

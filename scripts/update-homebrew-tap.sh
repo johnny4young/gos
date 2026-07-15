@@ -171,6 +171,7 @@ cleanup() {
   if [ -n "$cleanup_key" ]; then rm -f "$key_file"; fi
   rm -f "${known_hosts_file:-}"
   rm -f "${ssh_wrapper:-}"
+  if [ -n "${tap_dir:-}" ]; then rm -rf "$tap_dir"; fi
 }
 trap cleanup EXIT
 
