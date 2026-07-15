@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: validate-local.bash [--help]
+Usage: validate-local.bash [--required-only|--help]
 
 Run the local gos validation bundle.
 
@@ -18,7 +18,11 @@ Required checks:
 Required external tools:
   - ruby (workflow YAML syntax)
 
-Optional tools are run when installed:
+Options:
+  --required-only  skip optional tools and run only required checks
+  --help, -h       show this help
+
+Optional tools are run when installed unless --required-only is set:
   - shellcheck
   - shfmt
   - zsh
@@ -27,6 +31,8 @@ Optional tools are run when installed:
 EOF
 }
 
+run_optional_checks=1
+
 if [ "$#" -gt 1 ]; then
   usage >&2
   exit 2
@@ -34,6 +40,9 @@ fi
 
 case "${1:-}" in
   "")
+    ;;
+  --required-only)
+    run_optional_checks=0
     ;;
   --help | -h)
     usage
@@ -138,18 +147,27 @@ run_optional() {
   local tool="$1"
   shift
 
+  if [ "$run_optional_checks" -eq 0 ]; then
+    printf '== skipped: %s optional checks disabled ==\n' "$tool"
+    return 0
+  fi
+
   if command -v "$tool" >/dev/null 2>&1; then
     run "$tool" "$@"
   else
     printf '== skipped: %s is not installed ==\n' "$tool"
   fi
 }
-
 run_optional_powershell() {
   local powershell_bin=""
   local powershell_file
   local powershell_parse_script
   local -a powershell_args=()
+
+  if [ "$run_optional_checks" -eq 0 ]; then
+    printf '== skipped: pwsh/powershell optional checks disabled ==\n'
+    return 0
+  fi
 
   if command -v pwsh >/dev/null 2>&1; then
     powershell_bin="pwsh"

@@ -93,7 +93,9 @@ The local validation script runs command-surface checks, workflow YAML parse
 checks, Bash syntax checks, the repository Bash test suite, `./gos.sh version`
 and `./gos.sh help` CLI smoke checks, `git diff --check`, and optional
 ShellCheck/shfmt/zsh/Fish/PowerShell checks when those tools are installed.
-Ruby is required for the workflow YAML parse checks.
+Ruby is required for the workflow YAML parse checks. Use
+`scripts/validate-local.bash --required-only` when you need only the required
+gates without optional local tooling.
 
 ## Pull Request Guidelines
 

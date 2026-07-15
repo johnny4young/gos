@@ -23,12 +23,14 @@ assert_validate_help_stdout() {
   local stderr_file="${test_root}/${label}.stderr"
 
   bash scripts/validate-local.bash "$@" >"$stdout_file" 2>"$stderr_file"
-  grep -Fq "Usage: validate-local.bash [--help]" "$stdout_file" \
+  grep -Fq "Usage: validate-local.bash [--required-only|--help]" "$stdout_file" \
     || fail_shell "validate-local ${label} must print usage to stdout"
   grep -Fq "workflow YAML syntax" "$stdout_file" \
     || fail_shell "validate-local ${label} must list workflow YAML checks"
   grep -Fq "Required external tools:" "$stdout_file" \
     || fail_shell "validate-local ${label} must list required external tools"
+  grep -Fq -- "--required-only" "$stdout_file" \
+    || fail_shell "validate-local ${label} must list required-only mode"
   grep -Fq "ruby (workflow YAML syntax)" "$stdout_file" \
     || fail_shell "validate-local ${label} must list Ruby as required"
   grep -Fq "CLI smoke checks" "$stdout_file" \
@@ -54,7 +56,7 @@ assert_validate_invalid_usage() {
     || fail_shell "validate-local ${label} must exit 2"
   [ ! -s "$stdout_file" ] \
     || fail_shell "validate-local ${label} must not print stdout"
-  grep -Fq "Usage: validate-local.bash [--help]" "$stderr_file" \
+  grep -Fq "Usage: validate-local.bash [--required-only|--help]" "$stderr_file" \
     || fail_shell "validate-local ${label} must print usage to stderr"
 }
 
@@ -62,6 +64,7 @@ assert_validate_help_stdout "help-long" --help
 assert_validate_help_stdout "help-short" -h
 assert_validate_invalid_usage "invalid-option" --bogus
 assert_validate_invalid_usage "extra-argument" --help extra
+assert_validate_invalid_usage "required-only-extra-argument" --required-only extra
 
 # -EUTF-8 keeps file parsing locale-independent (repo files contain UTF-8).
 ruby -EUTF-8 <<'RUBY'
@@ -440,6 +443,7 @@ assert(contributing.include?("scripts/sync-command-surfaces.bash --check"), "CON
 assert(contributing.include?("scripts/validate-local.bash"), "CONTRIBUTING validation must use the local validation orchestrator")
 assert(contributing.include?("workflow YAML parse"), "CONTRIBUTING must document workflow YAML validation")
 assert(contributing.include?("Ruby is required for the workflow YAML parse checks"), "CONTRIBUTING must document required Ruby dependency")
+assert(contributing.include?("scripts/validate-local.bash --required-only"), "CONTRIBUTING must document required-only validation mode")
 assert(contributing.include?("`./gos.sh version`") && contributing.include?("`./gos.sh help`") && contributing.include?("CLI smoke checks"), "CONTRIBUTING must document local CLI smoke checks")
 assert(contributing.include?("optional") && contributing.include?("ShellCheck/shfmt/zsh/Fish/PowerShell checks"), "CONTRIBUTING must explain optional local validation tools")
 
@@ -452,6 +456,8 @@ assert(contributing.include?("optional") && contributing.include?("ShellCheck/sh
   "run_quiet ./gos.sh help",
   "require_tool ruby",
   "missing required tool: %s (%s)",
+  "--required-only",
+  "optional checks disabled",
   "YAML.load_file(\".github/workflows/ci.yml\")",
   "YAML.load_file(\".github/workflows/release.yml\")",
   "YAML.load_file(\".github/workflows/canary.yml\")"
