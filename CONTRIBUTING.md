@@ -91,7 +91,7 @@ scripts/validate-local.bash
 
 The local validation script runs command-surface checks, Bash syntax checks, the
 repository Bash test suite, `git diff --check`, and optional
-ShellCheck/shfmt/zsh/Fish checks when those tools are installed.
+ShellCheck/shfmt/zsh/Fish/PowerShell checks when those tools are installed.
 
 ## Pull Request Guidelines
 

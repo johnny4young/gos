@@ -18,6 +18,7 @@ Optional tools are run when installed:
   - shfmt
   - zsh
   - fish
+  - pwsh or powershell
 EOF
 }
 
@@ -96,6 +97,12 @@ shellcheck_files=(
   tests/*.bash
 )
 
+powershell_files=(
+  install.ps1
+  packaging/windows/uninstall.ps1
+  tests/install-ps1.ps1
+)
+
 print_command() {
   printf '+'
   printf ' %q' "$@"
@@ -118,6 +125,50 @@ run_optional() {
   fi
 }
 
+run_optional_powershell() {
+  local powershell_bin=""
+  local powershell_file
+  local powershell_parse_script
+  local -a powershell_args=()
+
+  if command -v pwsh >/dev/null 2>&1; then
+    powershell_bin="pwsh"
+    powershell_args=("$powershell_bin" -NoProfile)
+  elif command -v powershell >/dev/null 2>&1; then
+    powershell_bin="powershell"
+    powershell_args=("$powershell_bin" -NoProfile -ExecutionPolicy Bypass)
+  else
+    printf '== skipped: pwsh/powershell is not installed ==\n'
+    return 0
+  fi
+
+  for powershell_file in "${powershell_files[@]}"; do
+    [ -f "$powershell_file" ] || {
+      printf 'missing PowerShell validation file: %s\n' "$powershell_file" >&2
+      return 1
+    }
+  done
+
+  # PowerShell variables must remain literal until the PowerShell process runs.
+  # shellcheck disable=SC2016
+  powershell_parse_script='
+$ErrorActionPreference = "Stop"
+$files = @("install.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1")
+foreach ($file in $files) {
+  $errors = $null
+  $tokens = $null
+  [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+  if ($errors.Count) {
+    $errors | Format-List
+    exit 1
+  }
+}
+'
+
+  run "${powershell_args[@]}" -Command "$powershell_parse_script"
+  run "${powershell_args[@]}" -File tests/install-ps1.ps1
+}
+
 run scripts/sync-command-surfaces.bash --check
 run_optional shfmt -d -i 2 -ci -bn .
 run_optional shellcheck "${shellcheck_files[@]}"
@@ -129,6 +180,7 @@ done
 
 run_optional zsh -n completions/gos.zsh
 run_optional fish --no-config --no-execute completions/gos.fish
+run_optional_powershell
 run ./gos.sh version
 run ./gos.sh help >/dev/null
 run git diff --check

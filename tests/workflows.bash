@@ -85,6 +85,7 @@ readme = file_text("README.md")
 releasing = file_text("RELEASING.md")
 contributing = file_text("CONTRIBUTING.md")
 pr_template = file_text(".github/PULL_REQUEST_TEMPLATE.md")
+validate_local = file_text("scripts/validate-local.bash")
 security = file_text("SECURITY.md")
 bash_completion = file_text("completions/gos.bash")
 zsh_completion = file_text("completions/gos.zsh")
@@ -99,6 +100,7 @@ assert($?.success?, "Command surfaces must match gos command manifest: #{command
 assert(!releasing.empty?, "repository must include RELEASING.md")
 assert(!contributing.empty?, "repository must include CONTRIBUTING.md")
 assert(!pr_template.empty?, "repository must include PULL_REQUEST_TEMPLATE.md")
+assert(!validate_local.empty?, "repository must include scripts/validate-local.bash")
 assert(!security.empty?, "repository must include SECURITY.md")
 
 release_on = workflow_on(release)
@@ -410,7 +412,17 @@ assert(contributing.include?("scripts/sync-command-surfaces.bash --write"), "CON
 assert(contributing.include?("scripts/sync-command-surfaces.bash --check"), "CONTRIBUTING must document command surface sync checks")
 
 assert(contributing.include?("scripts/validate-local.bash"), "CONTRIBUTING validation must use the local validation orchestrator")
-assert(contributing.include?("optional") && contributing.include?("ShellCheck/shfmt/zsh/Fish checks"), "CONTRIBUTING must explain optional local validation tools")
+assert(contributing.include?("optional") && contributing.include?("ShellCheck/shfmt/zsh/Fish/PowerShell checks"), "CONTRIBUTING must explain optional local validation tools")
+
+[
+  "pwsh",
+  "powershell",
+  "install.ps1",
+  "packaging/windows/uninstall.ps1",
+  "tests/install-ps1.ps1"
+].each do |fragment|
+  assert(validate_local.include?(fragment), "validate-local must include #{fragment}")
+end
 
 [
   "scripts/validate-local.bash",
