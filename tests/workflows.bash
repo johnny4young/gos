@@ -25,6 +25,12 @@ assert_validate_help_stdout() {
   bash scripts/validate-local.bash "$@" >"$stdout_file" 2>"$stderr_file"
   grep -Fq "Usage: validate-local.bash [--help]" "$stdout_file" \
     || fail_shell "validate-local ${label} must print usage to stdout"
+  grep -Fq "workflow YAML syntax" "$stdout_file" \
+    || fail_shell "validate-local ${label} must list workflow YAML checks"
+  grep -Fq "CLI smoke checks" "$stdout_file" \
+    || fail_shell "validate-local ${label} must list CLI smoke checks"
+  grep -Fq "git whitespace checks" "$stdout_file" \
+    || fail_shell "validate-local ${label} must list whitespace checks"
   [ ! -s "$stderr_file" ] \
     || fail_shell "validate-local ${label} must not print stderr"
 }

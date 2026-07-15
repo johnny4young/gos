@@ -12,6 +12,7 @@ Required checks:
   - workflow YAML syntax
   - Bash syntax for scripts/tests
   - repository Bash test suite
+  - CLI smoke checks
   - git whitespace checks
 
 Optional tools are run when installed:
