@@ -75,10 +75,10 @@ jobs:
         run: |
           bash scripts/sync-command-surfaces.bash --check
 
-      - name: PowerShell installer syntax
+      - name: PowerShell syntax
         if: runner.os == 'Windows'
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -Command '$files = @("install.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1"); foreach ($file in $files) { $errors = $null; $tokens = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { $errors | Format-List; exit 1 } }'
+          powershell -NoProfile -ExecutionPolicy Bypass -Command '$files = @("install.ps1", "packaging/chocolatey/tools/chocolateyInstall.ps1", "packaging/chocolatey/tools/chocolateyUninstall.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1"); foreach ($file in $files) { $errors = $null; $tokens = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { $errors | Format-List; exit 1 } }'
 
       - name: PowerShell installer functional test
         if: runner.os == 'Windows'

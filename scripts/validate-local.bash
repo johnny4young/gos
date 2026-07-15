@@ -113,6 +113,8 @@ shellcheck_files=(
 
 powershell_files=(
   install.ps1
+  packaging/chocolatey/tools/chocolateyInstall.ps1
+  packaging/chocolatey/tools/chocolateyUninstall.ps1
   packaging/windows/uninstall.ps1
   tests/install-ps1.ps1
 )
@@ -191,8 +193,7 @@ run_optional_powershell() {
   # shellcheck disable=SC2016
   powershell_parse_script='
 $ErrorActionPreference = "Stop"
-$files = @("install.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1")
-foreach ($file in $files) {
+foreach ($file in $args) {
   $errors = $null
   $tokens = $null
   [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
@@ -203,7 +204,7 @@ foreach ($file in $files) {
 }
 '
 
-  run "${powershell_args[@]}" -Command "$powershell_parse_script"
+  run "${powershell_args[@]}" -Command "$powershell_parse_script" "${powershell_files[@]}"
   run "${powershell_args[@]}" -File tests/install-ps1.ps1
 }
 

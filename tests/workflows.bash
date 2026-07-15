@@ -107,6 +107,13 @@ def file_text(path)
   File.file?(path) ? File.read(path) : ""
 end
 
+def script_array(script, name)
+  body = script[/^#{Regexp.escape(name)}=\(\n(.*?)^\)/m, 1]
+  fail!("scripts/validate-local.bash must define #{name}") unless body
+
+  body.lines.map { |line| line.sub(/#.*/, "").strip }.reject(&:empty?)
+end
+
 release = workflow(".github/workflows/release.yml")
 ci = workflow(".github/workflows/ci.yml")
 canary = workflow(".github/workflows/canary.yml")
@@ -131,6 +138,22 @@ assert(!contributing.empty?, "repository must include CONTRIBUTING.md")
 assert(!pr_template.empty?, "repository must include PULL_REQUEST_TEMPLATE.md")
 assert(!validate_local.empty?, "repository must include scripts/validate-local.bash")
 assert(!security.empty?, "repository must include SECURITY.md")
+tracked_files = `git ls-files`.lines.map(&:strip)
+assert($?.success?, "git ls-files must succeed for repository inventory checks")
+assert(!tracked_files.empty?, "repository inventory must not be empty")
+
+validate_syntax_files = script_array(validate_local, "syntax_files")
+validate_test_scripts = script_array(validate_local, "test_scripts")
+validate_powershell_files = script_array(validate_local, "powershell_files")
+
+tracked_shell_files = tracked_files.select { |path| path.end_with?(".bash", ".sh") }.sort
+assert(validate_syntax_files.sort == tracked_shell_files, "validate-local syntax_files must cover every tracked .bash/.sh file")
+
+tracked_test_scripts = tracked_files.select { |path| path.start_with?("tests/") && path.end_with?(".bash") && path != "tests/lib.bash" }.sort
+assert(validate_test_scripts.sort == tracked_test_scripts, "validate-local test_scripts must run every tracked Bash test except tests/lib.bash")
+
+tracked_powershell_files = tracked_files.select { |path| path.end_with?(".ps1") }.sort
+assert(validate_powershell_files.sort == tracked_powershell_files, "validate-local powershell_files must cover every tracked PowerShell script")
 
 release_on = workflow_on(release)
 assert(release_on.dig("workflow_dispatch", "inputs", "version"), "release workflow must keep workflow_dispatch version input")
@@ -349,7 +372,15 @@ assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surf
 ].each do |command|
   assert(smoke_runs.include?(command), "smoke job must run #{command}")
 end
-assert(smoke_runs.include?("packaging/windows/uninstall.ps1"), "smoke job must parse the PowerShell uninstaller")
+tracked_shell_files.each do |path|
+  assert(smoke_runs.include?(path), "smoke job Bash syntax must cover tracked shell file #{path}")
+end
+tracked_powershell_files.each do |path|
+  assert(smoke_runs.include?(path), "smoke job PowerShell syntax must cover tracked PowerShell file #{path}")
+end
+assert(smoke_runs.include?("packaging/chocolatey/tools/chocolateyInstall.ps1"), "smoke job must parse the Chocolatey PowerShell installer")
+assert(smoke_runs.include?("packaging/chocolatey/tools/chocolateyUninstall.ps1"), "smoke job must parse the Chocolatey PowerShell uninstaller")
+assert(smoke_runs.include?("packaging/windows/uninstall.ps1"), "smoke job must parse the Windows PowerShell uninstaller")
 assert(smoke_runs.include?("tests/install-ps1.ps1"), "smoke job must parse the PowerShell installer test")
 assert(smoke_runs.include?("powershell -NoProfile -ExecutionPolicy Bypass -File tests/install-ps1.ps1"), "smoke job must run the functional PowerShell installer test")
 
@@ -451,8 +482,12 @@ assert(contributing.include?("optional") && contributing.include?("ShellCheck/sh
   "pwsh",
   "powershell",
   "install.ps1",
+  "packaging/chocolatey/tools/chocolateyInstall.ps1",
+  "packaging/chocolatey/tools/chocolateyUninstall.ps1",
   "packaging/windows/uninstall.ps1",
   "tests/install-ps1.ps1",
+  "foreach ($file in $args)",
+  '"${powershell_files[@]}"',
   "run_quiet ./gos.sh help",
   "require_tool ruby",
   "missing required tool: %s (%s)",
