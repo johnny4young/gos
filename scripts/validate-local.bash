@@ -114,6 +114,11 @@ run() {
   "$@"
 }
 
+run_quiet() {
+  print_command "$@"
+  "$@" >/dev/null
+}
+
 run_optional() {
   local tool="$1"
   shift
@@ -182,7 +187,7 @@ run_optional zsh -n completions/gos.zsh
 run_optional fish --no-config --no-execute completions/gos.fish
 run_optional_powershell
 run ./gos.sh version
-run ./gos.sh help >/dev/null
+run_quiet ./gos.sh help
 run git diff --check
 
 printf 'ok - local validation passed\n'

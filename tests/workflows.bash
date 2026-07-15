@@ -419,7 +419,8 @@ assert(contributing.include?("optional") && contributing.include?("ShellCheck/sh
   "powershell",
   "install.ps1",
   "packaging/windows/uninstall.ps1",
-  "tests/install-ps1.ps1"
+  "tests/install-ps1.ps1",
+  "run_quiet ./gos.sh help"
 ].each do |fragment|
   assert(validate_local.include?(fragment), "validate-local must include #{fragment}")
 end
