@@ -16,26 +16,42 @@ fail_shell() {
   exit 1
 }
 
-validate_help_stdout="${test_root}/validate-help.stdout"
-validate_help_stderr="${test_root}/validate-help.stderr"
-bash scripts/validate-local.bash --help >"$validate_help_stdout" 2>"$validate_help_stderr"
-grep -Fq "Usage: validate-local.bash [--help]" "$validate_help_stdout" \
-  || fail_shell "validate-local --help must print usage to stdout"
-[ ! -s "$validate_help_stderr" ] \
-  || fail_shell "validate-local --help must not print stderr"
+assert_validate_help_stdout() {
+  local label="$1"
+  shift
+  local stdout_file="${test_root}/${label}.stdout"
+  local stderr_file="${test_root}/${label}.stderr"
 
-validate_invalid_stdout="${test_root}/validate-invalid.stdout"
-validate_invalid_stderr="${test_root}/validate-invalid.stderr"
-set +e
-bash scripts/validate-local.bash --bogus >"$validate_invalid_stdout" 2>"$validate_invalid_stderr"
-cmd_status=$?
-set -e
-[ "$cmd_status" -eq 2 ] \
-  || fail_shell "validate-local invalid usage must exit 2"
-[ ! -s "$validate_invalid_stdout" ] \
-  || fail_shell "validate-local invalid usage must not print stdout"
-grep -Fq "Usage: validate-local.bash [--help]" "$validate_invalid_stderr" \
-  || fail_shell "validate-local invalid usage must print usage to stderr"
+  bash scripts/validate-local.bash "$@" >"$stdout_file" 2>"$stderr_file"
+  grep -Fq "Usage: validate-local.bash [--help]" "$stdout_file" \
+    || fail_shell "validate-local ${label} must print usage to stdout"
+  [ ! -s "$stderr_file" ] \
+    || fail_shell "validate-local ${label} must not print stderr"
+}
+
+assert_validate_invalid_usage() {
+  local label="$1"
+  shift
+  local stdout_file="${test_root}/${label}.stdout"
+  local stderr_file="${test_root}/${label}.stderr"
+  local cmd_status
+
+  set +e
+  bash scripts/validate-local.bash "$@" >"$stdout_file" 2>"$stderr_file"
+  cmd_status=$?
+  set -e
+  [ "$cmd_status" -eq 2 ] \
+    || fail_shell "validate-local ${label} must exit 2"
+  [ ! -s "$stdout_file" ] \
+    || fail_shell "validate-local ${label} must not print stdout"
+  grep -Fq "Usage: validate-local.bash [--help]" "$stderr_file" \
+    || fail_shell "validate-local ${label} must print usage to stderr"
+}
+
+assert_validate_help_stdout "help-long" --help
+assert_validate_help_stdout "help-short" -h
+assert_validate_invalid_usage "invalid-option" --bogus
+assert_validate_invalid_usage "extra-argument" --help extra
 
 # -EUTF-8 keeps file parsing locale-independent (repo files contain UTF-8).
 ruby -EUTF-8 <<'RUBY'
