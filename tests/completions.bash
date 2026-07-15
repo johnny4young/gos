@@ -29,6 +29,31 @@ set -e
 [ "$status" -eq 2 ] || fail "sync-command-surfaces should reject extra arguments with usage status. Output: ${output}"
 assert_contains "$output" "Usage: sync-command-surfaces.bash [--check|--write]" "sync-command-surfaces extra argument usage"
 
+sync_helpers=(
+  scripts/sync-bash-command-completions.bash
+  scripts/sync-fish-command-completions.bash
+  scripts/sync-zsh-command-completions.bash
+  scripts/sync-readme-usage.bash
+  scripts/sync-embedded-completions.bash
+)
+for sync_helper in "${sync_helpers[@]}"; do
+  sync_helper_name="${sync_helper##*/}"
+
+  set +e
+  output="$(bash "${repo_root}/${sync_helper}" --bogus 2>&1)"
+  status=$?
+  set -e
+  [ "$status" -eq 2 ] || fail "${sync_helper_name} should reject unknown options with usage status. Output: ${output}"
+  assert_contains "$output" "Usage: ${sync_helper_name} [--check|--write]" "${sync_helper_name} unknown option usage"
+
+  set +e
+  output="$(bash "${repo_root}/${sync_helper}" --check extra 2>&1)"
+  status=$?
+  set -e
+  [ "$status" -eq 2 ] || fail "${sync_helper_name} should reject extra arguments with usage status. Output: ${output}"
+  assert_contains "$output" "Usage: ${sync_helper_name} [--check|--write]" "${sync_helper_name} extra argument usage"
+done
+
 write_fixture="${test_root}/write-fixture"
 mkdir -p "${write_fixture}/completions" "${write_fixture}/scripts"
 cp "${repo_root}/gos.sh" "${repo_root}/README.md" "${write_fixture}/"
