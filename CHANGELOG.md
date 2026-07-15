@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Clarify the release checklist around curated `Unreleased` notes, fallback changelog generation, and the current validation bundle.
 - Include and harden Chocolatey PowerShell scripts in local and CI syntax validation, with workflow invariants that keep tracked shell/PowerShell files covered by `scripts/validate-local.bash`.
 - Harden Windows package metadata helpers so they reject ambiguous usage, avoid partial Chocolatey/Winget rewrites, and refuse placeholder SHA256 checksums.
+- Harden release-note and Homebrew tap helpers with strict input validation, data-safe template rendering, and exact metadata-stanza checks before publication.
 
 ## [1.7.0] - 2026-07-14
 
