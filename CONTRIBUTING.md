@@ -86,21 +86,12 @@ bash tests/detection.bash
 Before opening a pull request, run the broader local suite when possible:
 
 ```bash
-scripts/sync-command-surfaces.bash --check
-bash tests/completions.bash
-bash tests/install-sh.bash
-bash tests/install-ps1.bash
-bash tests/packaging.bash
-bash tests/changelog.bash
-bash tests/windows-extract.bash
-bash tests/workflows.bash
+scripts/validate-local.bash
 ```
 
-If ShellCheck is installed:
-
-```bash
-shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash
-```
+The local validation script runs command-surface checks, Bash syntax checks, the
+repository Bash test suite, `git diff --check`, and optional
+ShellCheck/shfmt/zsh/Fish checks when those tools are installed.
 
 ## Pull Request Guidelines
 
