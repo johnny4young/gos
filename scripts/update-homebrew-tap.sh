@@ -170,6 +170,7 @@ fi
 cleanup() {
   if [ -n "$cleanup_key" ]; then rm -f "$key_file"; fi
   rm -f "${known_hosts_file:-}"
+  rm -f "${ssh_wrapper:-}"
 }
 trap cleanup EXIT
 
@@ -196,7 +197,25 @@ fi
 # GOS_TAP_REMOTE is a test hook: the suite points it at a local bare repo so the
 # publish flow can run without network or SSH.
 tap_remote="${GOS_TAP_REMOTE:-git@github.com:${tap_repo}.git}"
-export GIT_SSH_COMMAND="ssh -i ${key_file} -o IdentitiesOnly=yes -o UserKnownHostsFile=${known_hosts_file} -o StrictHostKeyChecking=${host_key_policy}"
+ssh_wrapper="$(mktemp)"
+cat >"$ssh_wrapper" <<'SH'
+#!/bin/sh
+set -eu
+
+exec ssh \
+  -i "$GOS_TAP_SSH_KEY_FILE" \
+  -o IdentitiesOnly=yes \
+  -o "UserKnownHostsFile=$GOS_TAP_SSH_KNOWN_HOSTS_FILE" \
+  -o "StrictHostKeyChecking=$GOS_TAP_SSH_HOST_KEY_POLICY" \
+  "$@"
+SH
+chmod 700 "$ssh_wrapper"
+export GOS_TAP_SSH_KEY_FILE="$key_file"
+export GOS_TAP_SSH_KNOWN_HOSTS_FILE="$known_hosts_file"
+export GOS_TAP_SSH_HOST_KEY_POLICY="$host_key_policy"
+export GIT_SSH="$ssh_wrapper"
+export GIT_SSH_VARIANT="ssh"
+unset GIT_SSH_COMMAND
 tap_dir="$(mktemp -d)"
 git clone --depth 1 "$tap_remote" "$tap_dir"
 

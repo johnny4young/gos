@@ -55,6 +55,44 @@ good_sha="1111111111111111111111111111111111111111111111111111111111111111"
 placeholder_sha="0000000000000000000000000000000000000000000000000000000000000000"
 url="https://github.com/johnny4young/gos/archive/refs/tags/v9.9.9.tar.gz"
 
+ssh_test_dir="${test_root}/ssh-transport"
+ssh_log="${ssh_test_dir}/ssh.log"
+mkdir -p "${ssh_test_dir}/bin"
+cat >"${ssh_test_dir}/bin/ssh" <<'SH'
+#!/bin/sh
+printf '%s\n' "$@" >"$GOS_TEST_SSH_LOG"
+exit 1
+SH
+chmod +x "${ssh_test_dir}/bin/ssh"
+hostile_key="${ssh_test_dir}/key\$(touch GOS_TAP_INJECTED)"
+: >"$hostile_key"
+
+set +e
+ssh_output="$({
+  cd "$ssh_test_dir" \
+    && PATH="${ssh_test_dir}/bin:${PATH}" \
+      GOS_TEST_SSH_LOG="$ssh_log" \
+      GOS_TAP_REMOTE="git@example.invalid:tap.git" \
+      bash "$script" \
+      --kind formula \
+      --name gos \
+      --version 9.9.9 \
+      --sha256 "$good_sha" \
+      --url "$url" \
+      --template "${repo_root}/packaging/Formula/gos.rb" \
+      --deploy-key-file "$hostile_key"
+} 2>&1)"
+ssh_status=$?
+set -e
+
+[ "$ssh_status" -ne 0 ] || fail "the fake SSH transport should make clone fail"
+[ ! -e "${ssh_test_dir}/GOS_TAP_INJECTED" ] || fail "deploy key paths must not execute shell syntax"
+assert_file_contains "$ssh_log" "$hostile_key"
+assert_file_contains "$ssh_log" "IdentitiesOnly=yes"
+[ -f "$hostile_key" ] || fail "caller-provided deploy keys must be preserved"
+assert_contains "$ssh_output" "Could not read from remote repository" "fake SSH clone failure"
+pass "deploy key paths are passed to SSH as opaque data"
+
 run_tap() {
   output=""
   status=0
