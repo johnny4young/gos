@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Security
 
+- Keep curl redirects HTTPS-only for Go feeds, archives, checksum manifests, and self-update assets, and refuse self-update releases with malformed or older versions before replacement.
 - Pass Homebrew tap deploy-key paths to SSH as opaque arguments so shell syntax in caller-provided filenames cannot execute.
 
 ## [1.7.0] - 2026-07-14
