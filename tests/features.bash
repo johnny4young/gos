@@ -902,6 +902,30 @@ if [ -s "${case_dir}/urls.log" ]; then
 fi
 pass "install dir guardrails refuse dangerous paths before any work"
 
+case_dir="${test_root}/validate-versions-dir"
+for bad_versions_dir in / "${case_dir}/go" "${case_dir}/go/versions"; do
+  GOS_TEST_INSTALL_DIR="${case_dir}/go" \
+    GOS_TEST_VERSIONS_DIR="$bad_versions_dir" \
+    run_gos "$case_dir" bash "$script" install 1.21.6
+  [ "$status" -ne 0 ] || fail "unsafe versions dir '${bad_versions_dir}' should fail"
+  if [ "$bad_versions_dir" = "/" ]; then
+    assert_contains "$output" "GOS_VERSIONS_DIR='/' is too shallow" "versions dir root"
+  else
+    assert_contains "$output" "must not equal or be inside GOS_INSTALL_DIR" "versions dir overlap"
+  fi
+  if [ -s "${case_dir}/urls.log" ]; then
+    fail "unsafe versions dir '${bad_versions_dir}' must fail before network access"
+  fi
+done
+GOS_TEST_INSTALL_DIR="${case_dir}/go" \
+  GOS_TEST_VERSIONS_DIR="${case_dir}/go/versions" \
+  run_gos "$case_dir" bash "$script" doctor --json
+[ "$status" -ne 0 ] || fail "doctor should fail for an overlapping versions dir"
+assert_json "$output" "doctor overlapping versions dir"
+assert_contains "$output" '"name":"versions-dir","status":"problem"' "doctor versions dir topology"
+assert_contains "$output" "must not equal or be inside GOS_INSTALL_DIR" "doctor versions dir message"
+pass "side-by-side versions dir rejects root and activation-slot overlap"
+
 # `gos env` output is meant to be run with `eval "$(gos env)"`, so a path
 # carrying shell metacharacters must be single-quoted, never interpolated raw,
 # or it becomes command injection.

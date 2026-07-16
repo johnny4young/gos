@@ -257,6 +257,21 @@ _gos_validate_versions_dir() {
       ;;
   esac
   _gos_reject_unsafe_path "GOS_VERSIONS_DIR" "$GOS_VERSIONS_DIR" || return 1
+
+  local depth
+  depth=$(printf '%s' "$GOS_VERSIONS_DIR" | tr -cd '/' | wc -c | tr -d ' ')
+  if [ "$depth" -lt 2 ]; then
+    _gos_error "GOS_VERSIONS_DIR='${GOS_VERSIONS_DIR}' is too shallow. Use a path like /home/user/.gos/versions."
+    return 1
+  fi
+
+  # Version trees must stay outside the activation slot. If they are equal to
+  # or nested below GOS_INSTALL_DIR, moving the current install aside during a
+  # switch also moves the staged version that is about to be activated.
+  if _gos_path_is_under "$GOS_VERSIONS_DIR" "$GOS_INSTALL_DIR"; then
+    _gos_error "GOS_VERSIONS_DIR='${GOS_VERSIONS_DIR}' must not equal or be inside GOS_INSTALL_DIR='${GOS_INSTALL_DIR}'."
+    return 1
+  fi
 }
 
 _gos_versions_mode() {
@@ -3529,23 +3544,27 @@ main() {
     latest)
       _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_versions_dir || return 1
       _gos_acquire_lock || return 1
       cmd_latest "$@"
       ;;
     install)
       _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_versions_dir || return 1
       _gos_acquire_lock || return 1
       cmd_install "$@"
       ;;
     run)
       _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_versions_dir || return 1
       cmd_run "$@"
       ;;
     use)
       _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_versions_dir || return 1
       _gos_acquire_lock || return 1
       cmd_use "$@"
       ;;
@@ -3563,6 +3582,7 @@ main() {
     self-update | selfupdate) cmd_self_update "$@" ;;
     uninstall)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_versions_dir || return 1
       _gos_acquire_lock || return 1
       cmd_uninstall "$@"
       ;;
