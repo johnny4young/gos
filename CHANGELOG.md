@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Security
 
+- Require exact self-update version and checksum metadata, and prepare the standalone installer executable before replacing the current binary.
 - Keep standalone installer and Homebrew host-key metadata downloads on HTTPS redirects, and bound the best-effort GitHub metadata lookup.
 - Keep curl redirects HTTPS-only for Go feeds, archives, checksum manifests, and self-update assets, and refuse self-update releases with malformed or older versions before replacement.
 - Pass Homebrew tap deploy-key paths to SSH as opaque arguments so shell syntax in caller-provided filenames cannot execute.
