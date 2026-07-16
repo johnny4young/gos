@@ -34,9 +34,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Sort Go releases without numeric size limits and ignore malformed version metadata in lists and completion candidates.
 - Resolve the latest stable Go and bare `X.Y` requests by semantic version rather than relying on downloads-feed order.
 - Handle arbitrarily large `GOS_FEED_TTL` values without shell integer errors, and treat zero-padded zero values as disabling the discovery cache.
+- Reject non-numeric `GOS_FEED_TTL` values before remote discovery and report them through `gos doctor`.
 
 ### Security
 
+- Reject root-level `GOS_VERSIONS_DIR` values and version roots that overlap the active `GOS_INSTALL_DIR` before lock, network, or activation work.
 - Reject unknown `GOS_REQUIRE_CHECKSUM` values before downloads in both install paths, and report the invalid policy through `gos doctor`.
 - Require exact self-update version and checksum metadata, and prepare the standalone installer executable before replacing the current binary.
 - Keep standalone installer and Homebrew host-key metadata downloads on HTTPS redirects, and bound the best-effort GitHub metadata lookup.

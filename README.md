@@ -401,11 +401,11 @@ For Zsh and Fish setup, see [Manual Shell Configuration](#manual-shell-configura
 |---|---|---|
 | `GOS_BIN_DIR` | `/usr/local/bin` | Where the `gos` command is installed by `install.sh`. Missing custom directories are created when possible. |
 | `GOS_CACHE_DIR` | `$XDG_CACHE_HOME/gos` or `$HOME/.cache/gos` | Where verified Go archives and discovery-only feed metadata are cached for reuse. Clear archives with `gos prune`. |
-| `GOS_FEED_TTL` | `600` | Seconds that discovery commands (`list`, `platforms`, `check`, shell completion version suggestions) may reuse cached Go feed metadata. Set to `0` to disable. Installs and checksum verification always fetch fresh metadata. |
+| `GOS_FEED_TTL` | `600` | Non-negative integer seconds that discovery commands (`list`, `platforms`, `check`, shell completion version suggestions) may reuse cached Go feed metadata. Set to `0` to disable. Invalid values fail before remote discovery and are reported by `gos doctor`; installs and checksum verification always fetch fresh metadata. |
 | `GOS_NO_COLOR` | unset | Set to `1` to disable interactive color/symbol styling. Standard `NO_COLOR` is also honored. |
 | `GOS_INSTALL_DIR` | `/usr/local/go` | Where Go gets installed. Override to install without `sudo`. Path basename must contain "go". |
 | `GOS_DOWNLOAD_MIRROR` | unset | HTTPS base URL to download Go archives from (e.g. `https://golang.google.cn/dl` behind restrictive networks). Checksums are still resolved from go.dev, and mirror downloads fail closed when they cannot be verified. |
-| `GOS_VERSIONS_DIR` | unset | Opt-in side-by-side layout (e.g. `$HOME/.gos/versions`). Each version installs to `$GOS_VERSIONS_DIR/go<version>` and `GOS_INSTALL_DIR` becomes a symlink to the active one, so switching is instant. Requires symlink support (macOS, Linux, WSL). |
+| `GOS_VERSIONS_DIR` | unset | Opt-in side-by-side layout (e.g. `$HOME/.gos/versions`). Each version installs to `$GOS_VERSIONS_DIR/go<version>` and `GOS_INSTALL_DIR` becomes a symlink to the active one, so switching is instant. The versions root must not be `/`, equal to, or inside `GOS_INSTALL_DIR`. Requires symlink support (macOS, Linux, WSL). |
 | `GOS_REQUIRE_CHECKSUM` | unset | Set to `1` to abort installs when checksum metadata or local SHA256 calculation is unavailable. Set to `feed` to additionally require the digest to come from the go.dev downloads feed (cross-origin), rejecting the same-origin `.sha256` fallback. Honored by both `gos` and `install.sh` (`install.sh` treats `feed` like `1`). |
 
 Example — install Go in your home directory (no sudo needed):
@@ -459,6 +459,10 @@ gos uninstall 1.24.0  # removes an inactive version
 (`$GOS_INSTALL_DIR/bin`) never changes. `gos use` gains the same instant
 switching for project versions that are already installed. Requires a
 filesystem with symlinks (macOS, Linux, WSL — not Git Bash).
+
+Keep `GOS_INSTALL_DIR` and `GOS_VERSIONS_DIR` as siblings, as in the example.
+gos rejects root-level version directories and any versions root equal to or
+inside the active install slot, because activation moves that slot atomically.
 
 ---
 
