@@ -10,7 +10,7 @@ _gos() {
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
     'run:Run a command with a side-by-side Go version without activating it globally'
-    'use:Install the Go version requested by .go-version, .tool-versions, or go.mod'
+    'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
     'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
     'rollback:Restore the previous Go installation, if available'
@@ -73,7 +73,7 @@ _gos() {
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)
-          _files -/
+          _arguments '--print[Only resolve the project version]' '--json[Output machine-readable JSON]' '*:directory:_files -/'
           ;;
       esac
       ;;

@@ -2440,16 +2440,32 @@ cmd_status() {
 }
 
 cmd_use() {
-  local start_dir="${1:-$PWD}" resolved version source
+  local start_dir="" print_only="false" resolved version source arg
 
-  if [ "$#" -gt 1 ]; then
-    _gos_error "unexpected argument for gos use: ${2}"
-    echo "Usage: gos use [path]" >&2
-    return 1
-  fi
+  for arg in "$@"; do
+    case "$arg" in
+      --print) print_only="true" ;;
+      --json) GOS_OUTPUT_JSON=1 ;;
+      -*)
+        _gos_error "unknown option for gos use: ${arg}"
+        echo "Usage: gos use [--print] [path]" >&2
+        return 1
+        ;;
+      *)
+        if [ -n "$start_dir" ]; then
+          _gos_error "unexpected argument for gos use: ${arg}"
+          echo "Usage: gos use [--print] [path]" >&2
+          return 1
+        fi
+        start_dir="$arg"
+        ;;
+    esac
+  done
+  [ -n "$start_dir" ] || start_dir="$PWD"
 
-  if [ "$start_dir" = "--json" ]; then
-    _gos_error "gos use does not support --json."
+  # Installing prints human progress; JSON only describes the resolution.
+  if _gos_json_enabled && [ "$print_only" != "true" ]; then
+    _gos_error "gos use supports --json only together with --print."
     return 1
   fi
 
@@ -2463,6 +2479,22 @@ cmd_use() {
   version="${version#go}"
 
   _gos_validate_version "$version" || return 1
+
+  # --print resolves without installing — "what Go does this project want?"
+  # for scripts and CI. Bare go<version> on stdout keeps it composable.
+  if [ "$print_only" = "true" ]; then
+    if _gos_json_enabled; then
+      printf '{"version":'
+      _gos_json_string "go${version}"
+      printf ',"source":'
+      _gos_json_string "$source"
+      printf '}\n'
+    else
+      printf 'go%s\n' "$version"
+    fi
+    return 0
+  fi
+
   echo "Using Go ${version} from ${source}"
   cmd_install "$version"
 }
@@ -3336,6 +3368,9 @@ _gos_completions() {
         while IFS= read -r line; do
           COMPREPLY+=("$line")
         done < <(compgen -d -- "$cur")
+        while IFS= read -r line; do
+          COMPREPLY+=("$line")
+        done < <(compgen -W "--print --json" -- "$cur")
         return
         ;;
       *)
@@ -3369,7 +3404,7 @@ _gos() {
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
     'run:Run a command with a side-by-side Go version without activating it globally'
-    'use:Install the Go version requested by .go-version, .tool-versions, or go.mod'
+    'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
     'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
     'rollback:Restore the previous Go installation, if available'
@@ -3432,7 +3467,7 @@ _gos() {
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)
-          _files -/
+          _arguments '--print[Only resolve the project version]' '--json[Output machine-readable JSON]' '*:directory:_files -/'
           ;;
       esac
       ;;
@@ -3454,7 +3489,7 @@ complete -c gos -f
 complete -c gos -n '__fish_use_subcommand' -a 'latest' -d 'Install the latest stable Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'install' -d 'Install a specific Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally'
-complete -c gos -n '__fish_use_subcommand' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod'
+complete -c gos -n '__fish_use_subcommand' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
 complete -c gos -n '__fish_use_subcommand' -a 'pin' -d 'Write .go-version in the current directory (active version by default)'
 complete -c gos -n '__fish_use_subcommand' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'
 complete -c gos -n '__fish_use_subcommand' -a 'rollback' -d 'Restore the previous Go installation, if available'
@@ -3477,6 +3512,7 @@ complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable J
 complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version' -l json -d 'Output machine-readable JSON'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__fish_seen_subcommand_from doctor' -l fix -d 'Apply safe non-destructive fixes'
+complete -c gos -n '__fish_seen_subcommand_from use' -l print -d 'Only resolve the project version'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
 complete -c gos -n '__fish_seen_subcommand_from list' -l minor -d 'Keep only the newest version per minor'
 complete -c gos -n '__fish_seen_subcommand_from install run' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
@@ -3519,7 +3555,7 @@ _gos_command_manifest() {
 latest|latest|Install the latest stable Go version
 install|install <version>|Install a specific Go version
 run|run <version> [--] <command> [args...]|Run a command with a side-by-side Go version without activating it globally
-use|use [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod
+use|use [--print] [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it
 pin|pin [version]|Write .go-version in the current directory (active version by default)
 check|check|Check whether newer stable Go or gos releases are available (no install)
 rollback|rollback|Restore the previous Go installation, if available
@@ -3740,7 +3776,12 @@ main() {
       _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       _gos_validate_versions_dir || return 1
-      _gos_acquire_lock || return 1
+      # --print only resolves; a read-only query must not take (or be
+      # blocked by) the mutation lock.
+      case " $* " in
+        *" --print "*) ;;
+        *) _gos_acquire_lock || return 1 ;;
+      esac
       cmd_use "$@"
       ;;
     pin) cmd_pin "$@" ;;

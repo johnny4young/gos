@@ -68,6 +68,9 @@ _gos_completions() {
         while IFS= read -r line; do
           COMPREPLY+=("$line")
         done < <(compgen -d -- "$cur")
+        while IFS= read -r line; do
+          COMPREPLY+=("$line")
+        done < <(compgen -W "--print --json" -- "$cur")
         return
         ;;
       *)
