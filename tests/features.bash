@@ -797,6 +797,35 @@ else
 fi
 pass "status color is limited to interactive output"
 
+case_dir="${test_root}/list-installed-color"
+mkdir -p "$case_dir/versions/go1.20rc1/bin" "$case_dir/versions/go1.19.9/bin"
+for fixture_version in 1.20rc1 1.19.9; do
+  printf '#!/usr/bin/env bash\necho "go version go%s darwin/arm64"\n' "$fixture_version" \
+    >"${case_dir}/versions/go${fixture_version}/bin/go"
+  chmod +x "${case_dir}/versions/go${fixture_version}/bin/go"
+done
+runner="${case_dir}/list-tty.sh"
+cat >"$runner" <<TTY_LIST
+#!/usr/bin/env bash
+set -euo pipefail
+unset NO_COLOR GOS_NO_COLOR
+PATH="${fake_bin}:${original_path}" \
+TERM="xterm-256color" \
+GOS_INSTALL_DIR="${case_dir}/go" \
+GOS_VERSIONS_DIR="${case_dir}/versions" \
+GOS_CACHE_DIR="${case_dir}/cache" \
+  bash "$script" list --installed
+TTY_LIST
+chmod +x "$runner"
+if run_with_pty "$runner" "${case_dir}/list-tty.out"; then
+  list_tty=$(<"${case_dir}/list-tty.out")
+  assert_contains "$list_tty" $'\033[32mgo1.20rc1\033[0m (active)' "list installed tty marks active in green"
+  assert_not_contains "$list_tty" "go1.19.9 (active)" "list installed tty leaves inactive unmarked"
+else
+  echo "ok - list installed color TTY branch skipped: no usable pseudo-terminal harness"
+fi
+pass "list --installed marks the active version only interactively"
+
 case_dir="${test_root}/stderr-style"
 mkdir -p "$case_dir"
 run_gos "$case_dir" bash "$script" install bad-version
@@ -1767,6 +1796,10 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
   [ "$status" -eq 0 ] || fail "list --installed failed: ${output}"
   assert_contains "$output" "go1.20.0" "list installed old"
   assert_contains "$output" "go1.21.6" "list installed new"
+  assert_not_contains "$output" "(active)" "list installed piped output has no active marker"
+  case "$output" in
+    *$'\033['*) fail "list --installed non-tty output must not contain ANSI: ${output}" ;;
+  esac
   GOS_TEST_VERSIONS_DIR="$versions_dir" GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" list --installed --json
   [ "$status" -eq 0 ] || fail "list --installed --json failed: ${output}"
   assert_json "$output" "list --installed --json"

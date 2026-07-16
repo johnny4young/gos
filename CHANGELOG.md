@@ -32,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `gos status` and `gos prune` now report cache sizes in human-readable binary units (`123.4 MiB`) instead of raw byte counts, `gos prune` reports how much space it freed, and `gos prune --json` gains a `removed_bytes` field. JSON byte fields stay raw.
 - Interactive `gos status` and `gos check` now color semantic values (active and matching versions green, pending updates yellow) with the same TTY, `NO_COLOR`, and JSON gating as `gos doctor`.
 - `gos pin` without a version now pins the currently active Go instead of failing, so "make this project use what I am running" is one command.
+- Interactive `gos list --installed` now highlights the active version in green with an `(active)` marker; piped output keeps the bare one-per-line contract.
 
 ### Fixed
 

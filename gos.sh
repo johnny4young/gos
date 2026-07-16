@@ -2145,6 +2145,19 @@ cmd_list() {
       printf '}\n'
     elif [ -z "$versions" ]; then
       echo "No Go versions installed."
+    elif _gos_color_enabled; then
+      # Interactive-only marker: piped output keeps the bare one-per-line
+      # contract that scripts already parse.
+      current=$(_gos_current)
+      while IFS= read -r arg; do
+        if [ "$arg" = "go${current}" ]; then
+          _gos_print_styled_value 32 '' "$arg" ' (active)'
+        else
+          printf '%s\n' "$arg"
+        fi
+      done <<EOF
+$versions
+EOF
     else
       printf '%s\n' "$versions"
     fi
