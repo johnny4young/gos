@@ -42,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Add `gos uninstall --inactive [--dry-run]` to remove every side-by-side version except the active one in a single command, reporting the space it reclaims; the rollback target is kept with a hint, and the dry run previews without deleting or taking the mutation lock.
 - `gos uninstall <version> --dry-run` now previews a single-version removal too, matching the `--inactive` and `gos prune` dry runs.
 - `gos status` now surfaces crash residue (orphaned backups with a `gos prune --rollback` hint) and the mutation lock (held by which PID, or stale with a removal hint); the JSON output gains `orphaned_backups` and `lock` fields.
+- `gos run -- <command>` (no version) now runs the command with the version the surrounding project requests, resolved like `gos use`; the resolution notice goes to stderr so the command's stdout stays clean for pipes.
 
 ### Fixed
 

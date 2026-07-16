@@ -4,7 +4,7 @@ complete -c gos -f
 # gos-commands:fish:begin
 complete -c gos -n '__fish_use_subcommand' -a 'latest' -d 'Install the latest stable Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'install' -d 'Install a specific Go version'
-complete -c gos -n '__fish_use_subcommand' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally'
+complete -c gos -n '__fish_use_subcommand' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
 complete -c gos -n '__fish_use_subcommand' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
 complete -c gos -n '__fish_use_subcommand' -a 'pin' -d 'Write .go-version in the current directory (active version by default)'
 complete -c gos -n '__fish_use_subcommand' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'

@@ -9,7 +9,7 @@ _gos() {
   commands=(
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
-    'run:Run a command with a side-by-side Go version without activating it globally'
+    'run:Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
     'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'

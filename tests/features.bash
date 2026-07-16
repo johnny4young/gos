@@ -2013,6 +2013,26 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
   [ "$(readlink "${case_dir}/go")" = "$active_before" ] || fail "run missing version changed the active symlink"
   [ ! -e "${case_dir}/go.gos-lock" ] || fail "run missing version left the gos lock behind"
 
+  mkdir -p "${case_dir}/run-project"
+  printf '1.21.6\n' >"${case_dir}/run-project/.go-version"
+  pushd "${case_dir}/run-project" >/dev/null
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run -- go version
+  popd >/dev/null
+  [ "$status" -eq 0 ] || fail "run with the project version failed: ${output}"
+  assert_contains "$output" "Using Go 1.21.6 from ${case_dir}/run-project/.go-version" "run project version notice"
+  assert_contains "$output" "go version go1.21.6 darwin/arm64" "run project version output"
+  pushd "${case_dir}/run-project" >/dev/null
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run --
+  popd >/dev/null
+  [ "$status" -ne 0 ] || fail "run -- without a command should fail"
+  assert_contains "$output" "Usage: gos run [version] [--] <command>" "run project mode requires a command"
+  mkdir -p "${case_dir}/run-empty"
+  pushd "${case_dir}/run-empty" >/dev/null
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run -- go version
+  popd >/dev/null
+  [ "$status" -ne 0 ] || fail "run -- without a project manifest should fail"
+  assert_contains "$output" "no version given and no .go-version or go.mod found" "run project mode without manifest"
+
   GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall --inactive --dry-run
   [ "$status" -eq 0 ] || fail "uninstall --inactive --dry-run failed: ${output}"
   assert_contains "$output" "Keeping go1.20.0" "inactive dry-run protects the rollback target"

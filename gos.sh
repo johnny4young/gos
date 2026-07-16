@@ -1921,10 +1921,10 @@ cmd_install() {
 }
 
 cmd_run() {
-  local version="${1:-}" resolved version_dir
+  local version="${1:-}" resolved version_dir project_resolved project_source
 
   if [ -z "$version" ]; then
-    echo "Usage: gos run <version> [--] <command> [args...]" >&2
+    echo "Usage: gos run [version] [--] <command> [args...]" >&2
     return 1
   fi
   shift
@@ -1932,11 +1932,24 @@ cmd_run() {
     _gos_error "gos run does not support --json."
     return 1
   fi
-  if [ "${1:-}" = "--" ]; then
+  # A leading -- with no version runs the command with the version the
+  # surrounding project requests, resolved exactly like gos use. The notice
+  # goes to stderr so the command's stdout stays clean for pipes.
+  if [ "$version" = "--" ]; then
+    if ! project_resolved=$(_gos_resolve_project_version "$PWD"); then
+      _gos_error "no version given and no .go-version or go.mod found from ${PWD} upward."
+      echo "Usage: gos run [version] [--] <command> [args...]" >&2
+      return 1
+    fi
+    version="${project_resolved%%|*}"
+    project_source="${project_resolved#*|}"
+    version="${version#go}"
+    echo "Using Go ${version} from ${project_source}" >&2
+  elif [ "${1:-}" = "--" ]; then
     shift
   fi
   if [ "$#" -eq 0 ]; then
-    echo "Usage: gos run <version> [--] <command> [args...]" >&2
+    echo "Usage: gos run [version] [--] <command> [args...]" >&2
     return 1
   fi
 
@@ -3523,7 +3536,7 @@ _gos() {
   commands=(
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
-    'run:Run a command with a side-by-side Go version without activating it globally'
+    'run:Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
     'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
@@ -3612,7 +3625,7 @@ complete -c gos -f
 # gos-commands:fish:begin
 complete -c gos -n '__fish_use_subcommand' -a 'latest' -d 'Install the latest stable Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'install' -d 'Install a specific Go version'
-complete -c gos -n '__fish_use_subcommand' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally'
+complete -c gos -n '__fish_use_subcommand' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
 complete -c gos -n '__fish_use_subcommand' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
 complete -c gos -n '__fish_use_subcommand' -a 'pin' -d 'Write .go-version in the current directory (active version by default)'
 complete -c gos -n '__fish_use_subcommand' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'
@@ -3682,7 +3695,7 @@ _gos_command_manifest() {
   cat <<'GOS_COMMANDS'
 latest|latest|Install the latest stable Go version
 install|install <version>|Install a specific Go version
-run|run <version> [--] <command> [args...]|Run a command with a side-by-side Go version without activating it globally
+run|run [version] [--] <command> [args...]|Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version
 use|use [--print] [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it
 pin|pin [version]|Write .go-version in the current directory (active version by default)
 check|check|Check whether newer stable Go or gos releases are available (no install)
