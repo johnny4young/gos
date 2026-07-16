@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Dynamic completion suggestions for `gos install`/`gos run` now collapse cached remote versions to the newest release per minor, so tab completion offers a screenful instead of the full 300-entry history; installed versions always stay individually completable.
 - Add `gos prune --dry-run` to preview what would be reclaimed (archives with sizes, rollback copy, orphaned backups) without deleting anything; the preview neither takes nor is blocked by the mutation lock, and `--json` gains a `dry_run` field.
 - Add `gos help <command>` for single-command usage straight from the command manifest, with typo suggestions for unknown names; all three shell completions complete the command argument.
+- Add `gos uninstall --inactive [--dry-run]` to remove every side-by-side version except the active one in a single command, reporting the space it reclaims; the rollback target is kept with a hint, and the dry run previews without deleting or taking the mutation lock.
 
 ### Fixed
 

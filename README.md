@@ -274,7 +274,7 @@ exec fish          # for Fish
 | `gos pin [version]` | Write `.go-version` in the current directory (active version by default) |
 | `gos check` | Check whether newer stable Go or gos releases are available (no install) |
 | `gos rollback` | Restore the previous Go installation, if available |
-| `gos uninstall <version>` | Remove an installed version (side-by-side mode) |
+| `gos uninstall <version> (or --inactive [--dry-run])` | Remove an installed version (side-by-side mode); `--inactive` removes all but the active and rollback |
 | `gos prune [--rollback] [--dry-run]` | Remove cached Go archives; `--rollback` also removes the rollback copy, `--dry-run` only previews |
 | `gos current` | Show the currently active Go version |
 | `gos list [--installed] [--minor]` | List available Go versions (or locally installed ones); `--minor` keeps the newest per minor |

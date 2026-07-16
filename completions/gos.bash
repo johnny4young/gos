@@ -41,7 +41,7 @@ _gos_completions() {
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions 2>/dev/null || true)
         fi
-        words="$versions"
+        words="--inactive --dry-run $versions"
         ;;
       which)
         if command -v gos >/dev/null 2>&1; then

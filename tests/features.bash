@@ -1991,6 +1991,31 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
   [ -x "${versions_dir}/go1.20.0/bin/go" ] || fail "run missing version did not install into GOS_VERSIONS_DIR"
   [ "$(readlink "${case_dir}/go")" = "$active_before" ] || fail "run missing version changed the active symlink"
   [ ! -e "${case_dir}/go.gos-lock" ] || fail "run missing version left the gos lock behind"
+
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall --inactive --dry-run
+  [ "$status" -eq 0 ] || fail "uninstall --inactive --dry-run failed: ${output}"
+  assert_contains "$output" "Keeping go1.20.0" "inactive dry-run protects the rollback target"
+  assert_contains "$output" "No inactive Go versions to remove" "inactive dry-run with only protected versions"
+  mkdir -p "${versions_dir}/go1.19.9/bin"
+  printf '#!/usr/bin/env bash\necho "go version go1.19.9 darwin/arm64"\n' >"${versions_dir}/go1.19.9/bin/go"
+  chmod +x "${versions_dir}/go1.19.9/bin/go"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall --inactive --dry-run
+  [ "$status" -eq 0 ] || fail "uninstall --inactive --dry-run with candidates failed: ${output}"
+  assert_contains "$output" "Would uninstall go1.19.9" "inactive dry-run previews removals"
+  [ -d "${versions_dir}/go1.19.9" ] || fail "dry-run must not remove versions"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall --inactive
+  [ "$status" -eq 0 ] || fail "uninstall --inactive failed: ${output}"
+  assert_contains "$output" "Uninstalled go1.19.9" "inactive removes unprotected versions"
+  [ ! -d "${versions_dir}/go1.19.9" ] || fail "--inactive did not remove go1.19.9"
+  [ -d "${versions_dir}/go1.20.0" ] || fail "--inactive must keep the rollback target"
+  [ -d "${versions_dir}/go1.21.6" ] || fail "--inactive must keep the active version"
+  [ "$(readlink "${case_dir}/go")" = "${versions_dir}/go1.21.6" ] || fail "--inactive changed the active symlink"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall --inactive 1.20.0
+  [ "$status" -ne 0 ] || fail "--inactive with a version should fail"
+  assert_contains "$output" "cannot be combined" "inactive rejects a version argument"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall --dry-run 1.20.0
+  [ "$status" -ne 0 ] || fail "--dry-run without --inactive should fail"
+  assert_contains "$output" "--dry-run requires --inactive" "uninstall dry-run requires inactive"
   pass "side-by-side mode installs, switches instantly, lists, and uninstalls versions"
 
 else

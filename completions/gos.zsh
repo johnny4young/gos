@@ -14,7 +14,7 @@ _gos() {
     'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
     'rollback:Restore the previous Go installation, if available'
-    'uninstall:Remove an installed version (side-by-side mode)'
+    'uninstall:Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
     'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
     'current:Show the currently active Go version'
     'list:List available Go versions (or locally installed ones); --minor keeps the newest per minor'
@@ -47,6 +47,7 @@ _gos() {
           fi
           ;;
         uninstall)
+          _arguments '--inactive[Remove all inactive versions]' '--dry-run[Preview removals without deleting]'
           if command -v gos >/dev/null 2>&1; then
             _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
           fi

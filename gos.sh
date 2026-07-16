@@ -2539,20 +2539,77 @@ cmd_rollback() {
   _gos_activate_rollback
 }
 
-cmd_uninstall() {
-  local version="${1:-}" version_dir rollback_dir
+# Remove every installed side-by-side version except the active one. The
+# rollback target is kept too: deleting it would silently disarm gos rollback,
+# so it is skipped with a hint pointing at the explicit single-version path.
+_gos_uninstall_inactive() {
+  local dry_run="$1" installed version_dir rollback_dir removed=0 size removed_kib=0
+  local removal_verb="Uninstalled"
+  [ "$dry_run" = "true" ] && removal_verb="Would uninstall"
 
-  if [ -z "$version" ]; then
-    echo "Usage: gos uninstall <version>  e.g. gos uninstall 1.24.0" >&2
+  rollback_dir=$(_gos_rollback_dir)
+  for installed in $(_gos_installed_versions); do
+    version_dir=$(_gos_version_dir_for "$installed")
+    [ -d "$version_dir" ] || continue
+    if [ "$GOS_INSTALL_DIR" -ef "$version_dir" ]; then
+      continue
+    fi
+    if [ -e "$rollback_dir" ] && [ "$rollback_dir" -ef "$version_dir" ]; then
+      echo "Keeping go${installed}: the rollback points at it (remove it explicitly with: gos uninstall ${installed})."
+      continue
+    fi
+    size=$(du -sk "$version_dir" 2>/dev/null | cut -f1) || size=0
+    [ -n "$size" ] || size=0
+    if [ "$dry_run" != "true" ]; then
+      _gos_sudo rm -rf "$version_dir" || return 1
+    fi
+    removed=$((removed + 1))
+    removed_kib=$((removed_kib + size))
+    echo "${removal_verb} go${installed} from ${version_dir}."
+  done
+
+  if [ "$removed" -eq 0 ]; then
+    echo "No inactive Go versions to remove under ${GOS_VERSIONS_DIR}."
+  else
+    echo "${removal_verb} ${removed} inactive version(s) ($(_gos_format_bytes $((removed_kib * 1024))))."
+  fi
+}
+
+cmd_uninstall() {
+  local version="" inactive="false" dry_run="false" version_dir rollback_dir arg
+
+  for arg in "$@"; do
+    case "$arg" in
+      --inactive) inactive="true" ;;
+      --dry-run) dry_run="true" ;;
+      -*)
+        _gos_error "unknown option for gos uninstall: ${arg}"
+        echo "Usage: gos uninstall <version> (or --inactive [--dry-run])" >&2
+        return 1
+        ;;
+      *)
+        if [ -n "$version" ]; then
+          _gos_error "unexpected argument for gos uninstall: ${arg}"
+          echo "Usage: gos uninstall <version> (or --inactive [--dry-run])" >&2
+          return 1
+        fi
+        version="$arg"
+        ;;
+    esac
+  done
+
+  if [ "$inactive" = "true" ] && [ -n "$version" ]; then
+    _gos_error "--inactive removes every inactive version and cannot be combined with one."
     return 1
   fi
-  if [ "$#" -gt 1 ]; then
-    _gos_error "unexpected argument for gos uninstall: ${2}"
-    echo "Usage: gos uninstall <version>  e.g. gos uninstall 1.24.0" >&2
+  if [ "$dry_run" = "true" ] && [ "$inactive" != "true" ]; then
+    _gos_error "--dry-run requires --inactive."
     return 1
   fi
-  version="${version#go}"
-  _gos_validate_version "$version" || return 1
+  if [ -z "$version" ] && [ "$inactive" != "true" ]; then
+    echo "Usage: gos uninstall <version> (or --inactive [--dry-run])  e.g. gos uninstall 1.24.0" >&2
+    return 1
+  fi
 
   if ! _gos_versions_mode; then
     _gos_error "gos uninstall requires side-by-side mode (set GOS_VERSIONS_DIR)."
@@ -2560,6 +2617,14 @@ cmd_uninstall() {
     return 1
   fi
   _gos_validate_versions_dir || return 1
+
+  if [ "$inactive" = "true" ]; then
+    _gos_uninstall_inactive "$dry_run"
+    return
+  fi
+
+  version="${version#go}"
+  _gos_validate_version "$version" || return 1
 
   # A bare X.Y resolves to the matching installed patch release, mirroring
   # `gos install 1.21` (which installs the newest 1.21.x): resolve against
@@ -3354,7 +3419,7 @@ _gos_completions() {
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions 2>/dev/null || true)
         fi
-        words="$versions"
+        words="--inactive --dry-run $versions"
         ;;
       which)
         if command -v gos >/dev/null 2>&1; then
@@ -3424,7 +3489,7 @@ _gos() {
     'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
     'rollback:Restore the previous Go installation, if available'
-    'uninstall:Remove an installed version (side-by-side mode)'
+    'uninstall:Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
     'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
     'current:Show the currently active Go version'
     'list:List available Go versions (or locally installed ones); --minor keeps the newest per minor'
@@ -3457,6 +3522,7 @@ _gos() {
           fi
           ;;
         uninstall)
+          _arguments '--inactive[Remove all inactive versions]' '--dry-run[Preview removals without deleting]'
           if command -v gos >/dev/null 2>&1; then
             _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
           fi
@@ -3512,7 +3578,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'use' -d 'Install the Go version r
 complete -c gos -n '__fish_use_subcommand' -a 'pin' -d 'Write .go-version in the current directory (active version by default)'
 complete -c gos -n '__fish_use_subcommand' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'
 complete -c gos -n '__fish_use_subcommand' -a 'rollback' -d 'Restore the previous Go installation, if available'
-complete -c gos -n '__fish_use_subcommand' -a 'uninstall' -d 'Remove an installed version (side-by-side mode)'
+complete -c gos -n '__fish_use_subcommand' -a 'uninstall' -d 'Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
 complete -c gos -n '__fish_use_subcommand' -a 'prune' -d 'Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
 complete -c gos -n '__fish_use_subcommand' -a 'current' -d 'Show the currently active Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'list' -d 'List available Go versions (or locally installed ones); --minor keeps the newest per minor'
@@ -3538,6 +3604,8 @@ complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List loca
 complete -c gos -n '__fish_seen_subcommand_from list' -l minor -d 'Keep only the newest version per minor'
 complete -c gos -n '__fish_seen_subcommand_from install run' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
 complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
+complete -c gos -n '__fish_seen_subcommand_from uninstall' -l inactive -d 'Remove all inactive versions'
+complete -c gos -n '__fish_seen_subcommand_from uninstall' -l dry-run -d 'Preview removals without deleting'
 complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
 complete -c gos -n '__fish_seen_subcommand_from env' -l auto -d 'Emit opt-in auto-switch hook'
 complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
@@ -3580,7 +3648,7 @@ use|use [--print] [path]|Install the Go version requested by .go-version, .tool-
 pin|pin [version]|Write .go-version in the current directory (active version by default)
 check|check|Check whether newer stable Go or gos releases are available (no install)
 rollback|rollback|Restore the previous Go installation, if available
-uninstall|uninstall <version>|Remove an installed version (side-by-side mode)
+uninstall|uninstall <version> (or --inactive [--dry-run])|Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback
 prune|prune [--rollback] [--dry-run]|Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews
 current|current|Show the currently active Go version
 list|list [--installed] [--minor]|List available Go versions (or locally installed ones); --minor keeps the newest per minor
@@ -3856,7 +3924,12 @@ main() {
     uninstall)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       _gos_validate_versions_dir || return 1
-      _gos_acquire_lock || return 1
+      # A dry run mutates nothing and must not take (or be blocked by) the
+      # mutation lock.
+      case " $* " in
+        *" --dry-run "*) ;;
+        *) _gos_acquire_lock || return 1 ;;
+      esac
       cmd_uninstall "$@"
       ;;
     env)
