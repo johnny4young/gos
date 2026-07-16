@@ -2479,7 +2479,8 @@ _gos_self_path() {
 
 cmd_self_update() {
   local script_path script_dir tmp_dir new_script checksums
-  local expected_sha actual_sha new_version
+  local expected_sha expected_sha_candidates expected_sha_count actual_sha
+  local new_version new_version_candidates new_version_count
 
   if [ "$#" -gt 0 ]; then
     _gos_error "unexpected argument for gos self-update: ${1}"
@@ -2519,11 +2520,13 @@ cmd_self_update() {
     return 1
   }
 
-  new_version=$(sed -n 's/^GOS_VERSION="\([^"]*\)"$/\1/p' "$new_script" | head -1)
-  if [ -z "$new_version" ]; then
-    _gos_error "the downloaded file does not look like a gos release. Aborting."
+  new_version_candidates=$(sed -n 's/^GOS_VERSION="\([^"]*\)"$/\1/p' "$new_script")
+  new_version_count=$(printf '%s\n' "$new_version_candidates" | grep -c . || true)
+  if [ "$new_version_count" -ne 1 ]; then
+    _gos_error "the downloaded gos release must contain exactly one GOS_VERSION assignment (found ${new_version_count}). Aborting."
     return 1
   fi
+  new_version="$new_version_candidates"
   if ! _gos_semver_is_valid "$new_version"; then
     _gos_error "the downloaded gos release has an invalid version 'v${new_version}'. Aborting."
     return 1
@@ -2542,18 +2545,21 @@ cmd_self_update() {
   # Go archive install (which may fall back to a warning), self-update replaces
   # the running script — often via sudo — so it always fails closed: an
   # unverifiable download is refused regardless of GOS_REQUIRE_CHECKSUM.
-  expected_sha=""
+  expected_sha_candidates=""
   if _gos_download "${GOS_RELEASE_BASE_URL}/checksums.txt" "$checksums" 2>/dev/null; then
     # Accept both text-mode ("<hash>  gos.sh") and binary-mode ("<hash> *gos.sh")
     # sha256sum manifests so a future release format change cannot silently
     # blank out the digest and disable verification.
-    expected_sha=$(awk '{ f=$2; sub(/^\*/, "", f); if (f == "gos.sh") { print $1; exit } }' "$checksums")
+    expected_sha_candidates=$(awk '{ f=$2; sub(/^\*/, "", f); if (f == "gos.sh") print $1 }' "$checksums")
   fi
-  if [ -z "$expected_sha" ]; then
-    _gos_error "could not obtain the published checksum for gos.sh; refusing to self-update from an unverifiable download."
+  expected_sha_count=$(printf '%s\n' "$expected_sha_candidates" | grep -c . || true)
+  if [ "$expected_sha_count" -ne 1 ] || ! printf '%s\n' "$expected_sha_candidates" \
+    | LC_ALL=C grep -qE '^[0-9a-fA-F]{64}$'; then
+    _gos_error "checksums.txt must contain exactly one valid SHA256 entry for gos.sh; refusing to self-update."
     echo "The release checksums.txt manifest was missing or unreadable. Re-run the installer instead (see the README)." >&2
     return 1
   fi
+  expected_sha=$(printf '%s' "$expected_sha_candidates" | tr '[:upper:]' '[:lower:]')
   actual_sha=$(_gos_sha256 "$new_script")
   if [ -z "$actual_sha" ]; then
     _gos_error "no SHA256 tool is available to verify the downloaded gos release; refusing to self-update."

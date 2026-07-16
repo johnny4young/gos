@@ -91,7 +91,11 @@ case "$url" in
     cat "$GOS_TEST_SELFUPDATE_SCRIPT" >"$output"
     ;;
   https://github.com/johnny4young/gos/releases/latest/download/checksums.txt)
-    printf 'expectedsha  gos.sh\n' >"$output"
+    if [ -n "${GOS_TEST_SELFUPDATE_CHECKSUMS_FILE:-}" ]; then
+      cat "$GOS_TEST_SELFUPDATE_CHECKSUMS_FILE" >"$output"
+    else
+      printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  gos.sh\n' >"$output"
+    fi
     ;;
   https://github.com/johnny4young/gos/releases/latest)
     if [ "${GOS_TEST_DOWNLOAD_MODE:-ok}" = "fail-gos-release" ]; then
@@ -177,6 +181,9 @@ if grep -q GOS-TEST-CORRUPT "$1" 2>/dev/null; then
 fi
 
 case "$1" in
+  */gos.sh)
+    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  %s\n' "$1"
+    ;;
   *go1.20.0.darwin-arm64.tar.gz)
     printf 'oldsha  %s\n' "$1"
     ;;
@@ -276,6 +283,7 @@ run_gos() {
       GOS_TEST_GO_VERSION="${GOS_TEST_GO_VERSION:-}" \
       GOS_TEST_GO_BROKEN="${GOS_TEST_GO_BROKEN:-0}" \
       GOS_TEST_SELFUPDATE_SCRIPT="${GOS_TEST_SELFUPDATE_SCRIPT:-}" \
+      GOS_TEST_SELFUPDATE_CHECKSUMS_FILE="${GOS_TEST_SELFUPDATE_CHECKSUMS_FILE:-}" \
       GOS_TEST_GOS_RELEASE_EFFECTIVE_URL="${GOS_TEST_GOS_RELEASE_EFFECTIVE_URL:-}" \
       GOS_TEST_MV_FAIL_DEST="${GOS_TEST_MV_FAIL_DEST:-}" \
       GOS_TEST_REAL_MV="$real_mv" \
@@ -1139,6 +1147,45 @@ for candidate in 1.6.9 9.9.9evil; do
   esac
 done
 pass "self-update rejects older and malformed release versions before replacement"
+
+case_dir="${test_root}/self-update-duplicate-version"
+mkdir -p "${case_dir}/app"
+cp "$script" "${case_dir}/app/gos"
+chmod +x "${case_dir}/app/gos"
+awk '{ if ($0 ~ /^GOS_VERSION=/) { print "GOS_VERSION=\"9.9.9\""; print "GOS_VERSION=\"9.9.8\"" } else print }' \
+  "$script" >"${case_dir}/release-gos.sh"
+original_self_update_sha="$(sha256_file "${case_dir}/app/gos")"
+GOS_TEST_SELFUPDATE_SCRIPT="${case_dir}/release-gos.sh" run_gos "$case_dir" bash "${case_dir}/app/gos" self-update
+[ "$status" -ne 0 ] || fail "self-update should reject duplicate GOS_VERSION assignments"
+assert_contains "$output" "exactly one GOS_VERSION assignment (found 2)" "self-update duplicate version rejection"
+current_self_update_sha="$(sha256_file "${case_dir}/app/gos")"
+[ "$current_self_update_sha" = "$original_self_update_sha" ] || fail "duplicate GOS_VERSION assignments changed the installed script"
+pass "self-update requires exactly one release version assignment"
+
+for manifest_kind in duplicate malformed; do
+  case_dir="${test_root}/self-update-checksums-${manifest_kind}"
+  mkdir -p "${case_dir}/app"
+  cp "$script" "${case_dir}/app/gos"
+  chmod +x "${case_dir}/app/gos"
+  sed 's/^GOS_VERSION=.*/GOS_VERSION="9.9.9"/' "$script" >"${case_dir}/release-gos.sh"
+  case "$manifest_kind" in
+    duplicate)
+      printf '%s  gos.sh\n%s  gos.sh\n' \
+        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"${case_dir}/checksums.txt"
+      ;;
+    malformed) printf 'not-a-sha  gos.sh\n' >"${case_dir}/checksums.txt" ;;
+  esac
+  original_self_update_sha="$(sha256_file "${case_dir}/app/gos")"
+  GOS_TEST_SELFUPDATE_SCRIPT="${case_dir}/release-gos.sh" \
+    GOS_TEST_SELFUPDATE_CHECKSUMS_FILE="${case_dir}/checksums.txt" \
+    run_gos "$case_dir" bash "${case_dir}/app/gos" self-update
+  [ "$status" -ne 0 ] || fail "self-update should reject ${manifest_kind} gos.sh checksum metadata"
+  assert_contains "$output" "exactly one valid SHA256 entry for gos.sh" "self-update ${manifest_kind} checksum rejection"
+  current_self_update_sha="$(sha256_file "${case_dir}/app/gos")"
+  [ "$current_self_update_sha" = "$original_self_update_sha" ] || fail "${manifest_kind} checksum metadata changed the installed script"
+done
+pass "self-update rejects ambiguous and malformed checksum metadata"
 
 case_dir="${test_root}/self-update"
 mkdir -p "${case_dir}/app"
