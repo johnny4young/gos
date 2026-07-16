@@ -1202,10 +1202,25 @@ assert_contains "$output" "no .go-version or go.mod found" "use without manifest
 pass "use fails with a clear error when no project manifest exists"
 
 case_dir="${test_root}/pin-no-arg"
+mkdir -p "$case_dir/project"
+pushd "$case_dir/project" >/dev/null
 run_gos "$case_dir" bash "$script" pin
-[ "$status" -ne 0 ] || fail "pin without version should fail"
-assert_contains "$output" "Usage: gos pin <version>" "pin without version"
-pass "pin without a version prints usage and fails"
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "pin without a version should pin the active Go: ${output}"
+assert_contains "$output" "Pinning the active Go 1.20rc1." "pin active notice"
+assert_contains "$output" "Pinned Go 1.20rc1 in .go-version" "pin active confirmation"
+[ "$(cat "${case_dir}/project/.go-version")" = "1.20rc1" ] || fail "pin did not write the active version"
+pushd "$case_dir/project" >/dev/null
+GOS_TEST_GO_BROKEN=1 run_gos "$case_dir" bash "$script" pin
+popd >/dev/null
+[ "$status" -ne 0 ] || fail "pin without a version and without a working go should fail"
+assert_contains "$output" "no version given and no active Go found to pin." "pin without active go"
+pushd "$case_dir/project" >/dev/null
+run_gos "$case_dir" bash "$script" pin 1.24.0
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "pin with an explicit version failed: ${output}"
+[ "$(cat "${case_dir}/project/.go-version")" = "1.24.0" ] || fail "pin did not write the explicit version"
+pass "pin defaults to the active version and still accepts explicit ones"
 
 case_dir="${test_root}/check"
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check

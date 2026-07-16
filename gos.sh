@@ -2392,14 +2392,22 @@ cmd_use() {
 
 cmd_pin() {
   local version="${1:-}"
-  if [ -z "$version" ]; then
-    echo "Usage: gos pin <version>  e.g. gos pin 1.24.0" >&2
-    return 1
-  fi
   if [ "$#" -gt 1 ]; then
     _gos_error "unexpected argument for gos pin: ${2}"
-    echo "Usage: gos pin <version>  e.g. gos pin 1.24.0" >&2
+    echo "Usage: gos pin [version]  e.g. gos pin 1.24.0" >&2
     return 1
+  fi
+
+  # Without an argument, pin whatever Go is active — the "make this project
+  # use what I am using right now" gesture.
+  if [ -z "$version" ]; then
+    version=$(_gos_current)
+    if [ "$version" = "none" ]; then
+      _gos_error "no version given and no active Go found to pin."
+      echo "Usage: gos pin [version]  e.g. gos pin 1.24.0" >&2
+      return 1
+    fi
+    echo "Pinning the active Go ${version}."
   fi
 
   version="${version#go}"
@@ -3285,7 +3293,7 @@ _gos() {
     'install:Install a specific Go version'
     'run:Run a command with a side-by-side Go version without activating it globally'
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod'
-    'pin:Write .go-version in the current directory'
+    'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
     'rollback:Restore the previous Go installation, if available'
     'uninstall:Remove an installed version (side-by-side mode)'
@@ -3370,7 +3378,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'latest' -d 'Install the latest st
 complete -c gos -n '__fish_use_subcommand' -a 'install' -d 'Install a specific Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally'
 complete -c gos -n '__fish_use_subcommand' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod'
-complete -c gos -n '__fish_use_subcommand' -a 'pin' -d 'Write .go-version in the current directory'
+complete -c gos -n '__fish_use_subcommand' -a 'pin' -d 'Write .go-version in the current directory (active version by default)'
 complete -c gos -n '__fish_use_subcommand' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'
 complete -c gos -n '__fish_use_subcommand' -a 'rollback' -d 'Restore the previous Go installation, if available'
 complete -c gos -n '__fish_use_subcommand' -a 'uninstall' -d 'Remove an installed version (side-by-side mode)'
@@ -3434,7 +3442,7 @@ latest|latest|Install the latest stable Go version
 install|install <version>|Install a specific Go version
 run|run <version> [--] <command> [args...]|Run a command with a side-by-side Go version without activating it globally
 use|use [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod
-pin|pin <version>|Write .go-version in the current directory
+pin|pin [version]|Write .go-version in the current directory (active version by default)
 check|check|Check whether newer stable Go or gos releases are available (no install)
 rollback|rollback|Restore the previous Go installation, if available
 uninstall|uninstall <version>|Remove an installed version (side-by-side mode)

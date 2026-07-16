@@ -11,7 +11,7 @@ _gos() {
     'install:Install a specific Go version'
     'run:Run a command with a side-by-side Go version without activating it globally'
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod'
-    'pin:Write .go-version in the current directory'
+    'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
     'rollback:Restore the previous Go installation, if available'
     'uninstall:Remove an installed version (side-by-side mode)'

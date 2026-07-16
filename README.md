@@ -271,7 +271,7 @@ exec fish          # for Fish
 | `gos install <version>` | Install a specific Go version |
 | `gos run <version> [--] <command> [args...]` | Run a command with a side-by-side Go version without activating it globally |
 | `gos use [path]` | Install the Go version requested by `.go-version`, `.tool-versions`, or `go.mod` |
-| `gos pin <version>` | Write `.go-version` in the current directory |
+| `gos pin [version]` | Write `.go-version` in the current directory (active version by default) |
 | `gos check` | Check whether newer stable Go or gos releases are available (no install) |
 | `gos rollback` | Restore the previous Go installation, if available |
 | `gos uninstall <version>` | Remove an installed version (side-by-side mode) |
