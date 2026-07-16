@@ -1219,9 +1219,20 @@ fi
 run_gos "$case_dir" bash "$script" __versions --remote-cached
 [ "$status" -eq 0 ] || fail "__versions --remote-cached failed: ${output}"
 assert_contains "$output" "1.21.6" "__versions remote cached"
+assert_contains "$output" "1.22rc1" "__versions remote cached pre-release minor"
+assert_not_contains "$output" "1.21rc1" "__versions remote suggestions collapse to newest per minor"
 if [ -s "${case_dir}/urls.log" ]; then
   fail "__versions --remote-cached must not reach the network"
 fi
+suggest_versions_dir="${case_dir}/versions"
+mkdir -p "${suggest_versions_dir}/go1.21.5/bin"
+printf '#!/usr/bin/env bash\necho "go version go1.21.5 darwin/arm64"\n' >"${suggest_versions_dir}/go1.21.5/bin/go"
+chmod +x "${suggest_versions_dir}/go1.21.5/bin/go"
+GOS_TEST_VERSIONS_DIR="$suggest_versions_dir" run_gos "$case_dir" bash "$script" __versions --remote-cached
+[ "$status" -eq 0 ] || fail "__versions with an installed version failed: ${output}"
+assert_contains "$output" "1.21.5" "__versions keeps installed versions unfiltered"
+assert_contains "$output" "1.21.6" "__versions still offers the newest remote patch"
+rm -rf "$suggest_versions_dir"
 GOS_TEST_FEED_TTL=0 run_gos "$case_dir" bash "$script" list --json
 [ "$status" -eq 0 ] || fail "GOS_FEED_TTL=0 list failed: ${output}"
 assert_json "$output" "feed-cache disabled list"

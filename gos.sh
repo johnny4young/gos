@@ -2094,11 +2094,15 @@ cmd___versions() {
     esac
   done
 
+  # Remote suggestions collapse to the newest release per minor so tab
+  # completion offers a screenful, not the full 300-entry history. Installed
+  # versions always pass through unfiltered: whatever is on disk must stay
+  # completable for uninstall/run even when a newer patch exists remotely.
   versions=$(
     {
       _gos_installed_versions
       if [ "$include_remote_cached" = "true" ] && json=$(_gos_cached_feed_json true 2>/dev/null); then
-        _gos_feed_versions "$json"
+        _gos_feed_versions "$json" | _gos_sort_versions | _gos_newest_per_minor
       fi
     } | _gos_sort_versions | uniq
   )
