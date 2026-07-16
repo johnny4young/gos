@@ -9,6 +9,7 @@ test_root="$(mktemp -d)"
 fake_bin="${test_root}/bin"
 original_path="$PATH"
 real_mkdir="$(command -v mkdir)"
+real_chmod="$(command -v chmod)"
 
 cleanup() {
   rm -rf "$test_root"
@@ -108,8 +109,23 @@ set -euo pipefail
 GOS_TEST_UNDER_SUDO=1 "$@"
 FAKE_SUDO
 
-chmod +x "${fake_bin}/curl" "${fake_bin}/sha256sum" "${fake_bin}/shasum" \
-  "${fake_bin}/mkdir" "${fake_bin}/sudo"
+cat >"${fake_bin}/chmod" <<'FAKE_CHMOD'
+#!/usr/bin/env bash
+set -euo pipefail
+
+target=""
+for arg in "$@"; do
+  target="$arg"
+done
+if [ "${GOS_TEST_CHMOD_FAIL:-0}" = "1" ] && [ "${target##*/}" = "gos" ]; then
+  echo "simulated chmod failure: $target" >&2
+  exit 1
+fi
+exec "$GOS_TEST_REAL_CHMOD" "$@"
+FAKE_CHMOD
+
+"$real_chmod" +x "${fake_bin}/curl" "${fake_bin}/sha256sum" "${fake_bin}/shasum" \
+  "${fake_bin}/mkdir" "${fake_bin}/sudo" "${fake_bin}/chmod"
 
 assert_file_contains() {
   local file="$1" needle="$2" name="$3"
@@ -200,8 +216,10 @@ run_installer() {
       GOS_TEST_CURL_ARGS_LOG="$curl_args_log" \
       GOS_TEST_SUDO_LOG="$sudo_log" \
       GOS_TEST_REAL_MKDIR="$real_mkdir" \
+      GOS_TEST_REAL_CHMOD="$real_chmod" \
       GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
       GOS_TEST_MKDIR_MODE="$mkdir_mode" \
+      GOS_TEST_CHMOD_FAIL="${GOS_TEST_CHMOD_FAIL:-0}" \
       GOS_REQUIRE_CHECKSUM="$require_checksum" \
       bash "${script_under_test:-$script}" "$@" 2>&1
   )"
@@ -242,6 +260,19 @@ run_installer "existing_bin" "existing"
 assert_status 0 "$status" "existing bin" "$output"
 assert_installed "$bin_dir" "existing bin"
 pass "existing GOS_BIN_DIR still works"
+
+chmod_case_dir="${test_root}/chmod_failure"
+mkdir -p "${chmod_case_dir}/bin"
+cat >"${chmod_case_dir}/bin/gos" <<'OLD_GOS'
+#!/usr/bin/env bash
+echo "old gos"
+OLD_GOS
+chmod +x "${chmod_case_dir}/bin/gos"
+GOS_TEST_CHMOD_FAIL=1 run_installer "chmod_failure" "existing"
+assert_nonzero_status "$status" "downloaded gos chmod failure" "$output"
+assert_contains "$output" "failed to make the downloaded gos executable before installation" "downloaded gos chmod failure"
+[ "$("${bin_dir}/gos")" = "old gos" ] || fail "downloaded gos chmod failure replaced the previous executable"
+pass "installer applies executable mode before replacing the current gos"
 
 run_installer "sudo_created_bin" "sudo-created"
 assert_status 0 "$status" "sudo-created bin" "$output"

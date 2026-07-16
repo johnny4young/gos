@@ -196,10 +196,13 @@ main() {
   _download "$GOS_SCRIPT_URL" "$tmp_file"
 
   _verify_checksum "$tmp_file"
+  if ! chmod +x "$tmp_file"; then
+    echo "Error: failed to make the downloaded gos executable before installation." >&2
+    return 1
+  fi
 
   _prepare_bin_dir
   _maybe_sudo mv "$tmp_file" "$GOS_BIN_DIR/gos"
-  _maybe_sudo chmod +x "$GOS_BIN_DIR/gos"
   echo "gos installed to ${GOS_BIN_DIR}/gos"
   echo "Run 'gos help' to get started."
 }
