@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Preserve changelog permissions during atomic release rewrites, reject invalid release dates and previous tags, and require exactly one Chocolatey, Winget, and workflow version field before publication.
 - Make command-surface regeneration transactional so late generator failures restore README, `gos.sh`, and standalone completions without changing their contents or file modes.
 - Reject invalid `install.sh` arguments and ambiguous `GOS_BIN_DIR` paths before network access, and keep optional gos release checks HTTPS-only, time-bounded, restricted to canonical tags from this repository, and reported only when semantically newer.
+- Unknown-command suggestions now also catch transpositions and doubled, dropped, or replaced letters (`gos isntall` suggests `install`), instead of only prefix matches.
 
 ### Fixed
 

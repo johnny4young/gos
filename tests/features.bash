@@ -1467,6 +1467,28 @@ assert_not_contains "$output" "__versions" "hidden command prefix suggestions"
 assert_not_contains "$output" "__project-version" "hidden command prefix suggestions"
 pass "unknown commands suggest matching command prefixes"
 
+case_dir="${test_root}/unknown-command-close-typos"
+run_gos "$case_dir" bash "$script" isntall
+[ "$status" -ne 0 ] || fail "transposed command should fail"
+assert_contains "$output" "Did you mean?" "transposed command suggestion header"
+assert_contains "$output" "  install" "transposed command suggested install"
+run_gos "$case_dir" bash "$script" veersion
+[ "$status" -ne 0 ] || fail "doubled-letter command should fail"
+assert_contains "$output" "  version" "doubled-letter command suggested version"
+run_gos "$case_dir" bash "$script" sattus
+[ "$status" -ne 0 ] || fail "transposed status command should fail"
+assert_contains "$output" "  status" "transposed command suggested status"
+run_gos "$case_dir" bash "$script" chek
+[ "$status" -ne 0 ] || fail "dropped-letter command should fail"
+assert_contains "$output" "  check" "dropped-letter command suggested check"
+run_gos "$case_dir" bash "$script" installl
+[ "$status" -ne 0 ] || fail "trailing-letter command should fail"
+assert_contains "$output" "  install" "trailing-letter command suggested install"
+run_gos "$case_dir" bash "$script" frobnicate
+[ "$status" -ne 0 ] || fail "distant command should fail"
+assert_not_contains "$output" "Did you mean?" "distant command has no suggestions"
+pass "unknown commands suggest close-typo commands by edit distance"
+
 case_dir="${test_root}/cli-extra-args"
 run_gos "$case_dir" bash "$script" latest extra
 [ "$status" -ne 0 ] || fail "latest with trailing argument should fail"

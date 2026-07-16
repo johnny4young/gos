@@ -3516,17 +3516,72 @@ cmd___commands() {
 }
 
 _gos_suggest_command() {
-  local input="$1" command
+  local input="$1"
 
   # Avoid noisy guesses for one- or two-letter typos. Prefix matching is
   # deterministic, offline, and cheap enough for the unknown-command path.
   [ "${#input}" -ge 3 ] || return 0
 
-  _gos_commands | while IFS= read -r command; do
-    case "$command" in
-      "$input"*) printf '%s\n' "$command" ;;
-    esac
-  done
+  # One awk pass handles both suggestion tiers. Exact prefix matches win;
+  # otherwise common typos — transpositions and doubled, dropped, or replaced
+  # letters (isntall, veersion, chek) — are ranked by optimal-string-alignment
+  # distance and only the closest tier is suggested: one edit for short
+  # inputs, up to two once the input is long enough that two edits still
+  # leave most of the word intact. The typo reaches awk via the environment
+  # because -v escape processing would mangle backslashes.
+  _gos_commands | GOS_SUGGEST_INPUT="$input" awk '
+    function osa_distance(a, b, la, lb, i, j, cost, best, d) {
+      la = length(a)
+      lb = length(b)
+      for (i = 0; i <= la; i++) d[i, 0] = i
+      for (j = 0; j <= lb; j++) d[0, j] = j
+      for (i = 1; i <= la; i++) {
+        for (j = 1; j <= lb; j++) {
+          cost = substr(a, i, 1) == substr(b, j, 1) ? 0 : 1
+          best = d[i - 1, j] + 1
+          if (d[i, j - 1] + 1 < best) best = d[i, j - 1] + 1
+          if (d[i - 1, j - 1] + cost < best) best = d[i - 1, j - 1] + cost
+          if (i > 1 && j > 1 \
+            && substr(a, i, 1) == substr(b, j - 1, 1) \
+            && substr(a, i - 1, 1) == substr(b, j, 1) \
+            && d[i - 2, j - 2] + 1 < best) best = d[i - 2, j - 2] + 1
+          d[i, j] = best
+        }
+      }
+      return d[la, lb]
+    }
+    BEGIN {
+      typo = ENVIRON["GOS_SUGGEST_INPUT"]
+      max_distance = length(typo) >= 6 ? 2 : 1
+      prefix_count = 0
+      count = 0
+      closest = max_distance + 1
+    }
+    {
+      if (index($0, typo) == 1) {
+        prefix_matches[prefix_count] = $0
+        prefix_count++
+        next
+      }
+      if (length($0) < length(typo) - max_distance) next
+      if (length($0) > length(typo) + max_distance) next
+      distance = osa_distance(typo, $0)
+      if (distance > max_distance) next
+      commands[count] = $0
+      distances[count] = distance
+      count++
+      if (distance < closest) closest = distance
+    }
+    END {
+      if (prefix_count > 0) {
+        for (i = 0; i < prefix_count; i++) print prefix_matches[i]
+        exit
+      }
+      for (i = 0; i < count; i++) {
+        if (distances[i] == closest) print commands[i]
+      }
+    }
+  '
 }
 
 # ─── Entrypoint ───────────────────────────────────────────────────────────────
