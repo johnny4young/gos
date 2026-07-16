@@ -1568,6 +1568,74 @@ _gos_semver_is_newer() {
   _gos_decimal_is_greater "$candidate_patch" "$current_patch"
 }
 
+# Compare validated Go versions, including beta/rc ordering. The components use
+# the same decimal-string comparator as SemVer so unusually long versions do not
+# inherit the shell's integer limit.
+_gos_go_version_is_newer() {
+  local candidate="$1" current="$2"
+  local candidate_core candidate_major candidate_minor candidate_patch
+  local current_core current_major current_minor current_patch
+  local candidate_rank candidate_pre current_rank current_pre
+
+  case "$candidate" in
+    *beta*)
+      candidate_core="${candidate%%beta*}"
+      candidate_rank=0
+      candidate_pre="${candidate##*beta}"
+      ;;
+    *rc*)
+      candidate_core="${candidate%%rc*}"
+      candidate_rank=1
+      candidate_pre="${candidate##*rc}"
+      ;;
+    *)
+      candidate_core="$candidate"
+      candidate_rank=2
+      candidate_pre=0
+      ;;
+  esac
+  case "$current" in
+    *beta*)
+      current_core="${current%%beta*}"
+      current_rank=0
+      current_pre="${current##*beta}"
+      ;;
+    *rc*)
+      current_core="${current%%rc*}"
+      current_rank=1
+      current_pre="${current##*rc}"
+      ;;
+    *)
+      current_core="$current"
+      current_rank=2
+      current_pre=0
+      ;;
+  esac
+
+  IFS=. read -r candidate_major candidate_minor candidate_patch <<<"$candidate_core"
+  IFS=. read -r current_major current_minor current_patch <<<"$current_core"
+  candidate_patch="${candidate_patch:-0}"
+  current_patch="${current_patch:-0}"
+
+  if [ "$candidate_major" != "$current_major" ]; then
+    _gos_decimal_is_greater "$candidate_major" "$current_major"
+    return
+  fi
+  if [ "$candidate_minor" != "$current_minor" ]; then
+    _gos_decimal_is_greater "$candidate_minor" "$current_minor"
+    return
+  fi
+  if [ "$candidate_patch" != "$current_patch" ]; then
+    _gos_decimal_is_greater "$candidate_patch" "$current_patch"
+    return
+  fi
+  if [ "$candidate_rank" -ne "$current_rank" ]; then
+    [ "$candidate_rank" -gt "$current_rank" ]
+    return
+  fi
+  _gos_decimal_is_greater "$candidate_pre" "$current_pre"
+}
+
 # ─── Commands ─────────────────────────────────────────────────────────────────
 
 cmd_latest() {
@@ -1593,6 +1661,11 @@ cmd_latest() {
   current=$(_gos_current)
   echo "Latest: go${latest}"
 
+  if [ "$current" != "none" ] && _gos_go_version_is_newer "$current" "$latest"; then
+    echo "Current: go${current} is newer than latest stable go${latest}; nothing to do."
+    return 0
+  fi
+
   if [ "$current" = "$latest" ]; then
     if _gos_active_install_matches "$latest"; then
       echo "Already on Go ${latest}, nothing to do."
@@ -1610,7 +1683,7 @@ cmd_latest() {
 }
 
 cmd_check() {
-  local latest current up_to_date gos_latest="" gos_up_to_date="null"
+  local latest current up_to_date ahead_of_latest="false" gos_latest="" gos_up_to_date="null"
   _gos_set_json_from_args "$@" || return 1
 
   if ! _gos_json_enabled; then
@@ -1626,6 +1699,9 @@ cmd_check() {
   current=$(_gos_current)
   if [ "$current" = "$latest" ]; then
     up_to_date="true"
+  elif [ "$current" != "none" ] && _gos_go_version_is_newer "$current" "$latest"; then
+    up_to_date="true"
+    ahead_of_latest="true"
   else
     up_to_date="false"
   fi
@@ -1664,6 +1740,9 @@ cmd_check() {
   if [ "$current" = "none" ]; then
     echo "Current: none (no Go installation found)"
     echo "Install it with: gos latest"
+  elif [ "$ahead_of_latest" = "true" ]; then
+    echo "Current: go${current}"
+    echo "Current Go is newer than latest stable go${latest}."
   elif [ "$up_to_date" = "true" ]; then
     echo "Current: go${current}"
     echo "Already up to date."

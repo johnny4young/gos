@@ -380,6 +380,28 @@ semver_comparison_output="$(
   || fail "arbitrary-precision SemVer comparison failed: ${semver_comparison_output}"
 pass "gos SemVer comparison supports arbitrary-length numeric identifiers"
 
+go_comparison_output="$(
+  PATH="${fake_bin}:${original_path}" \
+    GOS_INSTALL_DIR="${test_root}/go-comparison/go" \
+    GOS_CACHE_DIR="${test_root}/go-comparison/cache" \
+    GOS_TEST_REAL_MV="$real_mv" \
+    bash -c '
+      set -euo pipefail
+      . "$1"
+      _gos_go_version_is_newer 1.22.0 1.21.6
+      _gos_go_version_is_newer 1.22rc1 1.21.6
+      _gos_go_version_is_newer 1.22rc2 1.22rc1
+      _gos_go_version_is_newer 1.22.0 1.22rc9
+      ! _gos_go_version_is_newer 1.22beta9 1.22rc1
+      ! _gos_go_version_is_newer 1.22 1.22.0
+      ! _gos_go_version_is_newer 1.21.6 1.22.0
+      printf "go-version-comparison-ok\\n"
+    ' bash "$sourceable_script"
+)"
+[ "$go_comparison_output" = "go-version-comparison-ok" ] \
+  || fail "Go version comparison failed: ${go_comparison_output}"
+pass "Go version comparison orders beta, rc, release, and patch versions"
+
 case_dir="${test_root}/json"
 run_gos "$case_dir" bash "$script" version --json
 [ "$status" -eq 0 ] || fail "version --json failed: ${output}"
@@ -851,6 +873,15 @@ if grep -q 'dl/go1' "${case_dir}/urls.log"; then
 fi
 pass "installing the active version is a no-op when the install dir serves it"
 
+case_dir="${test_root}/latest-newer-current"
+GOS_TEST_GO_VERSION="1.22.0" run_gos "$case_dir" bash "$script" latest
+[ "$status" -eq 0 ] || fail "latest with a newer current Go failed: ${output}"
+assert_contains "$output" "go1.22.0 is newer than latest stable go1.21.6; nothing to do." "latest newer current"
+if grep -q 'dl/go1' "${case_dir}/urls.log"; then
+  fail "latest must not downgrade a newer current Go: $(cat "${case_dir}/urls.log")"
+fi
+pass "latest never downgrades a newer active Go release"
+
 case_dir="${test_root}/masked-install"
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "masked install failed: ${output}"
@@ -1018,6 +1049,16 @@ GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --json
 assert_json "$output" "check --json up-to-date"
 assert_contains "$output" '"up_to_date":true' "check json up to date"
 assert_contains "$output" '"latest":"v9.9.9"' "check json gos latest up to date"
+GOS_TEST_GO_VERSION="1.22.0" run_gos "$case_dir" bash "$script" check
+[ "$status" -eq 0 ] || fail "check with a newer current Go failed: ${output}"
+assert_contains "$output" "Current Go is newer than latest stable go1.21.6." "check newer current"
+case "$output" in
+  *"Update available. Install it with: gos latest"*) fail "check offered to downgrade a newer current Go: ${output}" ;;
+esac
+GOS_TEST_GO_VERSION="1.22.0" run_gos "$case_dir" bash "$script" check --json
+[ "$status" -eq 0 ] || fail "check --json with a newer current Go failed: ${output}"
+assert_json "$output" "check --json newer current"
+assert_contains "$output" '"current":"go1.22.0","latest":"go1.21.6","up_to_date":true' "check json newer current"
 GOS_TEST_DOWNLOAD_MODE="fail-gos-release" GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
 [ "$status" -eq 0 ] || fail "check should skip gos release lookup failures: ${output}"
 assert_contains "$output" "Update available. Install it with: gos latest" "check skip gos release go output"
