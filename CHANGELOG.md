@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+
+- Refresh the README feature list and terminal demo for the 1.8.0 command surface (`list --minor`, `pin` defaults, `use --print`, `run --`, dry-run previews, `uninstall --inactive`, `help <command>`, and the full status dashboard).
+
 ## [1.8.0] - 2026-07-16
 
 ### Added

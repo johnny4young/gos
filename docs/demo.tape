@@ -25,7 +25,7 @@ Type "gos run 1.24.0 go version"
 Enter
 Sleep 2s
 
-Type "gos check"
+Type "gos status"
 Enter
 Sleep 3s
 

@@ -15,7 +15,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.png" alt="gos installing Go 1.24.0 with a verified checksum, running a command with a side-by-side version, and checking for Go and gos updates" width="776">
+  <img src="docs/demo.png" alt="gos installing Go 1.24.0 with a verified checksum, running a command with a side-by-side version, and showing the offline status dashboard" width="776">
 </p>
 
 ---
@@ -82,21 +82,23 @@ Done. That's the whole setup.
 
 - **One command to latest Go** — `gos latest` fetches and installs the newest stable release
 - **Pin any version** — `gos install 1.21.6` gets exactly what you need; `gos install 1.21` resolves to the newest patch release
-- **Run without switching** — `gos run 1.21 go test ./...` runs a command with a side-by-side Go version without changing the active one
-- **Project-aware switching** — `gos use` reads `.go-version`, `.tool-versions`, `toolchain`, or `go` directives
+- **Run without switching** — `gos run 1.21 go test ./...` runs a command with a side-by-side Go version without changing the active one; `gos run -- go test ./...` uses the project's pinned version
+- **Project-aware switching** — `gos use` reads `.go-version`, `.tool-versions`, `toolchain`, or `go` directives; `gos use --print` resolves without installing and `gos pin` records the active version
 - **Update checks** — `gos check` reports whether newer stable Go or `gos` releases are available without installing anything
 - **Doctor diagnostics** — `gos doctor` checks Go, PATH, permissions, checksum tools, and extraction tools; `gos doctor --fix` applies only safe, non-destructive fixes
-- **Offline status dashboard** — `gos status` summarizes the active Go, project manifest, rollback, cache, and layout without network access
-- **Cache and rollback** — verified archives are cached, `gos rollback` restores the previous install, and `gos prune` reclaims the disk space
+- **Offline status dashboard** — `gos status` summarizes the active Go, project manifest, rollback (and its version), cache size, crash residue, and lock state without network access
+- **Cache and rollback** — verified archives are cached, `gos rollback` restores the previous install, and `gos prune` reclaims the disk space; `--dry-run` previews every removal first
 - **Concurrent-operation guard** — mutating commands take a portable `.gos-lock` so overlapping installs fail fast instead of racing
-- **Side-by-side versions (opt-in)** — set `GOS_VERSIONS_DIR` and every version stays installed; switching becomes an instant symlink flip, with `gos list --installed` and `gos uninstall`
+- **Side-by-side versions (opt-in)** — set `GOS_VERSIONS_DIR` and every version stays installed; switching becomes an instant symlink flip, with `gos list --installed`, `gos uninstall`, and `gos uninstall --inactive` bulk cleanup
+- **One-screen version overview** — `gos list --minor` keeps only the newest release per minor instead of the full 300-line history
 - **Shell setup in one line** — `eval "$(gos env)"` puts the managed Go on PATH
 - **Opt-in auto-switching** — `eval "$(gos env --auto)"` switches this shell to installed project versions as you `cd`, without changing global symlinks
 - **Self-updating** — `gos self-update` upgrades gos itself from the latest verified release
 - **Mirror support** — `GOS_DOWNLOAD_MIRROR` downloads archives from an HTTPS mirror while still verifying official go.dev checksums
 - **TTY download progress** — interactive installs show archive progress while pipes, CI, and JSON stay quiet
 - **TTY diagnostics styling** — interactive `gos doctor` plus stderr `Error:`/`Warning:` lines use color and symbols; pipes, `NO_COLOR`, `GOS_NO_COLOR=1`, and JSON stay plain
-- **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `doctor`, `prune`, and `version`
+- **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `env`, `doctor`, `prune`, `version`, and `use --print`
+- **Helpful when you mistype** — unknown commands suggest close matches (`gos isntall` → `install`), and `gos help <command>` shows a single command's usage
 - **Auto-detects everything** — OS (`darwin`, `linux`, `windows`) and architecture (`amd64`, `arm64`, `armv6l`, `386`)
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)
 - **Zero dependencies** — just `curl` and `bash`, both pre-installed on most systems
