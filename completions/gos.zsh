@@ -17,7 +17,7 @@ _gos() {
     'uninstall:Remove an installed version (side-by-side mode)'
     'prune:Remove cached Go archives; --rollback also removes the rollback copy'
     'current:Show the currently active Go version'
-    'list:List available Go versions (or locally installed ones)'
+    'list:List available Go versions (or locally installed ones); --minor keeps the newest per minor'
     'platforms:List supported OS/arch archives for a Go version'
     'status:Show an offline dashboard for gos and the active Go'
     'which:Show the active or side-by-side Go binary path'
@@ -58,7 +58,7 @@ _gos() {
           fi
           ;;
         list)
-          _arguments '--installed[List locally installed versions]' '--json[Output machine-readable JSON]'
+          _arguments '--installed[List locally installed versions]' '--minor[Keep only the newest version per minor]' '--json[Output machine-readable JSON]'
           ;;
         env)
           _arguments '--fish[Emit fish shell syntax]' '--auto[Emit opt-in auto-switch hook]' '--json[Output machine-readable JSON]'

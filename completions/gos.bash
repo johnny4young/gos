@@ -50,7 +50,7 @@ _gos_completions() {
         words="--json $versions"
         ;;
       list)
-        words="--installed --json"
+        words="--installed --minor --json"
         ;;
       env)
         words="--fish --auto --json"

@@ -531,6 +531,23 @@ LIST_OUTPUT
 )"
 [ "$output" = "$expected_list_output" ] || fail "plain list output/order changed. Output: ${output}"
 
+run_gos "$case_dir" bash "$script" list --minor
+[ "$status" -eq 0 ] || fail "list --minor failed: ${output}"
+expected_minor_output="$(
+  cat <<'LIST_MINOR_OUTPUT'
+Fetching available Go versions...
+go1.20.0
+go1.21.6
+go1.22rc1
+LIST_MINOR_OUTPUT
+)"
+[ "$output" = "$expected_minor_output" ] || fail "list --minor output changed. Output: ${output}"
+
+run_gos "$case_dir" bash "$script" list --minor --json
+[ "$status" -eq 0 ] || fail "list --minor --json failed: ${output}"
+assert_json "$output" "list --minor --json"
+assert_contains "$output" '"versions":["go1.20.0","go1.21.6","go1.22rc1"]' "list minor json keeps newest per minor"
+
 run_gos "$case_dir" bash "$script" platforms 1.21.6 --json
 [ "$status" -eq 0 ] || fail "platforms --json failed: ${output}"
 assert_json "$output" "platforms --json"
@@ -1755,6 +1772,15 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
   assert_json "$output" "list --installed --json"
   assert_contains "$output" '"installed":["go1.20.0","go1.21.6"]' "list installed json"
   assert_contains "$output" '"active":"go1.21.6"' "list installed json active"
+
+  mkdir -p "${versions_dir}/go1.21.5/bin"
+  printf '#!/usr/bin/env bash\necho "go version go1.21.5 darwin/arm64"\n' >"${versions_dir}/go1.21.5/bin/go"
+  chmod +x "${versions_dir}/go1.21.5/bin/go"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" list --installed --minor
+  [ "$status" -eq 0 ] || fail "list --installed --minor failed: ${output}"
+  assert_contains "$output" "go1.21.6" "installed minor keeps newest patch"
+  assert_not_contains "$output" "go1.21.5" "installed minor drops older patch"
+  rm -rf "${versions_dir}/go1.21.5"
 
   : >"${case_dir}/urls.log"
   active_before=$(readlink "${case_dir}/go")

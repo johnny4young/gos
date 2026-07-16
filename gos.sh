@@ -2089,22 +2089,49 @@ cmd___versions() {
   return 0
 }
 
+# Keep only the newest entry per X.Y minor from an ascending semantically
+# sorted version list. Tolerates a "go" prefix and preserves the minors'
+# ascending order, so it can filter both bare and display-ready lists.
+_gos_newest_per_minor() {
+  awk '
+    {
+      v = $0
+      sub(/^go/, "", v)
+      if (match(v, /^[0-9]+\.[0-9]+/)) {
+        key = substr(v, 1, RLENGTH)
+      } else {
+        key = v
+      }
+      if (!(key in newest)) order[++minors] = key
+      newest[key] = $0
+    }
+    END {
+      for (i = 1; i <= minors; i++) print newest[order[i]]
+    }
+  '
+}
+
 cmd_list() {
-  local versions installed="false" current arg
+  local versions installed="false" minor_only="false" current arg
   for arg in "$@"; do
     case "$arg" in
       --json) GOS_OUTPUT_JSON=1 ;;
       --installed) installed="true" ;;
+      --minor) minor_only="true" ;;
       *)
         _gos_error "unknown option for gos list: ${arg}"
-        echo "Usage: gos list [--installed] [--json]" >&2
+        echo "Usage: gos list [--installed] [--minor] [--json]" >&2
         return 1
         ;;
     esac
   done
 
   if [ "$installed" = "true" ]; then
-    versions=$(_gos_installed_versions | _gos_sort_versions | sed 's/^/go/')
+    if [ "$minor_only" = "true" ]; then
+      versions=$(_gos_installed_versions | _gos_sort_versions | _gos_newest_per_minor | sed 's/^/go/')
+    else
+      versions=$(_gos_installed_versions | _gos_sort_versions | sed 's/^/go/')
+    fi
     if _gos_json_enabled; then
       current=$(_gos_current)
       printf '{"installed":'
@@ -2130,12 +2157,19 @@ cmd_list() {
     # Resolve the list before emitting JSON so failures never print a
     # truncated document.
     versions=$(_gos_list_versions) || return 1
+    if [ "$minor_only" = "true" ]; then
+      versions=$(printf '%s\n' "$versions" | _gos_newest_per_minor)
+    fi
     printf '{"versions":'
     printf '%s\n' "$versions" | _gos_json_array_from_lines
     printf '}\n'
   else
     echo "Fetching available Go versions..."
-    _gos_list_versions
+    if [ "$minor_only" = "true" ]; then
+      _gos_list_versions | _gos_newest_per_minor
+    else
+      _gos_list_versions
+    fi
   fi
 }
 
@@ -3241,7 +3275,7 @@ _gos_completions() {
         words="--json $versions"
         ;;
       list)
-        words="--installed --json"
+        words="--installed --minor --json"
         ;;
       env)
         words="--fish --auto --json"
@@ -3299,7 +3333,7 @@ _gos() {
     'uninstall:Remove an installed version (side-by-side mode)'
     'prune:Remove cached Go archives; --rollback also removes the rollback copy'
     'current:Show the currently active Go version'
-    'list:List available Go versions (or locally installed ones)'
+    'list:List available Go versions (or locally installed ones); --minor keeps the newest per minor'
     'platforms:List supported OS/arch archives for a Go version'
     'status:Show an offline dashboard for gos and the active Go'
     'which:Show the active or side-by-side Go binary path'
@@ -3340,7 +3374,7 @@ _gos() {
           fi
           ;;
         list)
-          _arguments '--installed[List locally installed versions]' '--json[Output machine-readable JSON]'
+          _arguments '--installed[List locally installed versions]' '--minor[Keep only the newest version per minor]' '--json[Output machine-readable JSON]'
           ;;
         env)
           _arguments '--fish[Emit fish shell syntax]' '--auto[Emit opt-in auto-switch hook]' '--json[Output machine-readable JSON]'
@@ -3384,7 +3418,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'rollback' -d 'Restore the previou
 complete -c gos -n '__fish_use_subcommand' -a 'uninstall' -d 'Remove an installed version (side-by-side mode)'
 complete -c gos -n '__fish_use_subcommand' -a 'prune' -d 'Remove cached Go archives; --rollback also removes the rollback copy'
 complete -c gos -n '__fish_use_subcommand' -a 'current' -d 'Show the currently active Go version'
-complete -c gos -n '__fish_use_subcommand' -a 'list' -d 'List available Go versions (or locally installed ones)'
+complete -c gos -n '__fish_use_subcommand' -a 'list' -d 'List available Go versions (or locally installed ones); --minor keeps the newest per minor'
 complete -c gos -n '__fish_use_subcommand' -a 'platforms' -d 'List supported OS/arch archives for a Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'status' -d 'Show an offline dashboard for gos and the active Go'
 complete -c gos -n '__fish_use_subcommand' -a 'which' -d 'Show the active or side-by-side Go binary path'
@@ -3401,6 +3435,7 @@ complete -c gos -n '__fish_seen_subcommand_from check current list platforms sta
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__fish_seen_subcommand_from doctor' -l fix -d 'Apply safe non-destructive fixes'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
+complete -c gos -n '__fish_seen_subcommand_from list' -l minor -d 'Keep only the newest version per minor'
 complete -c gos -n '__fish_seen_subcommand_from install run' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
 complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
 complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
@@ -3448,7 +3483,7 @@ rollback|rollback|Restore the previous Go installation, if available
 uninstall|uninstall <version>|Remove an installed version (side-by-side mode)
 prune|prune [--rollback]|Remove cached Go archives; --rollback also removes the rollback copy
 current|current|Show the currently active Go version
-list|list [--installed]|List available Go versions (or locally installed ones)
+list|list [--installed] [--minor]|List available Go versions (or locally installed ones); --minor keeps the newest per minor
 platforms|platforms [version]|List supported OS/arch archives for a Go version
 status|status|Show an offline dashboard for gos and the active Go
 which|which [version]|Show the active or side-by-side Go binary path

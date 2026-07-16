@@ -277,7 +277,7 @@ exec fish          # for Fish
 | `gos uninstall <version>` | Remove an installed version (side-by-side mode) |
 | `gos prune [--rollback]` | Remove cached Go archives; `--rollback` also removes the rollback copy |
 | `gos current` | Show the currently active Go version |
-| `gos list [--installed]` | List available Go versions (or locally installed ones) |
+| `gos list [--installed] [--minor]` | List available Go versions (or locally installed ones); `--minor` keeps the newest per minor |
 | `gos platforms [version]` | List supported OS/arch archives for a Go version |
 | `gos status` | Show an offline dashboard for gos and the active Go |
 | `gos which [version]` | Show the active or side-by-side Go binary path |

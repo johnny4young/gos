@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Harden feature tests for semantic Go version sorting and `gos self-update` replacement failures.
 - Add a shared shell test helper library and continue migrating shell suites to it.
 - Add a README terminal demo rendered from real command output, with a committed `docs/demo.tape` VHS source for regenerating it.
+- Add `gos list --minor` to keep only the newest version per minor (combines with `--installed` and `--json`), turning the 300-line full listing into a one-screen overview.
 
 ### Changed
 
