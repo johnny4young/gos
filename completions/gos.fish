@@ -21,7 +21,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'completions' -d 'Print a Bash, Zs
 complete -c gos -n '__fish_use_subcommand' -a 'doctor' -d 'Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
 complete -c gos -n '__fish_use_subcommand' -a 'self-update' -d 'Update gos itself to the latest verified release'
 complete -c gos -n '__fish_use_subcommand' -a 'version' -d 'Show gos version'
-complete -c gos -n '__fish_use_subcommand' -a 'help' -d 'Show this help message'
+complete -c gos -n '__fish_use_subcommand' -a 'help' -d 'Show this help message, or usage for one command'
 # gos-commands:fish:end
 # --json only where gos actually supports it (leading flag or per command).
 complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable JSON where supported'
@@ -30,6 +30,7 @@ complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remo
 complete -c gos -n '__fish_seen_subcommand_from prune' -l dry-run -d 'Preview removals without deleting'
 complete -c gos -n '__fish_seen_subcommand_from doctor' -l fix -d 'Apply safe non-destructive fixes'
 complete -c gos -n '__fish_seen_subcommand_from use' -l print -d 'Only resolve the project version'
+complete -c gos -n '__fish_seen_subcommand_from help' -a '(gos __commands 2>/dev/null)' -d 'gos command'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
 complete -c gos -n '__fish_seen_subcommand_from list' -l minor -d 'Keep only the newest version per minor'
 complete -c gos -n '__fish_seen_subcommand_from install run' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'

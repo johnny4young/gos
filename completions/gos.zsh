@@ -26,7 +26,7 @@ _gos() {
     'doctor:Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
     'self-update:Update gos itself to the latest verified release'
     'version:Show gos version'
-    'help:Show this help message'
+    'help:Show this help message, or usage for one command'
   )
   # gos-commands:zsh:end
 
@@ -59,6 +59,9 @@ _gos() {
           ;;
         list)
           _arguments '--installed[List locally installed versions]' '--minor[Keep only the newest version per minor]' '--json[Output machine-readable JSON]'
+          ;;
+        help)
+          _describe -t commands 'gos command' commands
           ;;
         env)
           _arguments '--fish[Emit fish shell syntax]' '--auto[Emit opt-in auto-switch hook]' '--json[Output machine-readable JSON]'

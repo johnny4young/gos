@@ -75,11 +75,11 @@ git -C "$write_fixture" diff --exit-code -- README.md gos.sh completions >/dev/n
 ruby - "${write_fixture}/gos.sh" <<'RUBY'
 path = ARGV.fetch(0)
 current = File.read(path)
-abort "command manifest insertion point missing" unless current.include?("help|help|Show this help message\nGOS_COMMANDS")
+abort "command manifest insertion point missing" unless current.include?("help|help [command]|Show this help message, or usage for one command\nGOS_COMMANDS")
 abort "embedded fish marker missing" unless current.include?("# gos-completions:fish:end")
 current = current.sub(
-  "help|help|Show this help message\nGOS_COMMANDS",
-  "help|help|Show this help message\nprobe|probe|Probe transactional synchronization\nGOS_COMMANDS"
+  "help|help [command]|Show this help message, or usage for one command\nGOS_COMMANDS",
+  "help|help [command]|Show this help message, or usage for one command\nprobe|probe|Probe transactional synchronization\nGOS_COMMANDS"
 )
 current = current.sub(
   "# gos-completions:fish:end",

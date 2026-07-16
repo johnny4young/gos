@@ -1696,6 +1696,24 @@ run_gos "$case_dir" bash "$script" frobnicate
 assert_not_contains "$output" "Did you mean?" "distant command has no suggestions"
 pass "unknown commands suggest close-typo commands by edit distance"
 
+case_dir="${test_root}/help-topic"
+run_gos "$case_dir" bash "$script" help list
+[ "$status" -eq 0 ] || fail "help list failed: ${output}"
+assert_contains "$output" "Usage: gos list [--installed] [--minor]" "help topic usage"
+assert_contains "$output" "List available Go versions" "help topic description"
+assert_not_contains "$output" "COMMANDS:" "help topic omits the full listing"
+run_gos "$case_dir" bash "$script" help isntall
+[ "$status" -ne 0 ] || fail "help for an unknown command should fail"
+assert_contains "$output" "Error: unknown command: isntall" "help unknown command error"
+assert_contains "$output" "  install" "help unknown command suggestion"
+run_gos "$case_dir" bash "$script" help list extra
+[ "$status" -ne 0 ] || fail "help with extra arguments should fail"
+assert_contains "$output" "unexpected argument for gos help" "help trailing argument"
+run_gos "$case_dir" bash "$script" help
+[ "$status" -eq 0 ] || fail "plain help failed: ${output}"
+assert_contains "$output" "COMMANDS:" "plain help keeps the full listing"
+pass "help shows a single command's usage from the manifest"
+
 case_dir="${test_root}/cli-extra-args"
 run_gos "$case_dir" bash "$script" latest extra
 [ "$status" -ne 0 ] || fail "latest with trailing argument should fail"

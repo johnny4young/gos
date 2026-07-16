@@ -286,7 +286,7 @@ exec fish          # for Fish
 | `gos doctor [--fix]` | Diagnose gos, Go, PATH, and local tool dependencies; `--fix` creates safe missing directories and prints the shell setup line |
 | `gos self-update` | Update gos itself to the latest verified release |
 | `gos version` | Show gos version |
-| `gos help` | Show this help message |
+| `gos help [command]` | Show this help message, or usage for one command |
 <!-- gos-commands:end -->
 
 ### Examples

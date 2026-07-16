@@ -52,6 +52,9 @@ _gos_completions() {
       list)
         words="--installed --minor --json"
         ;;
+      help)
+        words="$commands"
+        ;;
       env)
         words="--fish --auto --json"
         ;;

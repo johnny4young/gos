@@ -3365,6 +3365,9 @@ _gos_completions() {
       list)
         words="--installed --minor --json"
         ;;
+      help)
+        words="$commands"
+        ;;
       env)
         words="--fish --auto --json"
         ;;
@@ -3433,7 +3436,7 @@ _gos() {
     'doctor:Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
     'self-update:Update gos itself to the latest verified release'
     'version:Show gos version'
-    'help:Show this help message'
+    'help:Show this help message, or usage for one command'
   )
   # gos-commands:zsh:end
 
@@ -3466,6 +3469,9 @@ _gos() {
           ;;
         list)
           _arguments '--installed[List locally installed versions]' '--minor[Keep only the newest version per minor]' '--json[Output machine-readable JSON]'
+          ;;
+        help)
+          _describe -t commands 'gos command' commands
           ;;
         env)
           _arguments '--fish[Emit fish shell syntax]' '--auto[Emit opt-in auto-switch hook]' '--json[Output machine-readable JSON]'
@@ -3518,7 +3524,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'completions' -d 'Print a Bash, Zs
 complete -c gos -n '__fish_use_subcommand' -a 'doctor' -d 'Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
 complete -c gos -n '__fish_use_subcommand' -a 'self-update' -d 'Update gos itself to the latest verified release'
 complete -c gos -n '__fish_use_subcommand' -a 'version' -d 'Show gos version'
-complete -c gos -n '__fish_use_subcommand' -a 'help' -d 'Show this help message'
+complete -c gos -n '__fish_use_subcommand' -a 'help' -d 'Show this help message, or usage for one command'
 # gos-commands:fish:end
 # --json only where gos actually supports it (leading flag or per command).
 complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable JSON where supported'
@@ -3527,6 +3533,7 @@ complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remo
 complete -c gos -n '__fish_seen_subcommand_from prune' -l dry-run -d 'Preview removals without deleting'
 complete -c gos -n '__fish_seen_subcommand_from doctor' -l fix -d 'Apply safe non-destructive fixes'
 complete -c gos -n '__fish_seen_subcommand_from use' -l print -d 'Only resolve the project version'
+complete -c gos -n '__fish_seen_subcommand_from help' -a '(gos __commands 2>/dev/null)' -d 'gos command'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
 complete -c gos -n '__fish_seen_subcommand_from list' -l minor -d 'Keep only the newest version per minor'
 complete -c gos -n '__fish_seen_subcommand_from install run' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
@@ -3585,7 +3592,7 @@ completions|completions <shell>|Print a Bash, Zsh, or Fish completion script
 doctor|doctor [--fix]|Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line
 self-update|self-update|Update gos itself to the latest verified release
 version|version|Show gos version
-help|help|Show this help message
+help|help [command]|Show this help message, or usage for one command
 GOS_COMMANDS
 }
 
@@ -3597,6 +3604,42 @@ _gos_command_help() {
 }
 
 cmd_help() {
+  local topic="${1:-}" entry entry_usage entry_description suggestion suggestions
+
+  if [ "$#" -gt 1 ]; then
+    _gos_error "unexpected argument for gos help: ${2}"
+    echo "Usage: gos help [command]" >&2
+    return 1
+  fi
+
+  # Per-command help straight from the manifest, so it can never drift from
+  # the full listing, the README table, or the completions.
+  if [ -n "$topic" ]; then
+    entry=$(_gos_command_manifest | while IFS='|' read -r entry_name entry_usage entry_description; do
+      if [ "$entry_name" = "$topic" ]; then
+        printf '%s|%s\n' "$entry_usage" "$entry_description"
+      fi
+    done)
+    if [ -z "$entry" ]; then
+      _gos_error "unknown command: ${topic}"
+      suggestions=$(_gos_suggest_command "$topic")
+      if [ -n "$suggestions" ]; then
+        echo "Did you mean?" >&2
+        while IFS= read -r suggestion; do
+          echo "  ${suggestion}" >&2
+        done <<EOF
+$suggestions
+EOF
+      fi
+      return 1
+    fi
+    entry_usage="${entry%%|*}"
+    entry_description="${entry#*|}"
+    printf 'Usage: gos %s\n' "$entry_usage"
+    printf '%s\n' "$entry_description"
+    return 0
+  fi
+
   cat <<EOF
 
 gos — Go Switch v${GOS_VERSION}
@@ -3831,7 +3874,7 @@ main() {
     __versions) cmd___versions "$@" ;;
     doctor) cmd_doctor "$@" ;;
     version) cmd_version "$@" ;;
-    help | --help | -h) cmd_help ;;
+    help | --help | -h) cmd_help "$@" ;;
     *)
       local suggestion suggestions
       _gos_error "unknown command: $cmd"
