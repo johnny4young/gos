@@ -1022,6 +1022,12 @@ if [ -s "${case_dir}/urls.log" ]; then
   fail "cached list should not reach the network: $(cat "${case_dir}/urls.log")"
 fi
 assert_contains "$output" '"versions":["go1.20.0","go1.21rc1","go1.21.6","go1.22rc1"]' "cached list output"
+GOS_TEST_FEED_TTL=999999999999999999999 run_gos "$case_dir" bash "$script" list --json
+[ "$status" -eq 0 ] || fail "arbitrary-precision GOS_FEED_TTL list failed: ${output}"
+assert_json "$output" "arbitrary-precision GOS_FEED_TTL list"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "a giant GOS_FEED_TTL should reuse the fresh feed cache: $(cat "${case_dir}/urls.log")"
+fi
 run_gos "$case_dir" bash "$script" __versions --remote-cached
 [ "$status" -eq 0 ] || fail "__versions --remote-cached failed: ${output}"
 assert_contains "$output" "1.21.6" "__versions remote cached"
@@ -1033,6 +1039,11 @@ GOS_TEST_FEED_TTL=0 run_gos "$case_dir" bash "$script" list --json
 assert_json "$output" "feed-cache disabled list"
 grep -q 'https://go.dev/dl/?mode=json&include=all' "${case_dir}/urls.log" \
   || fail "GOS_FEED_TTL=0 should disable feed-cache reads"
+GOS_TEST_FEED_TTL=000 run_gos "$case_dir" bash "$script" list --json
+[ "$status" -eq 0 ] || fail "GOS_FEED_TTL=000 list failed: ${output}"
+assert_json "$output" "feed-cache canonical zero list"
+grep -q 'https://go.dev/dl/?mode=json&include=all' "${case_dir}/urls.log" \
+  || fail "GOS_FEED_TTL=000 should disable feed-cache reads"
 
 case_dir="${test_root}/check-feed-cache"
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json

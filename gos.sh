@@ -363,11 +363,19 @@ _gos_download_stdout() {
 GOS_FEED_JSON_DEFAULT=""
 GOS_FEED_JSON_ALL=""
 
-_gos_feed_cache_enabled() {
+_gos_feed_ttl_seconds() {
+  local ttl
   case "$GOS_FEED_TTL" in
-    '' | *[!0-9]* | 0) return 1 ;;
-    *) return 0 ;;
+    '' | *[!0-9]*) return 1 ;;
   esac
+  ttl=$(printf '%s\n' "$GOS_FEED_TTL" | sed 's/^0*//')
+  printf '%s\n' "${ttl:-0}"
+}
+
+_gos_feed_cache_enabled() {
+  local ttl
+  ttl=$(_gos_feed_ttl_seconds) || return 1
+  [ "$ttl" != "0" ]
 }
 
 _gos_feed_cache_path() {
@@ -385,15 +393,17 @@ _gos_file_mtime() {
 }
 
 _gos_feed_cache_fresh() {
-  local cache_file="$1" mtime now age
+  local cache_file="$1" mtime now age ttl
 
   _gos_feed_cache_enabled || return 1
+  ttl=$(_gos_feed_ttl_seconds) || return 1
   [ -f "$cache_file" ] || return 1
   mtime=$(_gos_file_mtime "$cache_file") || return 1
   case "$mtime" in '' | *[!0-9]*) return 1 ;; esac
   now=$(date +%s 2>/dev/null) || return 1
   age=$((now - mtime))
-  [ "$age" -ge 0 ] && [ "$age" -le "$GOS_FEED_TTL" ]
+  [ "$age" -ge 0 ] || return 1
+  [ "$age" = "$ttl" ] || _gos_decimal_is_greater "$ttl" "$age"
 }
 
 _gos_cached_feed_json() {
