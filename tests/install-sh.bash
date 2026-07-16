@@ -153,7 +153,7 @@ assert_not_installed() {
 
 run_installer() {
   local name="$1" install_kind="$2" strict="default"
-  local require_checksum=""
+  local require_checksum="${GOS_TEST_REQUIRE_CHECKSUM:-}"
   shift 2
   case "${1:-}" in
     default | strict)
@@ -235,6 +235,13 @@ assert_contains "$output" "Usage: install.sh" "unexpected installer argument usa
 assert_not_installed "$bin_dir" "unexpected installer argument"
 [ ! -s "$url_log" ] || fail "unexpected installer argument should fail before downloading"
 pass "installer rejects positional arguments before download"
+
+GOS_TEST_REQUIRE_CHECKSUM=required run_installer "invalid_checksum_policy" "existing"
+assert_nonzero_status "$status" "invalid checksum policy" "$output"
+assert_contains "$output" "GOS_REQUIRE_CHECKSUM='required' must be unset, '1', or 'feed'" "invalid checksum policy"
+assert_not_installed "$bin_dir" "invalid checksum policy"
+[ ! -s "$url_log" ] || fail "invalid checksum policy should fail before downloading"
+pass "installer rejects unknown checksum policies before download"
 
 run_installer "relative_bin" "relative"
 assert_nonzero_status "$status" "relative GOS_BIN_DIR" "$output"

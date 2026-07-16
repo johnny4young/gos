@@ -31,6 +31,14 @@ _validate_inputs() {
     return 2
   fi
 
+  case "${GOS_REQUIRE_CHECKSUM:-}" in
+    '' | 1 | feed) ;;
+    *)
+      echo "Error: GOS_REQUIRE_CHECKSUM='${GOS_REQUIRE_CHECKSUM}' must be unset, '1', or 'feed'." >&2
+      return 1
+      ;;
+  esac
+
   if [ -z "$GOS_BIN_DIR" ]; then
     echo "Error: GOS_BIN_DIR is empty." >&2
     return 1

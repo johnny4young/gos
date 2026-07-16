@@ -602,6 +602,16 @@ _gos_has_checksum_parser() {
   command -v jq &>/dev/null || command -v python3 &>/dev/null
 }
 
+_gos_validate_checksum_policy() {
+  case "${GOS_REQUIRE_CHECKSUM:-}" in
+    '' | 1 | feed) return 0 ;;
+    *)
+      _gos_error "GOS_REQUIRE_CHECKSUM='${GOS_REQUIRE_CHECKSUM}' must be unset, '1', or 'feed'."
+      return 1
+      ;;
+  esac
+}
+
 # GOS_REQUIRE_CHECKSUM=1    -> fail closed when no checksum can be verified.
 # GOS_REQUIRE_CHECKSUM=feed -> additionally require the digest to come from
 #   the go.dev downloads feed (cross-origin from the archive host), rejecting
@@ -3005,6 +3015,13 @@ cmd_doctor() {
     _gos_doctor_check "warn" "checksum-metadata" "jq/python3 is missing; checksum metadata cannot be parsed"
   fi
 
+  local checksum_policy_error
+  if checksum_policy_error=$(_gos_validate_checksum_policy 2>&1); then
+    _gos_doctor_check "ok" "checksum-policy" "GOS_REQUIRE_CHECKSUM is valid"
+  else
+    _gos_doctor_check "problem" "checksum-policy" "$checksum_policy_error" "Unset GOS_REQUIRE_CHECKSUM or set it to 1 or feed."
+  fi
+
   # Actually hash a throwaway file (not "$0", which is "bash" under curl | bash),
   # so a present-but-broken tool — a shasum missing a Perl module, a wrong-arch
   # binary — is caught here instead of only when an install later fails.
@@ -3488,20 +3505,24 @@ main() {
 
   case "$cmd" in
     latest)
+      _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       _gos_acquire_lock || return 1
       cmd_latest "$@"
       ;;
     install)
+      _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       _gos_acquire_lock || return 1
       cmd_install "$@"
       ;;
     run)
+      _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       cmd_run "$@"
       ;;
     use)
+      _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       _gos_acquire_lock || return 1
       cmd_use "$@"

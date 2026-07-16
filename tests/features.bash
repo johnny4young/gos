@@ -857,6 +857,27 @@ run_gos "$case_dir" bash "$script" install ""
 assert_contains "$output" "Usage: gos install <version>" "empty version usage"
 pass "unsafe or malformed versions are rejected before any network access"
 
+case_dir="${test_root}/checksum-policy"
+GOS_TEST_REQUIRE_CHECKSUM=required run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "install should reject an unknown checksum policy"
+assert_contains "$output" "GOS_REQUIRE_CHECKSUM='required' must be unset, '1', or 'feed'" "install checksum policy"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "invalid checksum policy must fail before install network access"
+fi
+GOS_TEST_REQUIRE_CHECKSUM=required run_gos "$case_dir" bash "$script" latest
+[ "$status" -ne 0 ] || fail "latest should reject an unknown checksum policy"
+assert_contains "$output" "GOS_REQUIRE_CHECKSUM='required' must be unset, '1', or 'feed'" "latest checksum policy"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "invalid checksum policy must fail before latest network access"
+fi
+GOS_TEST_REQUIRE_CHECKSUM=required run_gos "$case_dir" bash "$script" doctor --json
+[ "$status" -ne 0 ] || fail "doctor should fail when checksum policy is invalid"
+assert_json "$output" "doctor invalid checksum policy"
+assert_contains "$output" '"status":"problem"' "doctor checksum policy status"
+assert_contains "$output" '"name":"checksum-policy"' "doctor checksum policy check"
+assert_contains "$output" "GOS_REQUIRE_CHECKSUM='required' must be unset" "doctor checksum policy message"
+pass "unknown checksum policies fail closed and doctor reports them"
+
 case_dir="${test_root}/validate-install-dir"
 GOS_TEST_INSTALL_DIR="/usr" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -ne 0 ] || fail "system-critical install dir should fail"
