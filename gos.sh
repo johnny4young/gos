@@ -121,6 +121,19 @@ _gos_color_text() {
   printf '\033[%sm%s\033[0m' "$code" "$text"
 }
 
+# Print "<prefix><value><suffix>" with only the value colored when
+# interactive color is enabled. Must be called at top level, never inside
+# command substitution: there stdout is a pipe, so the TTY check in
+# _gos_color_enabled would always disable color.
+_gos_print_styled_value() {
+  local code="$1" prefix="$2" value="$3" suffix="${4-}"
+  if _gos_color_enabled; then
+    printf '%s%s%s\n' "$prefix" "$(_gos_color_text "$code" "$value")" "$suffix"
+  else
+    printf '%s%s%s\n' "$prefix" "$value" "$suffix"
+  fi
+}
+
 _gos_stderr_color_enabled() {
   [ "${GOS_OUTPUT_JSON:-0}" != "1" ] || return 1
   [ -t 2 ] || return 1
@@ -1830,14 +1843,14 @@ cmd_check() {
     echo "Current Go is newer than latest stable go${latest}."
   elif [ "$up_to_date" = "true" ]; then
     echo "Current: go${current}"
-    echo "Already up to date."
+    _gos_print_styled_value 32 '' 'Already up to date.'
   else
     echo "Current: go${current}"
-    echo "Update available. Install it with: gos latest"
+    _gos_print_styled_value 33 '' 'Update available. Install it with: gos latest'
   fi
 
   if [ -n "$gos_latest" ] && [ "$gos_up_to_date" = "false" ]; then
-    echo "gos v${gos_latest} is available. Update with: gos self-update"
+    _gos_print_styled_value 33 '' "gos v${gos_latest} is available. Update with: gos self-update"
   fi
 }
 
@@ -2316,9 +2329,9 @@ cmd_status() {
   fi
 
   if [ "$active" = "none" ]; then
-    printf 'Active:       none\n'
+    _gos_print_styled_value 33 'Active:       ' 'none'
   else
-    printf 'Active:       go%s\n' "$active"
+    _gos_print_styled_value 32 'Active:       ' "go${active}"
   fi
   if [ -n "$go_path" ]; then
     printf 'Go path:      %s (%s)\n' "$go_path" "$source"
@@ -2333,9 +2346,9 @@ cmd_status() {
   fi
   if [ -n "$project_version" ]; then
     if [ "$project_matches" = "true" ]; then
-      printf 'Project:      go%s (%s, matches active)\n' "$project_version" "$project_source"
+      _gos_print_styled_value 32 'Project:      ' "go${project_version}" " (${project_source}, matches active)"
     else
-      printf 'Project:      go%s (%s, differs from active)\n' "$project_version" "$project_source"
+      _gos_print_styled_value 33 'Project:      ' "go${project_version}" " (${project_source}, differs from active)"
     fi
   else
     printf 'Project:      none found from %s upward\n' "$PWD"

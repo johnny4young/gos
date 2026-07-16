@@ -559,6 +559,9 @@ popd >/dev/null
 [ "$status" -eq 0 ] || fail "status failed: ${output}"
 assert_contains "$output" "Project:      go1.20rc1" "status human project"
 assert_contains "$output" "Cache:        1 archive(s)" "status human cache"
+case "$output" in
+  *$'\033['*) fail "status non-tty output must not contain ANSI: ${output}" ;;
+esac
 
 case_dir="${test_root}/which"
 run_gos "$case_dir" bash "$script" which --json
@@ -754,6 +757,28 @@ else
   echo "ok - doctor NO_COLOR TTY branch skipped: no usable pseudo-terminal harness"
 fi
 pass "doctor color is limited to interactive output and honors NO_COLOR"
+
+case_dir="${test_root}/status-color"
+mkdir -p "$case_dir"
+runner="${case_dir}/status-tty.sh"
+cat >"$runner" <<TTY_STATUS
+#!/usr/bin/env bash
+set -euo pipefail
+unset NO_COLOR GOS_NO_COLOR
+PATH="${fake_bin}:${original_path}" \
+TERM="xterm-256color" \
+GOS_INSTALL_DIR="${case_dir}/go" \
+GOS_CACHE_DIR="${case_dir}/cache" \
+  bash "$script" status
+TTY_STATUS
+chmod +x "$runner"
+if run_with_pty "$runner" "${case_dir}/status-tty.out"; then
+  status_tty=$(<"${case_dir}/status-tty.out")
+  assert_contains "$status_tty" $'\033[32mgo' "status tty active version is green"
+else
+  echo "ok - status color TTY branch skipped: no usable pseudo-terminal harness"
+fi
+pass "status color is limited to interactive output"
 
 case_dir="${test_root}/stderr-style"
 mkdir -p "$case_dir"
@@ -1279,6 +1304,12 @@ assert_contains "$output" "gos v${huge_gos_version} is available" "arbitrary-pre
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --bogus
 [ "$status" -ne 0 ] || fail "check should reject an unknown flag"
 assert_contains "$output" "unexpected argument: --bogus" "check rejects unknown flag"
+GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
+[ "$status" -eq 0 ] || fail "check with an update available failed: ${output}"
+assert_contains "$output" "Update available. Install it with: gos latest" "check verdict text without tty"
+case "$output" in
+  *$'\033['*) fail "check non-tty output must not contain ANSI: ${output}" ;;
+esac
 pass "check reports update availability without installing"
 
 case_dir="${test_root}/download-progress"
