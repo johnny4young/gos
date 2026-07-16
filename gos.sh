@@ -2308,7 +2308,7 @@ cmd_which() {
 
 cmd_status() {
   local active go_path source layout layout_target resolved project_version project_source
-  local project_matches="null" rollback_available="false" stats cache_count cache_bytes
+  local project_matches="null" rollback_available="false" rollback_version="" stats cache_count cache_bytes
 
   _gos_set_json_from_args "$@" || return 1
 
@@ -2352,6 +2352,11 @@ cmd_status() {
 
   if [ -d "$(_gos_rollback_dir)" ] || [ -L "$(_gos_rollback_dir)" ]; then
     rollback_available="true"
+    # Best effort: a rollback slot without a runnable go still reports as
+    # available, just without a version.
+    if [ -x "$(_gos_rollback_dir)/bin/go" ]; then
+      rollback_version=$(_gos_go_version_of "$(_gos_rollback_dir)/bin/go") || rollback_version=""
+    fi
   fi
   stats=$(_gos_cache_archive_stats)
   cache_count="${stats%%|*}"
@@ -2384,7 +2389,13 @@ cmd_status() {
     else
       printf 'null'
     fi
-    printf ',"rollback_available":%s,"cache":{"dir":' "$rollback_available"
+    printf ',"rollback_available":%s,"rollback_version":' "$rollback_available"
+    if [ -n "$rollback_version" ]; then
+      _gos_json_string "go${rollback_version}"
+    else
+      printf 'null'
+    fi
+    printf ',"cache":{"dir":'
     _gos_json_string "$GOS_CACHE_DIR"
     printf ',"archives":%s,"bytes":%s},"gos_version":' "$cache_count" "$cache_bytes"
     _gos_json_string "$GOS_VERSION"
@@ -2417,7 +2428,9 @@ cmd_status() {
   else
     printf 'Project:      none found from %s upward\n' "$PWD"
   fi
-  if [ "$rollback_available" = "true" ]; then
+  if [ "$rollback_available" = "true" ] && [ -n "$rollback_version" ]; then
+    printf 'Rollback:     available (go%s)\n' "$rollback_version"
+  elif [ "$rollback_available" = "true" ]; then
     printf 'Rollback:     available\n'
   else
     printf 'Rollback:     unavailable\n'

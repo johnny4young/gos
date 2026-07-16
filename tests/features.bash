@@ -566,6 +566,7 @@ assert_contains "$output" '"active":"go1.20rc1"' "status json active"
 assert_contains "$output" '"source":"path"' "status json source"
 assert_contains "$output" '"project":{"version":"go1.20rc1"' "status json project"
 assert_contains "$output" '"matches_active":true' "status json project match"
+assert_contains "$output" '"rollback_available":false,"rollback_version":null' "status json without rollback"
 assert_contains "$output" '"archives":1' "status json cache count"
 if [ -s "${case_dir}/urls.log" ]; then
   fail "status must not reach the network"
@@ -576,9 +577,28 @@ popd >/dev/null
 [ "$status" -eq 0 ] || fail "status failed: ${output}"
 assert_contains "$output" "Project:      go1.20rc1" "status human project"
 assert_contains "$output" "Cache:        1 archive(s)" "status human cache"
+assert_contains "$output" "Rollback:     unavailable" "status human without rollback"
 case "$output" in
   *$'\033['*) fail "status non-tty output must not contain ANSI: ${output}" ;;
 esac
+
+mkdir -p "${case_dir}/go.gos-rollback/bin"
+cat >"${case_dir}/go.gos-rollback/bin/go" <<'ROLLBACK_GO'
+#!/usr/bin/env bash
+echo "go version go1.19.5 darwin/arm64"
+ROLLBACK_GO
+chmod +x "${case_dir}/go.gos-rollback/bin/go"
+pushd "$case_dir/project" >/dev/null
+run_gos "$case_dir" bash "$script" status
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "status with rollback failed: ${output}"
+assert_contains "$output" "Rollback:     available (go1.19.5)" "status human rollback version"
+pushd "$case_dir/project" >/dev/null
+run_gos "$case_dir" bash "$script" status --json
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "status --json with rollback failed: ${output}"
+assert_json "$output" "status --json with rollback"
+assert_contains "$output" '"rollback_available":true,"rollback_version":"go1.19.5"' "status json rollback version"
 
 case_dir="${test_root}/which"
 run_gos "$case_dir" bash "$script" which --json

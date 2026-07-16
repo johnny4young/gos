@@ -34,6 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `gos pin` without a version now pins the currently active Go instead of failing, so "make this project use what I am running" is one command.
 - Interactive `gos list --installed` now highlights the active version in green with an `(active)` marker; piped output keeps the bare one-per-line contract.
 - `gos install` with a version the go.dev downloads feed does not list now fails immediately with a clear error and a `gos list` hint, instead of attempting a download that ends in "may not exist". When the feed or its parsers are unavailable the previous attempt-and-report behavior is kept.
+- `gos status` now reports which version the rollback slot contains (`Rollback: available (go1.25.2)`), and `gos status --json` gains a `rollback_version` field.
 
 ### Fixed
 
