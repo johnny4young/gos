@@ -46,6 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- The release workflow now builds `gos-windows.zip` once in the version-bump job and publishes that exact artifact, instead of rebuilding it in the release job and requiring bit-identical zip output across runners; a mismatched rebuild aborted the v1.8.0 release before any asset was published.
 - Compare gos release versions without shell integer limits, preserving correct ordering for every valid SemVer numeric identifier.
 - Keep `gos check` and `gos latest` from offering or performing a downgrade when the active Go is newer than the latest stable feed release.
 - Sort Go releases without numeric size limits and ignore malformed version metadata in lists and completion candidates.

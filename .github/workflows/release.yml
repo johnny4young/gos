@@ -177,11 +177,21 @@ jobs:
           VERSION: ${{ needs.validate-release-ref.outputs.version }}
         run: |
           : "${VERSION:?missing release version}"
-          tmp_zip=$(mktemp)
-          trap 'rm -f "$tmp_zip"' EXIT
-          bash scripts/build-windows-package.bash "$tmp_zip"
-          WINDOWS_SHA=$(sha256sum "$tmp_zip" | cut -d' ' -f1)
+          bash scripts/build-windows-package.bash gos-windows.zip
+          WINDOWS_SHA=$(sha256sum gos-windows.zip | cut -d' ' -f1)
           bash scripts/update-packaging.bash "$VERSION" "$WINDOWS_SHA"
+
+      # The release job publishes this exact zip instead of rebuilding it:
+      # zip output is only bit-identical across runners when their Info-ZIP
+      # builds match, so a rebuild can drift from the checksum stamped into
+      # the committed package metadata.
+      - name: Upload Windows package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gos-windows-zip
+          path: gos-windows.zip
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Commit and tag
         env:
@@ -264,7 +274,18 @@ jobs:
           grep -Fq "GOS_EXPECTED_SHA256=\"${GOS_SHA}\"" install.sh
           printf 'Patched install.sh with TAG=%s and SHA256=%s\n' "$TAG" "$GOS_SHA"
 
+      # Manual releases reuse the exact zip whose checksum version-bump
+      # stamped into the package metadata. Tag-push releases have no bump job,
+      # so they rebuild locally and rely on the tag's metadata being prepared
+      # against an identical zip.
+      - name: Download Windows package asset
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/download-artifact@v4
+        with:
+          name: gos-windows-zip
+
       - name: Build Windows package asset
+        if: github.event_name != 'workflow_dispatch'
         run: |
           bash scripts/build-windows-package.bash gos-windows.zip
 
