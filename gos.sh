@@ -483,14 +483,17 @@ _gos_fetch_latest() {
   local allow_disk_cache="${1:-false}"
   local json
   json=$(_gos_feed_json false "$allow_disk_cache") || return 1
-  _gos_feed_versions "$json" | head -1
+  _gos_feed_versions "$json" \
+    | grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$' \
+    | _gos_sort_versions \
+    | tail -1
 }
 
 # Resolve a bare X.Y version to the newest matching release in the feed.
 # Since Go 1.21 the first release of every minor ships as X.Y.0, so `gos
 # install 1.22` (or a go.mod `go 1.22` directive) has no matching archive.
-# Older minors did ship a bare X.Y release, which the feed also lists, so the
-# newest feed match (feed order is newest-first) is correct for both eras.
+# Older minors did ship a bare X.Y release, which the feed also lists. Resolve
+# the semantic maximum instead of depending on the feed's current ordering.
 # Prints the input unchanged when it already has a patch or pre-release
 # component, or when the feed is unavailable.
 _gos_resolve_bare_minor() {
@@ -508,7 +511,12 @@ _gos_resolve_bare_minor() {
     return 0
   }
   escaped=${version//./\\.}
-  resolved=$(_gos_feed_versions "$json" | grep -E "^${escaped}(\.[0-9]+)?$" | head -1) || resolved=""
+  resolved=$(
+    _gos_feed_versions "$json" \
+      | grep -E "^${escaped}(\.[0-9]+)?$" \
+      | _gos_sort_versions \
+      | tail -1
+  ) || resolved=""
 
   if [ -n "$resolved" ]; then
     printf '%s\n' "$resolved"

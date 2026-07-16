@@ -110,6 +110,15 @@ case "$url" in
     cat <<'JSON'
 [
   {
+    "version": "malformed"
+  },
+  {
+    "version": "go1.20.0",
+    "files": [
+      {"filename": "go1.20.0.darwin-arm64.tar.gz", "os": "darwin", "arch": "arm64", "kind": "archive", "sha256": "oldsha"}
+    ]
+  },
+  {
     "version": "go1.21.6",
     "files": [
       {"filename": "go1.21.6.darwin-arm64.tar.gz", "os": "darwin", "arch": "arm64", "kind": "archive", "sha256": "expectedsha"},
@@ -117,10 +126,7 @@ case "$url" in
     ]
   },
   {
-    "version": "go1.20.0",
-    "files": [
-      {"filename": "go1.20.0.darwin-arm64.tar.gz", "os": "darwin", "arch": "arm64", "kind": "archive", "sha256": "oldsha"}
-    ]
+    "version": "go1.22rc1"
   }
 ]
 JSON
@@ -392,6 +398,39 @@ LARGE_SORT_OUTPUT
 [ "$large_sort_output" = "$expected_large_sort_output" ] \
   || fail "arbitrary-precision Go version ordering failed. Output: ${large_sort_output}"
 pass "version sorter preserves arbitrary precision and ignores malformed metadata"
+
+feed_selection_output="$(
+  PATH="${fake_bin}:${original_path}" \
+    GOS_INSTALL_DIR="${test_root}/feed-selection/go" \
+    GOS_CACHE_DIR="${test_root}/feed-selection/cache" \
+    GOS_TEST_REAL_MV="$real_mv" \
+    bash -c '
+      set -euo pipefail
+      . "$1"
+      _gos_feed_json() {
+        cat <<"JSON"
+[
+  {"version":"malformed"},
+  {"version":"go1.21.4"},
+  {"version":"go1.20.0"},
+  {"version":"go1.21.6"},
+  {"version":"go1.22rc1"}
+]
+JSON
+      }
+      printf "latest=%s\\n" "$(_gos_fetch_latest)"
+      printf "minor=%s\\n" "$(_gos_resolve_bare_minor 1.21)"
+    ' bash "$sourceable_script"
+)"
+expected_feed_selection_output="$(
+  cat <<'FEED_SELECTION_OUTPUT'
+latest=1.21.6
+minor=1.21.6
+FEED_SELECTION_OUTPUT
+)"
+[ "$feed_selection_output" = "$expected_feed_selection_output" ] \
+  || fail "unordered feed selection failed. Output: ${feed_selection_output}"
+pass "latest and bare-minor resolution are independent of feed ordering"
 
 semver_comparison_output="$(
   PATH="${fake_bin}:${original_path}" \
