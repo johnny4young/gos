@@ -2584,13 +2584,13 @@ cmd_uninstall() {
       --dry-run) dry_run="true" ;;
       -*)
         _gos_error "unknown option for gos uninstall: ${arg}"
-        echo "Usage: gos uninstall <version> (or --inactive [--dry-run])" >&2
+        echo "Usage: gos uninstall <version or --inactive> [--dry-run]" >&2
         return 1
         ;;
       *)
         if [ -n "$version" ]; then
           _gos_error "unexpected argument for gos uninstall: ${arg}"
-          echo "Usage: gos uninstall <version> (or --inactive [--dry-run])" >&2
+          echo "Usage: gos uninstall <version or --inactive> [--dry-run]" >&2
           return 1
         fi
         version="$arg"
@@ -2602,12 +2602,8 @@ cmd_uninstall() {
     _gos_error "--inactive removes every inactive version and cannot be combined with one."
     return 1
   fi
-  if [ "$dry_run" = "true" ] && [ "$inactive" != "true" ]; then
-    _gos_error "--dry-run requires --inactive."
-    return 1
-  fi
   if [ -z "$version" ] && [ "$inactive" != "true" ]; then
-    echo "Usage: gos uninstall <version> (or --inactive [--dry-run])  e.g. gos uninstall 1.24.0" >&2
+    echo "Usage: gos uninstall <version or --inactive> [--dry-run]  e.g. gos uninstall 1.24.0" >&2
     return 1
   fi
 
@@ -2670,6 +2666,11 @@ cmd_uninstall() {
   rollback_dir=$(_gos_rollback_dir)
   if [ -e "$rollback_dir" ] && [ "$rollback_dir" -ef "$version_dir" ]; then
     _gos_warning "the rollback link points at go${version}; gos rollback will not work until the next install."
+  fi
+
+  if [ "$dry_run" = "true" ]; then
+    echo "Would uninstall go${version} from ${version_dir}."
+    return 0
   fi
 
   _gos_sudo rm -rf "$version_dir" || return 1
@@ -3648,7 +3649,7 @@ use|use [--print] [path]|Install the Go version requested by .go-version, .tool-
 pin|pin [version]|Write .go-version in the current directory (active version by default)
 check|check|Check whether newer stable Go or gos releases are available (no install)
 rollback|rollback|Restore the previous Go installation, if available
-uninstall|uninstall <version> (or --inactive [--dry-run])|Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback
+uninstall|uninstall <version or --inactive> [--dry-run]|Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback
 prune|prune [--rollback] [--dry-run]|Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews
 current|current|Show the currently active Go version
 list|list [--installed] [--minor]|List available Go versions (or locally installed ones); --minor keeps the newest per minor

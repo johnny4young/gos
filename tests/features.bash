@@ -2014,8 +2014,9 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
   [ "$status" -ne 0 ] || fail "--inactive with a version should fail"
   assert_contains "$output" "cannot be combined" "inactive rejects a version argument"
   GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall --dry-run 1.20.0
-  [ "$status" -ne 0 ] || fail "--dry-run without --inactive should fail"
-  assert_contains "$output" "--dry-run requires --inactive" "uninstall dry-run requires inactive"
+  [ "$status" -eq 0 ] || fail "single-version uninstall --dry-run failed: ${output}"
+  assert_contains "$output" "Would uninstall go1.20.0" "single uninstall dry-run previews"
+  [ -d "${versions_dir}/go1.20.0" ] || fail "single uninstall dry-run must not delete the version"
   pass "side-by-side mode installs, switches instantly, lists, and uninstalls versions"
 
 else
