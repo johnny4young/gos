@@ -31,6 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - Compare gos release versions without shell integer limits, preserving correct ordering for every valid SemVer numeric identifier.
 - Keep `gos check` and `gos latest` from offering or performing a downgrade when the active Go is newer than the latest stable feed release.
+- Sort Go releases without numeric size limits and ignore malformed version metadata in lists and completion candidates.
+- Resolve the latest stable Go and bare `X.Y` requests by semantic version rather than relying on downloads-feed order.
 
 ### Security
 
