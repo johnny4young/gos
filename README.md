@@ -14,6 +14,12 @@
 
 ---
 
+<p align="center">
+  <img src="docs/demo.png" alt="gos installing Go 1.24.0 with a verified checksum, running a command with a side-by-side version, and checking for Go and gos updates" width="776">
+</p>
+
+---
+
 ## Why gos?
 
 You're on Go 1.19. Your project needs 1.22. You just want to switch — not install a version manager that itself needs managing.
