@@ -359,6 +359,40 @@ SORT_OUTPUT
 [ "$sort_output" = "$expected_sort_output" ] || fail "_gos_sort_versions ordering changed. Output: ${sort_output}"
 pass "version sorter orders beta, rc, releases, and patches"
 
+large_sort_output="$(
+  PATH="${fake_bin}:${original_path}" \
+    GOS_INSTALL_DIR="${test_root}/large-sort/go" \
+    GOS_CACHE_DIR="${test_root}/large-sort/cache" \
+    GOS_TEST_REAL_MV="$real_mv" \
+    bash -c '
+      set -euo pipefail
+      . "$1"
+      printf "%s\n" \
+        100000000000000000000.0.0 \
+        99999999999999999999.0.0 \
+        1.100000000000000000000.0 \
+        1.99999999999999999999.0 \
+        1.2rc100000000000000000000 \
+        1.2rc99999999999999999999 \
+        malformed \
+        1.2.3evil \
+        | _gos_sort_versions
+    ' bash "$sourceable_script"
+)"
+expected_large_sort_output="$(
+  cat <<'LARGE_SORT_OUTPUT'
+1.2rc99999999999999999999
+1.2rc100000000000000000000
+1.99999999999999999999.0
+1.100000000000000000000.0
+99999999999999999999.0.0
+100000000000000000000.0.0
+LARGE_SORT_OUTPUT
+)"
+[ "$large_sort_output" = "$expected_large_sort_output" ] \
+  || fail "arbitrary-precision Go version ordering failed. Output: ${large_sort_output}"
+pass "version sorter preserves arbitrary precision and ignores malformed metadata"
+
 semver_comparison_output="$(
   PATH="${fake_bin}:${original_path}" \
     GOS_INSTALL_DIR="${test_root}/semver/go" \

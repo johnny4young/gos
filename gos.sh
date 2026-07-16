@@ -1387,30 +1387,41 @@ _gos_resolve_project_version() {
 # `sort -t. -kN,Nn` treats 1.24rc2 as 1.24, interleaving pre-releases wrongly.
 _gos_sort_versions() {
   awk '
+    function canonical_decimal(number) {
+      sub(/^0+/, "", number)
+      return (number == "") ? "0" : number
+    }
     {
       v = $0
+      if (v !~ /^[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$/) {
+        next
+      }
       major = v
       sub(/\..*$/, "", major)
       rest = substr(v, length(major) + 2)
       rank = 2
-      pre = 0
+      pre = "0"
       if (match(rest, /beta[0-9]+$/)) {
         rank = 0
-        pre = substr(rest, RSTART + 4) + 0
+        pre = substr(rest, RSTART + 4)
         rest = substr(rest, 1, RSTART - 1)
       } else if (match(rest, /rc[0-9]+$/)) {
         rank = 1
-        pre = substr(rest, RSTART + 2) + 0
+        pre = substr(rest, RSTART + 2)
         rest = substr(rest, 1, RSTART - 1)
       }
       n = split(rest, parts, ".")
-      minor = (n >= 1) ? parts[1] + 0 : 0
-      patch = (n >= 2) ? parts[2] + 0 : 0
-      printf "%d %d %d %d %d %s\n", major, minor, patch, rank, pre, v
+      major = canonical_decimal(major)
+      minor = canonical_decimal((n >= 1) ? parts[1] : "0")
+      patch = canonical_decimal((n >= 2) ? parts[2] : "0")
+      pre = canonical_decimal(pre)
+      printf "%010d %s %010d %s %010d %s %d %010d %s %s\n", \
+        length(major), major, length(minor), minor, length(patch), patch, \
+        rank, length(pre), pre, v
     }
   ' \
-    | sort -k1,1n -k2,2n -k3,3n -k4,4n -k5,5n \
-    | cut -d' ' -f6
+    | LC_ALL=C sort -k1,1 -k2,2 -k3,3 -k4,4 -k5,5 -k6,6 -k7,7 -k8,8 -k9,9 -k10,10 \
+    | cut -d' ' -f10
 }
 
 _gos_list_versions() {
