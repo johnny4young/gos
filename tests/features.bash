@@ -1268,6 +1268,19 @@ popd >/dev/null
 [ "$(cat "${case_dir}/project/.go-version")" = "1.24.0" ] || fail "pin did not write the explicit version"
 pass "pin defaults to the active version and still accepts explicit ones"
 
+case_dir="${test_root}/install-nonexistent"
+run_gos "$case_dir" bash "$script" install 1.99.9
+[ "$status" -ne 0 ] || fail "installing a nonexistent version should fail"
+assert_contains "$output" "go1.99.9 was not found in the go.dev downloads feed." "nonexistent version error"
+assert_contains "$output" "Run 'gos list' to see available versions." "nonexistent version hint"
+if grep -q 'dl/go1.99.9' "${case_dir}/urls.log"; then
+  fail "a nonexistent version must not attempt any archive or .sha256 download"
+fi
+run_gos "$case_dir" bash "$script" install 1.99
+[ "$status" -ne 0 ] || fail "installing a nonexistent bare minor should fail"
+assert_contains "$output" "go1.99 was not found in the go.dev downloads feed." "nonexistent bare minor error"
+pass "install fails fast when the version is not in the feed"
+
 case_dir="${test_root}/check"
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check
 [ "$status" -eq 0 ] || fail "check up-to-date failed: ${output}"
@@ -1440,11 +1453,18 @@ grep -q '^https://mirror.test.invalid/dl/go1.21.6.darwin-arm64.tar.gz$' "${case_
 pass "mirror URLs with trailing slashes are normalized"
 
 case_dir="${test_root}/mirror-unverified"
-GOS_TEST_MIRROR="https://mirror.test.invalid/dl" run_gos "$case_dir" bash "$script" install 1.19.0
+GOS_TEST_MIRROR="https://mirror.test.invalid/dl" GOS_TEST_DOWNLOAD_MODE="fail-all" \
+  run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -ne 0 ] || fail "mirror install without checksum metadata should fail"
 assert_contains "$output" "no official checksum is available" "mirror requires checksum"
-if grep -q 'mirror.test.invalid/dl/go1.19.0' "${case_dir}/urls.log"; then
+if grep -q 'mirror.test.invalid/dl/go1.21.6' "${case_dir}/urls.log"; then
   fail "mirror install without checksum must not download the archive"
+fi
+GOS_TEST_MIRROR="https://mirror.test.invalid/dl" run_gos "$case_dir" bash "$script" install 1.19.0
+[ "$status" -ne 0 ] || fail "mirror install of a nonexistent version should fail"
+assert_contains "$output" "go1.19.0 was not found in the go.dev downloads feed." "mirror nonexistent version error"
+if grep -q 'mirror.test.invalid/dl/go1.19.0' "${case_dir}/urls.log"; then
+  fail "mirror install of a nonexistent version must not download the archive"
 fi
 pass "mirror installs refuse to download unverifiable archives"
 

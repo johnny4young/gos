@@ -1230,12 +1230,29 @@ _gos_install_version() {
   # Resolve checksum metadata before consulting the local archive cache.
   # The feed cache is warmed here, in the parent shell, so the command
   # substitution below reuses it instead of re-downloading the feed.
-  local expected_sha actual_sha cache_hit sha_source
+  local expected_sha actual_sha cache_hit sha_source feed_json
   expected_sha=""
   sha_source=""
   if _gos_has_checksum_parser && _gos_feed_json "$include_all_checksums" >/dev/null; then
     expected_sha=$(_gos_fetch_checksum "$pkg" "$include_all_checksums") || expected_sha=""
     [ -n "$expected_sha" ] && sha_source="feed"
+  fi
+  # Fail fast when the requested version does not exist at all: if the feed
+  # was fetched and parsed into a non-empty version list that never mentions
+  # the version, the .sha256 lookup and the download can only 404, so a clear
+  # error beats "may not exist" after a wasted request. An empty parse result
+  # proves nothing (parser drift, hermetic test fakes), so it falls through
+  # to the legacy attempt-and-report behavior, as does a missing parser/feed.
+  local feed_versions
+  if [ -z "$expected_sha" ] && _gos_has_checksum_parser \
+    && feed_json=$(_gos_feed_json "$include_all_checksums" 2>/dev/null); then
+    feed_versions=$(_gos_feed_versions "$feed_json") || feed_versions=""
+    if [ -n "$feed_versions" ] \
+      && ! printf '%s\n' "$feed_versions" | grep -Fqx "$version"; then
+      _gos_error "go${version} was not found in the go.dev downloads feed."
+      echo "Run 'gos list' to see available versions." >&2
+      return 1
+    fi
   fi
   if _gos_require_feed_checksum && [ "$sha_source" != "feed" ]; then
     _gos_error "GOS_REQUIRE_CHECKSUM=feed but no checksum was found in the go.dev downloads feed for ${pkg}."
