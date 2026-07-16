@@ -1065,6 +1065,17 @@ GOS_TEST_FEED_TTL=000 run_gos "$case_dir" bash "$script" list --json
 assert_json "$output" "feed-cache canonical zero list"
 grep -q 'https://go.dev/dl/?mode=json&include=all' "${case_dir}/urls.log" \
   || fail "GOS_FEED_TTL=000 should disable feed-cache reads"
+GOS_TEST_FEED_TTL=forever run_gos "$case_dir" bash "$script" list --json
+[ "$status" -ne 0 ] || fail "invalid GOS_FEED_TTL should fail"
+assert_contains "$output" "GOS_FEED_TTL='forever' must be a non-negative integer" "invalid feed TTL"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "invalid GOS_FEED_TTL must fail before discovery network access"
+fi
+GOS_TEST_FEED_TTL=forever run_gos "$case_dir" bash "$script" doctor --json
+[ "$status" -ne 0 ] || fail "doctor should fail when GOS_FEED_TTL is invalid"
+assert_json "$output" "doctor invalid feed TTL"
+assert_contains "$output" '"name":"feed-ttl","status":"problem"' "doctor feed TTL check"
+assert_contains "$output" "GOS_FEED_TTL='forever' must be a non-negative integer" "doctor feed TTL message"
 
 case_dir="${test_root}/check-feed-cache"
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json

@@ -363,11 +363,18 @@ _gos_download_stdout() {
 GOS_FEED_JSON_DEFAULT=""
 GOS_FEED_JSON_ALL=""
 
+_gos_validate_feed_ttl() {
+  case "$GOS_FEED_TTL" in
+    '' | *[!0-9]*)
+      _gos_error "GOS_FEED_TTL='${GOS_FEED_TTL}' must be a non-negative integer number of seconds."
+      return 1
+      ;;
+  esac
+}
+
 _gos_feed_ttl_seconds() {
   local ttl
-  case "$GOS_FEED_TTL" in
-    '' | *[!0-9]*) return 1 ;;
-  esac
+  _gos_validate_feed_ttl >/dev/null 2>&1 || return 1
   ttl=$(printf '%s\n' "$GOS_FEED_TTL" | sed 's/^0*//')
   printf '%s\n' "${ttl:-0}"
 }
@@ -441,6 +448,10 @@ _gos_write_feed_cache() {
 _gos_feed_json() {
   local include_all="${1:-false}"
   local allow_disk_cache="${2:-false}" json
+
+  if [ "$allow_disk_cache" = "true" ]; then
+    _gos_validate_feed_ttl || return 1
+  fi
 
   if [ "$include_all" = "true" ]; then
     if [ -z "$GOS_FEED_JSON_ALL" ]; then
@@ -1724,6 +1735,7 @@ cmd_latest() {
 cmd_check() {
   local latest current up_to_date ahead_of_latest="false" gos_latest="" gos_up_to_date="null"
   _gos_set_json_from_args "$@" || return 1
+  _gos_validate_feed_ttl || return 1
 
   if ! _gos_json_enabled; then
     echo "Checking for Go updates..."
@@ -2065,6 +2077,8 @@ cmd_list() {
     return 0
   fi
 
+  _gos_validate_feed_ttl || return 1
+
   if _gos_json_enabled; then
     # Resolve the list before emitting JSON so failures never print a
     # truncated document.
@@ -2091,6 +2105,8 @@ cmd_platforms() {
       return 1
     fi
   done
+
+  _gos_validate_feed_ttl || return 1
 
   if [ -z "$version" ]; then
     version=$(_gos_fetch_latest true) || version=""
@@ -2917,7 +2933,7 @@ _gos_doctor_apply_fixes() {
 }
 
 cmd_doctor() {
-  local os arch raw_os raw_arch install_error mirror_error versions_error go_path go_version go_bin arg doctor_fix="false"
+  local os arch raw_os raw_arch install_error mirror_error versions_error feed_ttl_error go_path go_version go_bin arg doctor_fix="false"
   GOS_DOCTOR_PROBLEMS=0
   GOS_DOCTOR_WARNINGS=0
   GOS_DOCTOR_JSON_ITEMS=""
@@ -3005,6 +3021,12 @@ cmd_doctor() {
     else
       _gos_doctor_check "problem" "versions-dir" "$versions_error" "Set GOS_VERSIONS_DIR to a safe absolute path or unset it."
     fi
+  fi
+
+  if feed_ttl_error=$(_gos_validate_feed_ttl 2>&1); then
+    _gos_doctor_check "ok" "feed-ttl" "discovery cache TTL is ${GOS_FEED_TTL} second(s)"
+  else
+    _gos_doctor_check "problem" "feed-ttl" "$feed_ttl_error" "Set GOS_FEED_TTL to a non-negative integer number of seconds."
   fi
 
   if _gos_has_checksum_parser; then
