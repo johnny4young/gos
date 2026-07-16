@@ -1171,6 +1171,18 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "prune setup install failed: ${output}"
 [ -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "prune setup did not cache archive"
 [ -d "${case_dir}/go.gos-rollback" ] || fail "prune setup did not create rollback"
+run_gos "$case_dir" bash "$script" prune --dry-run
+[ "$status" -eq 0 ] || fail "prune --dry-run failed: ${output}"
+assert_contains "$output" "Would remove 1 cached Go archive(s)" "dry-run previews archive removal"
+[ -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "dry-run must not delete cached archives"
+run_gos "$case_dir" bash "$script" prune --rollback --dry-run
+[ "$status" -eq 0 ] || fail "prune --rollback --dry-run failed: ${output}"
+assert_contains "$output" "Would remove rollback installation" "dry-run previews rollback removal"
+[ -d "${case_dir}/go.gos-rollback" ] || fail "dry-run must not delete the rollback"
+mkdir -p "${case_dir}/go.gos-lock"
+run_gos "$case_dir" bash "$script" prune --rollback --dry-run
+[ "$status" -eq 0 ] || fail "prune --dry-run must not take or be blocked by the mutation lock: ${output}"
+rmdir "${case_dir}/go.gos-lock"
 run_gos "$case_dir" bash "$script" prune
 [ "$status" -eq 0 ] || fail "prune failed: ${output}"
 assert_contains "$output" "Removed 1 cached Go archive(s)" "prune cache"
@@ -1731,9 +1743,15 @@ mkdir -p "$case_dir"
 create_old_install "${case_dir}/go"
 run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "prune-json setup install failed: ${output}"
+run_gos "$case_dir" bash "$script" prune --dry-run --json
+[ "$status" -eq 0 ] || fail "prune --dry-run --json failed: ${output}"
+assert_json "$output" "prune --dry-run --json"
+assert_contains "$output" '"dry_run":true' "prune json dry-run flag"
+assert_contains "$output" '"removed_archives":1' "prune json dry-run would-remove count"
 run_gos "$case_dir" bash "$script" prune --json
 [ "$status" -eq 0 ] || fail "prune --json failed: ${output}"
 assert_json "$output" "prune --json"
+assert_contains "$output" '"dry_run":false' "prune json real run flag"
 assert_contains "$output" '"removed_archives":1' "prune json removed count"
 assert_contains "$output" '"removed_bytes":' "prune json removed bytes"
 assert_not_contains "$output" '"removed_bytes":0,' "prune json removed bytes counts freed space"

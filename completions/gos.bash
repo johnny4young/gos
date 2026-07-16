@@ -29,7 +29,7 @@ _gos_completions() {
     cmd="${COMP_WORDS[$cmd_index]:-}"
     case "$cmd" in
       prune)
-        words="--rollback --json"
+        words="--rollback --dry-run --json"
         ;;
       install | run)
         if command -v gos >/dev/null 2>&1; then

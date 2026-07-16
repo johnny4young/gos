@@ -2933,23 +2933,28 @@ cmd_self_update() {
 }
 
 cmd_prune() {
-  local prune_rollback="false" arg rollback_dir removed=0 removed_bytes=0 size file rollback_state
+  local prune_rollback="false" dry_run="false" arg rollback_dir removed=0 removed_bytes=0 size file rollback_state
+  local removal_verb="Removed"
 
   for arg in "$@"; do
     case "$arg" in
       --rollback) prune_rollback="true" ;;
+      --dry-run) dry_run="true" ;;
       --json) GOS_OUTPUT_JSON=1 ;;
       *)
         _gos_error "unknown option for gos prune: ${arg}"
-        echo "Usage: gos prune [--rollback] [--json]" >&2
+        echo "Usage: gos prune [--rollback] [--dry-run] [--json]" >&2
         return 1
         ;;
     esac
   done
 
-  if [ "$prune_rollback" = "true" ]; then
+  # A dry run mutates nothing, so it must not take (or be blocked by) the
+  # mutation lock either.
+  if [ "$prune_rollback" = "true" ] && [ "$dry_run" != "true" ]; then
     _gos_acquire_lock || return 1
   fi
+  [ "$dry_run" = "true" ] && removal_verb="Would remove"
 
   # Delete only files that look like cached Go archives. GOS_CACHE_DIR is
   # user-controlled, so prune never runs rm -rf against it.
@@ -2957,14 +2962,14 @@ cmd_prune() {
     for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip; do
       [ -f "$file" ] || continue
       size=$(wc -c <"$file" | tr -d '[:space:]') || size=0
-      rm -f "$file"
+      [ "$dry_run" = "true" ] || rm -f "$file"
       removed=$((removed + 1))
       removed_bytes=$((removed_bytes + size))
     done
   fi
   if ! _gos_json_enabled; then
     if [ "$removed" -gt 0 ]; then
-      echo "Removed ${removed} cached Go archive(s) ($(_gos_format_bytes "$removed_bytes")) from ${GOS_CACHE_DIR}."
+      echo "${removal_verb} ${removed} cached Go archive(s) ($(_gos_format_bytes "$removed_bytes")) from ${GOS_CACHE_DIR}."
     else
       echo "No cached Go archives found in ${GOS_CACHE_DIR}."
     fi
@@ -2974,9 +2979,11 @@ cmd_prune() {
   rollback_state="none"
   if [ "$prune_rollback" = "true" ]; then
     if [ -d "$rollback_dir" ] || [ -L "$rollback_dir" ]; then
-      _gos_sudo rm -rf "$rollback_dir" || return 1
+      if [ "$dry_run" != "true" ]; then
+        _gos_sudo rm -rf "$rollback_dir" || return 1
+      fi
       rollback_state="removed"
-      _gos_json_enabled || echo "Removed rollback installation at ${rollback_dir}."
+      _gos_json_enabled || echo "${removal_verb} rollback installation at ${rollback_dir}."
     else
       _gos_json_enabled || echo "No rollback installation found at ${rollback_dir}."
     fi
@@ -2995,16 +3002,18 @@ cmd_prune() {
     [ -d "$orphan" ] || [ -L "$orphan" ] || continue
     orphans_found=$((orphans_found + 1))
     if [ "$prune_rollback" = "true" ] && [ -x "${GOS_INSTALL_DIR}/bin/go" ]; then
-      _gos_sudo rm -rf "$orphan" || return 1
+      if [ "$dry_run" != "true" ]; then
+        _gos_sudo rm -rf "$orphan" || return 1
+      fi
       orphans_removed=$((orphans_removed + 1))
-      _gos_json_enabled || echo "Removed orphaned backup at ${orphan}."
+      _gos_json_enabled || echo "${removal_verb} orphaned backup at ${orphan}."
     else
       _gos_json_enabled || echo "Orphaned backup found at ${orphan} (remove it with: gos prune --rollback)."
     fi
   done
 
   if _gos_json_enabled; then
-    printf '{"removed_archives":%s,"removed_bytes":%s,"cache_dir":' "$removed" "$removed_bytes"
+    printf '{"dry_run":%s,"removed_archives":%s,"removed_bytes":%s,"cache_dir":' "$dry_run" "$removed" "$removed_bytes"
     _gos_json_string "$GOS_CACHE_DIR"
     printf ',"rollback":'
     _gos_json_string "$rollback_state"
@@ -3333,7 +3342,7 @@ _gos_completions() {
     cmd="${COMP_WORDS[$cmd_index]:-}"
     case "$cmd" in
       prune)
-        words="--rollback --json"
+        words="--rollback --dry-run --json"
         ;;
       install | run)
         if command -v gos >/dev/null 2>&1; then
@@ -3413,7 +3422,7 @@ _gos() {
     'check:Check whether newer stable Go or gos releases are available (no install)'
     'rollback:Restore the previous Go installation, if available'
     'uninstall:Remove an installed version (side-by-side mode)'
-    'prune:Remove cached Go archives; --rollback also removes the rollback copy'
+    'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
     'current:Show the currently active Go version'
     'list:List available Go versions (or locally installed ones); --minor keeps the newest per minor'
     'platforms:List supported OS/arch archives for a Go version'
@@ -3437,7 +3446,7 @@ _gos() {
     args)
       case "${line[1]}" in
         prune)
-          _arguments '--rollback[Also remove the rollback installation]' '--json[Output machine-readable JSON]'
+          _arguments '--rollback[Also remove the rollback installation]' '--dry-run[Preview removals without deleting]' '--json[Output machine-readable JSON]'
           ;;
         install | run)
           if command -v gos >/dev/null 2>&1; then
@@ -3498,7 +3507,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'pin' -d 'Write .go-version in the
 complete -c gos -n '__fish_use_subcommand' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'
 complete -c gos -n '__fish_use_subcommand' -a 'rollback' -d 'Restore the previous Go installation, if available'
 complete -c gos -n '__fish_use_subcommand' -a 'uninstall' -d 'Remove an installed version (side-by-side mode)'
-complete -c gos -n '__fish_use_subcommand' -a 'prune' -d 'Remove cached Go archives; --rollback also removes the rollback copy'
+complete -c gos -n '__fish_use_subcommand' -a 'prune' -d 'Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
 complete -c gos -n '__fish_use_subcommand' -a 'current' -d 'Show the currently active Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'list' -d 'List available Go versions (or locally installed ones); --minor keeps the newest per minor'
 complete -c gos -n '__fish_use_subcommand' -a 'platforms' -d 'List supported OS/arch archives for a Go version'
@@ -3515,6 +3524,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'help' -d 'Show this help message'
 complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable JSON where supported'
 complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version' -l json -d 'Output machine-readable JSON'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
+complete -c gos -n '__fish_seen_subcommand_from prune' -l dry-run -d 'Preview removals without deleting'
 complete -c gos -n '__fish_seen_subcommand_from doctor' -l fix -d 'Apply safe non-destructive fixes'
 complete -c gos -n '__fish_seen_subcommand_from use' -l print -d 'Only resolve the project version'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
@@ -3564,7 +3574,7 @@ pin|pin [version]|Write .go-version in the current directory (active version by 
 check|check|Check whether newer stable Go or gos releases are available (no install)
 rollback|rollback|Restore the previous Go installation, if available
 uninstall|uninstall <version>|Remove an installed version (side-by-side mode)
-prune|prune [--rollback]|Remove cached Go archives; --rollback also removes the rollback copy
+prune|prune [--rollback] [--dry-run]|Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews
 current|current|Show the currently active Go version
 list|list [--installed] [--minor]|List available Go versions (or locally installed ones); --minor keeps the newest per minor
 platforms|platforms [version]|List supported OS/arch archives for a Go version

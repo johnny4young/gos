@@ -15,7 +15,7 @@ _gos() {
     'check:Check whether newer stable Go or gos releases are available (no install)'
     'rollback:Restore the previous Go installation, if available'
     'uninstall:Remove an installed version (side-by-side mode)'
-    'prune:Remove cached Go archives; --rollback also removes the rollback copy'
+    'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
     'current:Show the currently active Go version'
     'list:List available Go versions (or locally installed ones); --minor keeps the newest per minor'
     'platforms:List supported OS/arch archives for a Go version'
@@ -39,7 +39,7 @@ _gos() {
     args)
       case "${line[1]}" in
         prune)
-          _arguments '--rollback[Also remove the rollback installation]' '--json[Output machine-readable JSON]'
+          _arguments '--rollback[Also remove the rollback installation]' '--dry-run[Preview removals without deleting]' '--json[Output machine-readable JSON]'
           ;;
         install | run)
           if command -v gos >/dev/null 2>&1; then
