@@ -27,6 +27,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Make command-surface regeneration transactional so late generator failures restore README, `gos.sh`, and standalone completions without changing their contents or file modes.
 - Reject invalid `install.sh` arguments and ambiguous `GOS_BIN_DIR` paths before network access, and keep optional gos release checks HTTPS-only, time-bounded, restricted to canonical tags from this repository, and reported only when semantically newer.
 
+### Fixed
+
+- Compare gos release versions without shell integer limits, preserving correct ordering for every valid SemVer numeric identifier.
+- Keep `gos check` and `gos latest` from offering or performing a downgrade when the active Go is newer than the latest stable feed release.
+
 ### Security
 
 - Require exact self-update version and checksum metadata, and prepare the standalone installer executable before replacing the current binary.
