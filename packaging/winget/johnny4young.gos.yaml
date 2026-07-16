@@ -2,7 +2,7 @@
 # Draft only. Submit after a release publishes the referenced gos-windows.zip
 # asset and the manifest is validated with winget tooling.
 PackageIdentifier: johnny4young.gos
-PackageVersion: 1.8.0
+PackageVersion: 1.7.0
 PackageLocale: en-US
 PackageName: gos
 Publisher: johnny4young
@@ -27,7 +27,7 @@ Installers:
     NestedInstallerFiles:
       - RelativeFilePath: gos\gos.cmd
         PortableCommandAlias: gos
-    InstallerUrl: https://github.com/johnny4young/gos/releases/download/v1.8.0/gos-windows.zip
-    InstallerSha256: 116cd14afbad2b6f1847f35dad78949189f84e5db277689c0ce2881a3753fc19
+    InstallerUrl: https://github.com/johnny4young/gos/releases/download/v1.7.0/gos-windows.zip
+    InstallerSha256: 639030e25f31bcae552fe71091bbf46767796725e0ef4e0554df1eb9b6a7ccff
 ManifestType: singleton
 ManifestVersion: 1.6.0
