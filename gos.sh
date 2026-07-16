@@ -1577,6 +1577,25 @@ _gos_cache_archive_stats() {
   printf '%s|%s\n' "$count" "$bytes"
 }
 
+# Format a raw byte count for humans using binary units with one decimal
+# (129448695 -> "123.4 MiB"). Integer shell arithmetic only, so the output is
+# locale-independent. JSON output keeps raw byte counts; this is only for
+# human-facing lines.
+_gos_format_bytes() {
+  local bytes="$1" tenths=0
+  set -- B KiB MiB GiB TiB PiB
+  while [ "$bytes" -ge 1024 ] && [ "$#" -gt 1 ]; do
+    tenths=$(((bytes % 1024) * 10 / 1024))
+    bytes=$((bytes / 1024))
+    shift
+  done
+  if [ "$1" = "B" ]; then
+    printf '%s B' "$bytes"
+  else
+    printf '%s.%s %s' "$bytes" "$tenths" "$1"
+  fi
+}
+
 _gos_semver_is_valid() {
   printf '%s\n' "$1" \
     | LC_ALL=C grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
@@ -2326,7 +2345,7 @@ cmd_status() {
   else
     printf 'Rollback:     unavailable\n'
   fi
-  printf 'Cache:        %s archive(s), %s byte(s) in %s\n' "$cache_count" "$cache_bytes" "$GOS_CACHE_DIR"
+  printf 'Cache:        %s archive(s), %s in %s\n' "$cache_count" "$(_gos_format_bytes "$cache_bytes")" "$GOS_CACHE_DIR"
   printf 'gos:          v%s\n' "$GOS_VERSION"
 }
 
@@ -2780,7 +2799,7 @@ cmd_self_update() {
 }
 
 cmd_prune() {
-  local prune_rollback="false" arg rollback_dir removed=0 file rollback_state
+  local prune_rollback="false" arg rollback_dir removed=0 removed_bytes=0 size file rollback_state
 
   for arg in "$@"; do
     case "$arg" in
@@ -2803,13 +2822,15 @@ cmd_prune() {
   if [ -d "$GOS_CACHE_DIR" ]; then
     for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip; do
       [ -f "$file" ] || continue
+      size=$(wc -c <"$file" | tr -d '[:space:]') || size=0
       rm -f "$file"
       removed=$((removed + 1))
+      removed_bytes=$((removed_bytes + size))
     done
   fi
   if ! _gos_json_enabled; then
     if [ "$removed" -gt 0 ]; then
-      echo "Removed ${removed} cached Go archive(s) from ${GOS_CACHE_DIR}."
+      echo "Removed ${removed} cached Go archive(s) ($(_gos_format_bytes "$removed_bytes")) from ${GOS_CACHE_DIR}."
     else
       echo "No cached Go archives found in ${GOS_CACHE_DIR}."
     fi
@@ -2849,7 +2870,7 @@ cmd_prune() {
   done
 
   if _gos_json_enabled; then
-    printf '{"removed_archives":%s,"cache_dir":' "$removed"
+    printf '{"removed_archives":%s,"removed_bytes":%s,"cache_dir":' "$removed" "$removed_bytes"
     _gos_json_string "$GOS_CACHE_DIR"
     printf ',"rollback":'
     _gos_json_string "$rollback_state"

@@ -365,6 +365,33 @@ SORT_OUTPUT
 [ "$sort_output" = "$expected_sort_output" ] || fail "_gos_sort_versions ordering changed. Output: ${sort_output}"
 pass "version sorter orders beta, rc, releases, and patches"
 
+format_bytes_output="$(
+  PATH="${fake_bin}:${original_path}" \
+    GOS_INSTALL_DIR="${test_root}/format-bytes/go" \
+    GOS_CACHE_DIR="${test_root}/format-bytes/cache" \
+    GOS_TEST_REAL_MV="$real_mv" \
+    bash -c '
+      set -euo pipefail
+      . "$1"
+      for bytes in 0 1023 1024 1536 129448695 1073741824; do
+        _gos_format_bytes "$bytes"
+        printf "\n"
+      done
+    ' bash "$sourceable_script"
+)"
+expected_format_bytes_output="$(
+  cat <<'FORMAT_BYTES_OUTPUT'
+0 B
+1023 B
+1.0 KiB
+1.5 KiB
+123.4 MiB
+1.0 GiB
+FORMAT_BYTES_OUTPUT
+)"
+[ "$format_bytes_output" = "$expected_format_bytes_output" ] || fail "_gos_format_bytes output changed. Output: ${format_bytes_output}"
+pass "byte formatter renders binary units with one decimal"
+
 large_sort_output="$(
   PATH="${fake_bin}:${original_path}" \
     GOS_INSTALL_DIR="${test_root}/large-sort/go" \
@@ -1032,6 +1059,7 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 run_gos "$case_dir" bash "$script" prune
 [ "$status" -eq 0 ] || fail "prune failed: ${output}"
 assert_contains "$output" "Removed 1 cached Go archive(s)" "prune cache"
+assert_contains "$output" "cached Go archive(s) (" "prune reports freed space"
 assert_contains "$output" "Rollback installation kept" "prune keeps rollback"
 [ ! -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "prune left cached archive"
 [ -d "${case_dir}/go.gos-rollback" ] || fail "prune must not remove rollback by default"
@@ -1540,6 +1568,8 @@ run_gos "$case_dir" bash "$script" prune --json
 [ "$status" -eq 0 ] || fail "prune --json failed: ${output}"
 assert_json "$output" "prune --json"
 assert_contains "$output" '"removed_archives":1' "prune json removed count"
+assert_contains "$output" '"removed_bytes":' "prune json removed bytes"
+assert_not_contains "$output" '"removed_bytes":0,' "prune json removed bytes counts freed space"
 assert_contains "$output" '"rollback":"kept"' "prune json rollback kept"
 run_gos "$case_dir" bash "$script" prune --rollback --json
 [ "$status" -eq 0 ] || fail "prune --rollback --json failed: ${output}"
