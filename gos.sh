@@ -1517,6 +1517,19 @@ _gos_semver_is_valid() {
     | LC_ALL=C grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 }
 
+# Compare canonical, non-negative decimal strings without coercing them to the
+# shell's machine-sized integer type. SemVer numeric identifiers have no size
+# limit, so arithmetic tests would reject or misorder otherwise-valid releases.
+_gos_decimal_is_greater() {
+  local candidate="$1" current="$2" LC_ALL=C
+
+  if [ "${#candidate}" -ne "${#current}" ]; then
+    [ "${#candidate}" -gt "${#current}" ]
+    return
+  fi
+  [[ "$candidate" > "$current" ]]
+}
+
 _gos_fetch_latest_gos_release() {
   command -v curl >/dev/null 2>&1 || return 1
 
@@ -1544,15 +1557,15 @@ _gos_semver_is_newer() {
   IFS=. read -r candidate_major candidate_minor candidate_patch <<<"$1"
   IFS=. read -r current_major current_minor current_patch <<<"$2"
 
-  if [ "$candidate_major" -ne "$current_major" ]; then
-    [ "$candidate_major" -gt "$current_major" ]
+  if [ "$candidate_major" != "$current_major" ]; then
+    _gos_decimal_is_greater "$candidate_major" "$current_major"
     return
   fi
-  if [ "$candidate_minor" -ne "$current_minor" ]; then
-    [ "$candidate_minor" -gt "$current_minor" ]
+  if [ "$candidate_minor" != "$current_minor" ]; then
+    _gos_decimal_is_greater "$candidate_minor" "$current_minor"
     return
   fi
-  [ "$candidate_patch" -gt "$current_patch" ]
+  _gos_decimal_is_greater "$candidate_patch" "$current_patch"
 }
 
 # ─── Commands ─────────────────────────────────────────────────────────────────

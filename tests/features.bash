@@ -359,6 +359,27 @@ SORT_OUTPUT
 [ "$sort_output" = "$expected_sort_output" ] || fail "_gos_sort_versions ordering changed. Output: ${sort_output}"
 pass "version sorter orders beta, rc, releases, and patches"
 
+semver_comparison_output="$(
+  PATH="${fake_bin}:${original_path}" \
+    GOS_INSTALL_DIR="${test_root}/semver/go" \
+    GOS_CACHE_DIR="${test_root}/semver/cache" \
+    GOS_TEST_REAL_MV="$real_mv" \
+    bash -c '
+      set -euo pipefail
+      . "$1"
+      _gos_semver_is_newer 999999999999999999999.0.0 2.0.0
+      ! _gos_semver_is_newer 2.0.0 999999999999999999999.0.0
+      _gos_semver_is_newer 1.999999999999999999999.0 1.2.0
+      ! _gos_semver_is_newer 1.2.0 1.999999999999999999999.0
+      _gos_semver_is_newer 1.2.999999999999999999999 1.2.3
+      ! _gos_semver_is_newer 1.2.3 1.2.999999999999999999999
+      printf "arbitrary-precision-semver-ok\\n"
+    ' bash "$sourceable_script"
+)"
+[ "$semver_comparison_output" = "arbitrary-precision-semver-ok" ] \
+  || fail "arbitrary-precision SemVer comparison failed: ${semver_comparison_output}"
+pass "gos SemVer comparison supports arbitrary-length numeric identifiers"
+
 case_dir="${test_root}/json"
 run_gos "$case_dir" bash "$script" version --json
 [ "$status" -eq 0 ] || fail "version --json failed: ${output}"
@@ -1040,6 +1061,11 @@ GOS_TEST_GOS_RELEASE_EFFECTIVE_URL="https://github.com/johnny4young/gos/releases
   GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
 [ "$status" -eq 0 ] || fail "check with a multi-digit newer gos release failed: ${output}"
 assert_contains "$output" "gos v${newer_gos_version} is available" "multi-digit newer gos release"
+huge_gos_version="999999999999999999999.${gos_minor}.${gos_patch}"
+GOS_TEST_GOS_RELEASE_EFFECTIVE_URL="https://github.com/johnny4young/gos/releases/tag/v${huge_gos_version}" \
+  GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
+[ "$status" -eq 0 ] || fail "check with an arbitrary-precision gos release failed: ${output}"
+assert_contains "$output" "gos v${huge_gos_version} is available" "arbitrary-precision newer gos release"
 # Unknown flags are rejected, not silently ignored (shared [--json] parser).
 GOS_TEST_GO_VERSION="1.21.6" run_gos "$case_dir" bash "$script" check --bogus
 [ "$status" -ne 0 ] || fail "check should reject an unknown flag"
