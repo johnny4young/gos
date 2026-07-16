@@ -2313,6 +2313,7 @@ cmd_which() {
 cmd_status() {
   local active go_path source layout layout_target resolved project_version project_source
   local project_matches="null" rollback_available="false" rollback_version="" stats cache_count cache_bytes
+  local orphan orphaned_backups=0 lock_dir lock_pid="" lock_state="none"
 
   _gos_set_json_from_args "$@" || return 1
 
@@ -2362,6 +2363,22 @@ cmd_status() {
       rollback_version=$(_gos_go_version_of "$(_gos_rollback_dir)/bin/go") || rollback_version=""
     fi
   fi
+  # Crash residue and the mutation lock are exactly the state a user needs
+  # visible when something feels off; both checks stay offline.
+  for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
+    [ -d "$orphan" ] || [ -L "$orphan" ] || continue
+    orphaned_backups=$((orphaned_backups + 1))
+  done
+  lock_dir=$(_gos_lock_dir)
+  if [ -d "$lock_dir" ]; then
+    [ -f "${lock_dir}/pid" ] && lock_pid=$(sed -n '1p' "${lock_dir}/pid" 2>/dev/null || true)
+    if _gos_pid_is_running "$lock_pid"; then
+      lock_state="held"
+    else
+      lock_state="stale"
+    fi
+  fi
+
   stats=$(_gos_cache_archive_stats)
   cache_count="${stats%%|*}"
   cache_bytes="${stats#*|}"
@@ -2401,7 +2418,20 @@ cmd_status() {
     fi
     printf ',"cache":{"dir":'
     _gos_json_string "$GOS_CACHE_DIR"
-    printf ',"archives":%s,"bytes":%s},"gos_version":' "$cache_count" "$cache_bytes"
+    printf ',"archives":%s,"bytes":%s},"orphaned_backups":%s,"lock":' "$cache_count" "$cache_bytes" "$orphaned_backups"
+    if [ "$lock_state" = "none" ]; then
+      printf 'null'
+    else
+      printf '{"state":'
+      _gos_json_string "$lock_state"
+      printf ',"pid":'
+      case "$lock_pid" in
+        '' | *[!0-9]*) printf 'null' ;;
+        *) printf '%s' "$lock_pid" ;;
+      esac
+      printf '}'
+    fi
+    printf ',"gos_version":'
     _gos_json_string "$GOS_VERSION"
     printf '}\n'
     return 0
@@ -2438,6 +2468,14 @@ cmd_status() {
     printf 'Rollback:     available\n'
   else
     printf 'Rollback:     unavailable\n'
+  fi
+  if [ "$orphaned_backups" -gt 0 ]; then
+    _gos_print_styled_value 33 'Residue:      ' "${orphaned_backups} orphaned backup(s)" ' (clean with: gos prune --rollback)'
+  fi
+  if [ "$lock_state" = "held" ]; then
+    printf 'Lock:         held by PID %s\n' "${lock_pid:-unknown}"
+  elif [ "$lock_state" = "stale" ]; then
+    _gos_print_styled_value 33 'Lock:         ' 'stale' " (remove with: rm -rf \"${lock_dir}\")"
   fi
   printf 'Cache:        %s archive(s), %s in %s\n' "$cache_count" "$(_gos_format_bytes "$cache_bytes")" "$GOS_CACHE_DIR"
   printf 'gos:          v%s\n' "$GOS_VERSION"

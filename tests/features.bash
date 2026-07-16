@@ -567,6 +567,7 @@ assert_contains "$output" '"source":"path"' "status json source"
 assert_contains "$output" '"project":{"version":"go1.20rc1"' "status json project"
 assert_contains "$output" '"matches_active":true' "status json project match"
 assert_contains "$output" '"rollback_available":false,"rollback_version":null' "status json without rollback"
+assert_contains "$output" '"orphaned_backups":0,"lock":null' "status json without residue or lock"
 assert_contains "$output" '"archives":1' "status json cache count"
 if [ -s "${case_dir}/urls.log" ]; then
   fail "status must not reach the network"
@@ -578,9 +579,29 @@ popd >/dev/null
 assert_contains "$output" "Project:      go1.20rc1" "status human project"
 assert_contains "$output" "Cache:        1 archive(s)" "status human cache"
 assert_contains "$output" "Rollback:     unavailable" "status human without rollback"
+assert_not_contains "$output" "Residue:" "status human hides residue line when clean"
+assert_not_contains "$output" "Lock:" "status human hides lock line when free"
 case "$output" in
   *$'\033['*) fail "status non-tty output must not contain ANSI: ${output}" ;;
 esac
+
+mkdir -p "${case_dir}/go.gos-backup.12345"
+mkdir -p "${case_dir}/go.gos-lock"
+printf '99999999\n' >"${case_dir}/go.gos-lock/pid"
+pushd "$case_dir/project" >/dev/null
+run_gos "$case_dir" bash "$script" status
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "status with residue and stale lock failed: ${output}"
+assert_contains "$output" "Residue:      1 orphaned backup(s) (clean with: gos prune --rollback)" "status human residue"
+assert_contains "$output" "Lock:         stale" "status human stale lock"
+pushd "$case_dir/project" >/dev/null
+run_gos "$case_dir" bash "$script" status --json
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "status --json with residue failed: ${output}"
+assert_json "$output" "status --json with residue"
+assert_contains "$output" '"orphaned_backups":1' "status json residue count"
+assert_contains "$output" '"lock":{"state":"stale","pid":99999999}' "status json stale lock"
+rm -rf "${case_dir}/go.gos-backup.12345" "${case_dir}/go.gos-lock"
 
 mkdir -p "${case_dir}/go.gos-rollback/bin"
 cat >"${case_dir}/go.gos-rollback/bin/go" <<'ROLLBACK_GO'
