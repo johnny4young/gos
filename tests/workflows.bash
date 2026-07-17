@@ -580,5 +580,32 @@ assert(releasing.include?("`[Unreleased]` compare link"), "RELEASING.md must inc
   assert(security.include?(fragment), "SECURITY.md must mention #{fragment}")
 end
 
+# ARCH-501: every helper that builds a path under GOS_CACHE_DIR must have a
+# counterpart in cmd_prune. Without this, adding a new kind of cache file
+# leaves it leaking forever — exactly how the discovery feed cache grew
+# unreclaimed until v1.8.1.
+gos_sh = file_text("gos.sh")
+cmd_prune_body = gos_sh[/^cmd_prune\(\) \{.*?^\}/m]
+assert(!cmd_prune_body.nil?, "could not locate cmd_prune in gos.sh")
+
+cache_path_producers = gos_sh.scan(/^(_gos_\w+)\(\) \{/).flatten.select do |fn|
+  body = gos_sh[/^#{Regexp.escape(fn)}\(\) \{.*?^\}/m]
+  body && body =~ /printf\s+'[^']*%s[^']*'\s+"\$GOS_CACHE_DIR"/
+end
+assert(!cache_path_producers.empty?, "found no GOS_CACHE_DIR path helpers to check (regex drift?)")
+
+# How cmd_prune reclaims each producer's files: the archive helper is globbed,
+# the feed helper is called by name.
+prune_coverage = {
+  "_gos_cache_path" => cmd_prune_body.include?("/go*.tar.gz") && cmd_prune_body.include?("/go*.zip"),
+  "_gos_feed_cache_path" => cmd_prune_body.include?("_gos_feed_cache_path"),
+}
+cache_path_producers.each do |fn|
+  assert(prune_coverage.key?(fn),
+    "cache-path helper #{fn} has no cmd_prune cleanup mapping (ARCH-501): add it to cmd_prune and to this invariant")
+  assert(prune_coverage[fn],
+    "cmd_prune no longer reclaims the files produced by #{fn} (ARCH-501)")
+end
+
 puts "ok - workflow YAML and invariants"
 RUBY
