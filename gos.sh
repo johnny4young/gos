@@ -2581,13 +2581,49 @@ cmd_pin() {
 }
 
 cmd_rollback() {
-  if [ "$#" -gt 0 ]; then
-    _gos_error "unexpected argument for gos rollback: ${1}"
-    echo "Usage: gos rollback" >&2
+  local dry_run="false" arg rollback_dir rollback_version current
+
+  for arg in "$@"; do
+    case "$arg" in
+      --dry-run) dry_run="true" ;;
+      *)
+        _gos_error "unexpected argument for gos rollback: ${arg}"
+        echo "Usage: gos rollback [--dry-run]" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  if [ "$dry_run" != "true" ]; then
+    _gos_activate_rollback
+    return
+  fi
+
+  # Preview the same swap the real run performs: the rollback becomes active
+  # and the active install takes its place, so both directions are reported.
+  rollback_dir=$(_gos_rollback_dir)
+  if [ ! -d "$rollback_dir" ]; then
+    _gos_error "no rollback installation found at ${rollback_dir}."
     return 1
   fi
 
-  _gos_activate_rollback
+  rollback_version=""
+  if [ -x "${rollback_dir}/bin/go" ]; then
+    rollback_version=$(_gos_go_version_of "${rollback_dir}/bin/go") || rollback_version=""
+  fi
+  if [ -n "$rollback_version" ]; then
+    echo "Would roll back to go${rollback_version} from ${rollback_dir}."
+  else
+    echo "Would roll back to the installation at ${rollback_dir}."
+  fi
+
+  current=""
+  if [ -x "${GOS_INSTALL_DIR}/bin/go" ]; then
+    current=$(_gos_go_version_of "${GOS_INSTALL_DIR}/bin/go") || current=""
+  fi
+  if [ -n "$current" ]; then
+    echo "The active go${current} would become the new rollback."
+  fi
 }
 
 # Remove every installed side-by-side version except the active one. The
@@ -3482,6 +3518,9 @@ _gos_completions() {
       list)
         words="--installed --minor --json"
         ;;
+      rollback)
+        words="--dry-run"
+        ;;
       help)
         words="$commands"
         ;;
@@ -3540,7 +3579,7 @@ _gos() {
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
     'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
-    'rollback:Restore the previous Go installation, if available'
+    'rollback:Restore the previous Go installation, if available; --dry-run only previews the swap'
     'uninstall:Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
     'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
     'current:Show the currently active Go version'
@@ -3588,6 +3627,9 @@ _gos() {
         list)
           _arguments '--installed[List locally installed versions]' '--minor[Keep only the newest version per minor]' '--json[Output machine-readable JSON]'
           ;;
+        rollback)
+          _arguments '--dry-run[Preview the rollback without switching]'
+          ;;
         help)
           _describe -t commands 'gos command' commands
           ;;
@@ -3629,7 +3671,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'run' -d 'Run a command with a sid
 complete -c gos -n '__fish_use_subcommand' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
 complete -c gos -n '__fish_use_subcommand' -a 'pin' -d 'Write .go-version in the current directory (active version by default)'
 complete -c gos -n '__fish_use_subcommand' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'
-complete -c gos -n '__fish_use_subcommand' -a 'rollback' -d 'Restore the previous Go installation, if available'
+complete -c gos -n '__fish_use_subcommand' -a 'rollback' -d 'Restore the previous Go installation, if available; --dry-run only previews the swap'
 complete -c gos -n '__fish_use_subcommand' -a 'uninstall' -d 'Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
 complete -c gos -n '__fish_use_subcommand' -a 'prune' -d 'Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
 complete -c gos -n '__fish_use_subcommand' -a 'current' -d 'Show the currently active Go version'
@@ -3649,6 +3691,7 @@ complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable J
 complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version' -l json -d 'Output machine-readable JSON'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l dry-run -d 'Preview removals without deleting'
+complete -c gos -n '__fish_seen_subcommand_from rollback' -l dry-run -d 'Preview the rollback without switching'
 complete -c gos -n '__fish_seen_subcommand_from doctor' -l fix -d 'Apply safe non-destructive fixes'
 complete -c gos -n '__fish_seen_subcommand_from use' -l print -d 'Only resolve the project version'
 complete -c gos -n '__fish_seen_subcommand_from help' -a '(gos __commands 2>/dev/null)' -d 'gos command'
@@ -3699,7 +3742,7 @@ run|run [version] [--] <command> [args...]|Run a command with a side-by-side Go 
 use|use [--print] [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it
 pin|pin [version]|Write .go-version in the current directory (active version by default)
 check|check|Check whether newer stable Go or gos releases are available (no install)
-rollback|rollback|Restore the previous Go installation, if available
+rollback|rollback [--dry-run]|Restore the previous Go installation, if available; --dry-run only previews the swap
 uninstall|uninstall <version or --inactive> [--dry-run]|Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback
 prune|prune [--rollback] [--dry-run]|Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews
 current|current|Show the currently active Go version
@@ -3964,7 +4007,12 @@ main() {
     pin) cmd_pin "$@" ;;
     rollback)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_acquire_lock || return 1
+      # A dry run mutates nothing and must not take (or be blocked by) the
+      # mutation lock.
+      case " $* " in
+        *" --dry-run "*) ;;
+        *) _gos_acquire_lock || return 1 ;;
+      esac
       cmd_rollback "$@"
       ;;
     prune)

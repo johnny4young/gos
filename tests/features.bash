@@ -775,6 +775,19 @@ create_old_install "${case_dir}/go"
 run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "install before rollback failed: ${output}"
 [ -d "${case_dir}/go.gos-rollback" ] || fail "rollback snapshot was not saved"
+run_gos "$case_dir" bash "$script" rollback --dry-run
+[ "$status" -eq 0 ] || fail "rollback --dry-run failed: ${output}"
+assert_contains "$output" "Would roll back to go1.20.0 from ${case_dir}/go.gos-rollback." "rollback dry-run target"
+assert_contains "$output" "The active go1.21.6 would become the new rollback." "rollback dry-run swap"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "rollback --dry-run must not switch the install"
+[ -d "${case_dir}/go.gos-rollback" ] || fail "rollback --dry-run must not consume the rollback"
+mkdir -p "${case_dir}/go.gos-lock"
+run_gos "$case_dir" bash "$script" rollback --dry-run
+[ "$status" -eq 0 ] || fail "rollback --dry-run must not take or be blocked by the mutation lock: ${output}"
+rmdir "${case_dir}/go.gos-lock"
+run_gos "$case_dir" bash "$script" rollback --bogus
+[ "$status" -ne 0 ] || fail "rollback should reject unknown flags"
+assert_contains "$output" "unexpected argument for gos rollback: --bogus" "rollback unknown flag"
 run_gos "$case_dir" bash "$script" rollback
 [ "$status" -eq 0 ] || fail "rollback failed: ${output}"
 [ "$(<"${case_dir}/go/VERSION_MARKER")" = "old" ] || fail "rollback did not restore previous install"

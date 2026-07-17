@@ -13,7 +13,7 @@ _gos() {
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
     'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
-    'rollback:Restore the previous Go installation, if available'
+    'rollback:Restore the previous Go installation, if available; --dry-run only previews the swap'
     'uninstall:Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
     'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
     'current:Show the currently active Go version'
@@ -60,6 +60,9 @@ _gos() {
           ;;
         list)
           _arguments '--installed[List locally installed versions]' '--minor[Keep only the newest version per minor]' '--json[Output machine-readable JSON]'
+          ;;
+        rollback)
+          _arguments '--dry-run[Preview the rollback without switching]'
           ;;
         help)
           _describe -t commands 'gos command' commands

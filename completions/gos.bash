@@ -52,6 +52,9 @@ _gos_completions() {
       list)
         words="--installed --minor --json"
         ;;
+      rollback)
+        words="--dry-run"
+        ;;
       help)
         words="$commands"
         ;;

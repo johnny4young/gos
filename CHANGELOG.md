@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- Add `gos rollback --dry-run` to preview the swap (which version would become active and which would become the new rollback) without switching anything; the preview neither takes nor is blocked by the mutation lock.
+
 ### Changed
 
 - Refresh the README feature list and terminal demo for the 1.8.0 command surface (`list --minor`, `pin` defaults, `use --print`, `run --`, dry-run previews, `uninstall --inactive`, `help <command>`, and the full status dashboard).
