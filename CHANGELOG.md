@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - Request gzip for the go.dev downloads feed (`--compressed`), cutting the ~2.1 MB feed to ~0.5 MB on every `list`/`check`/`install` that resolves a checksum.
 - Extract cached archives in place on a cache hit instead of copying the ~70 MB file into a temp dir and re-hashing it.
+- Resolve install checksums from the small default downloads feed first and only escalate to the multi-megabyte `include=all` feed when the requested version is older than the last two minors, so installing a recent version no longer downloads the full release history.
 
 ### Fixed
 

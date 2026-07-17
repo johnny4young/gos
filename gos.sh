@@ -1255,9 +1255,21 @@ _gos_install_version() {
   local expected_sha actual_sha cache_hit sha_source feed_json
   expected_sha=""
   sha_source=""
-  if _gos_has_checksum_parser && _gos_feed_json "$include_all_checksums" >/dev/null; then
-    expected_sha=$(_gos_fetch_checksum "$pkg" "$include_all_checksums") || expected_sha=""
-    [ -n "$expected_sha" ] && sha_source="feed"
+  if _gos_has_checksum_parser; then
+    # Try the small default feed first — it lists the last two minors, which is
+    # the common install — and escalate to the multi-megabyte include=all feed
+    # only when the requested version is older than that. Each feed is warmed
+    # in this parent shell so the command substitution reuses it. Net effect:
+    # installing a recent version no longer downloads the full history.
+    if _gos_feed_json false >/dev/null; then
+      expected_sha=$(_gos_fetch_checksum "$pkg" false) || expected_sha=""
+      [ -n "$expected_sha" ] && sha_source="feed"
+    fi
+    if [ -z "$expected_sha" ] && [ "$include_all_checksums" = "true" ] \
+      && _gos_feed_json true >/dev/null; then
+      expected_sha=$(_gos_fetch_checksum "$pkg" true) || expected_sha=""
+      [ -n "$expected_sha" ] && sha_source="feed"
+    fi
   fi
   # Fail fast when the requested version does not exist at all: if the feed
   # was fetched and parsed into a non-empty version list that never mentions
