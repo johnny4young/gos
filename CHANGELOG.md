@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 
 - Add `gos rollback --dry-run` to preview the swap (which version would become active and which would become the new rollback) without switching anything; the preview neither takes nor is blocked by the mutation lock.
+- `gos doctor` now reports crash residue and the mutation lock, matching `gos status`: orphaned backups and a stale lock are warnings with removal hints, while a lock held by a running gos is reported as fine. Neither check touches anything.
 
 ### Changed
 

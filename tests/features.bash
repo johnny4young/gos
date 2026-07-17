@@ -800,12 +800,33 @@ run_gos "$case_dir" bash "$script" doctor --json
 assert_json "$output" "doctor --json"
 assert_contains "$output" '"status":"ok"' "doctor json"
 assert_contains "$output" '"name":"checksum-hash"' "doctor json checks"
+assert_contains "$output" '"name":"residue","status":"ok"' "doctor json residue check"
+assert_contains "$output" '"name":"lock","status":"ok"' "doctor json lock check"
 run_gos "$case_dir" bash "$script" doctor
 [ "$status" -eq 0 ] || fail "doctor human failed: ${output}"
 case "$output" in
   *$'\033['*) fail "doctor non-tty output must not contain ANSI: ${output}" ;;
 esac
 pass "doctor emits machine-readable diagnostics"
+
+case_dir="${test_root}/doctor-residue-lock"
+mkdir -p "${case_dir}/go.gos-backup.4242"
+mkdir -p "${case_dir}/go.gos-lock"
+printf '99999999\n' >"${case_dir}/go.gos-lock/pid"
+run_gos "$case_dir" bash "$script" doctor
+[ "$status" -eq 0 ] || fail "doctor must not fail on warnings: ${output}"
+assert_contains "$output" "warn - residue: 1 orphaned backup(s)" "doctor residue warning"
+assert_contains "$output" "fix - Remove them with: gos prune --rollback" "doctor residue fix hint"
+assert_contains "$output" "warn - lock: a stale lock at ${case_dir}/go.gos-lock" "doctor stale lock warning"
+run_gos "$case_dir" bash "$script" doctor --json
+[ "$status" -eq 0 ] || fail "doctor --json with residue failed: ${output}"
+assert_json "$output" "doctor --json with residue"
+assert_contains "$output" '"name":"residue","status":"warn"' "doctor json residue warn"
+assert_contains "$output" '"name":"lock","status":"warn"' "doctor json lock warn"
+[ -d "${case_dir}/go.gos-lock" ] || fail "doctor must not remove the lock"
+[ -d "${case_dir}/go.gos-backup.4242" ] || fail "doctor must not remove residue"
+rm -rf "${case_dir}/go.gos-backup.4242" "${case_dir}/go.gos-lock"
+pass "doctor reports crash residue and a stale lock without touching them"
 
 case_dir="${test_root}/doctor-color"
 mkdir -p "$case_dir"

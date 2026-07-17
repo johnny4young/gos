@@ -3361,6 +3361,33 @@ cmd_doctor() {
     _gos_doctor_check "problem" "feed-ttl" "$feed_ttl_error" "Set GOS_FEED_TTL to a non-negative integer number of seconds."
   fi
 
+  # Crash residue and the lock are diagnosable state, so doctor reports them
+  # like status does. Neither is a "problem": an interrupted install left the
+  # backup on purpose, and a held lock means another gos is simply running.
+  local orphan doctor_orphans=0
+  for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
+    [ -d "$orphan" ] || [ -L "$orphan" ] || continue
+    doctor_orphans=$((doctor_orphans + 1))
+  done
+  if [ "$doctor_orphans" -eq 0 ]; then
+    _gos_doctor_check "ok" "residue" "no orphaned backups from interrupted installs"
+  else
+    _gos_doctor_check "warn" "residue" "${doctor_orphans} orphaned backup(s) from interrupted installs are using disk space" "Remove them with: gos prune --rollback"
+  fi
+
+  local doctor_lock_dir doctor_lock_pid=""
+  doctor_lock_dir=$(_gos_lock_dir)
+  if [ ! -d "$doctor_lock_dir" ]; then
+    _gos_doctor_check "ok" "lock" "no gos operation lock is present"
+  else
+    [ -f "${doctor_lock_dir}/pid" ] && doctor_lock_pid=$(sed -n '1p' "${doctor_lock_dir}/pid" 2>/dev/null || true)
+    if _gos_pid_is_running "$doctor_lock_pid"; then
+      _gos_doctor_check "ok" "lock" "another gos operation is running (pid ${doctor_lock_pid})"
+    else
+      _gos_doctor_check "warn" "lock" "a stale lock at ${doctor_lock_dir} blocks mutating commands" "Remove it if no gos install/update is active: rm -rf \"${doctor_lock_dir}\""
+    fi
+  fi
+
   if _gos_has_checksum_parser; then
     _gos_doctor_check "ok" "checksum-metadata" "jq or python3 is available"
   elif _gos_require_checksum; then
