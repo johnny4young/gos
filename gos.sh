@@ -71,6 +71,14 @@ _gos_os() {
     Darwin) echo "darwin" ;;
     Linux) echo "linux" ;;
     MINGW* | MSYS* | CYGWIN*) echo "windows" ;;
+    # go.dev publishes current archives for the BSDs (verified through the
+    # latest release), so map the ones whose uname -s is unambiguous. They use
+    # the same unix install path as Linux (tar, optional sudo — never the
+    # windows branch).
+    FreeBSD) echo "freebsd" ;;
+    OpenBSD) echo "openbsd" ;;
+    NetBSD) echo "netbsd" ;;
+    DragonFly) echo "dragonfly" ;;
     *) echo "unsupported" ;;
   esac
 }
@@ -82,6 +90,14 @@ _gos_arch() {
     # Go ships a single 32-bit ARM build (armv6l); armv7l/armv8l CPUs run it.
     armv6l | armv7l | armv8l) echo "armv6l" ;;
     i386 | i486 | i586 | i686) echo "386" ;;
+    # Non-x86 targets go.dev publishes archives for. loong64 is Go's name for
+    # LoongArch, whose uname -m is loongarch64. Endianness-ambiguous MIPS is
+    # left out on purpose — uname -m cannot tell mips from mipsle reliably.
+    riscv64) echo "riscv64" ;;
+    loongarch64 | loong64) echo "loong64" ;;
+    ppc64le) echo "ppc64le" ;;
+    ppc64) echo "ppc64" ;;
+    s390x) echo "s390x" ;;
     *) echo "unsupported" ;;
   esac
 }
