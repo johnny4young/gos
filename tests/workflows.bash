@@ -607,5 +607,11 @@ cache_path_producers.each do |fn|
     "cmd_prune no longer reclaims the files produced by #{fn} (ARCH-501)")
 end
 
+# UX-803: errors should tell the user what to do next, not guess. The old
+# archive-download failure blamed "Version may not exist" even on a network
+# outage; keep that vague phrasing from creeping back.
+assert(!gos_sh.include?("may not exist"),
+  "download errors must give a next step (retry / gos list), not guess 'may not exist' (UX-803)")
+
 puts "ok - workflow YAML and invariants"
 RUBY

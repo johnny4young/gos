@@ -1227,7 +1227,8 @@ GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" list
 assert_contains "$output" "could not fetch the Go version list" "offline list"
 GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -ne 0 ] || fail "offline install should fail"
-assert_contains "$output" "download failed" "offline install"
+assert_contains "$output" "download of go1.21.6.darwin-arm64.tar.gz failed" "offline install error"
+assert_contains "$output" "run 'gos list' to confirm the version exists" "offline install next step"
 GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" platforms 1.21.6
 [ "$status" -ne 0 ] || fail "offline platforms should fail"
 assert_contains "$output" "could not fetch the Go downloads feed" "offline platforms"

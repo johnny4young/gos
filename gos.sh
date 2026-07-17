@@ -1274,9 +1274,10 @@ _gos_install_version() {
   # Fail fast when the requested version does not exist at all: if the feed
   # was fetched and parsed into a non-empty version list that never mentions
   # the version, the .sha256 lookup and the download can only 404, so a clear
-  # error beats "may not exist" after a wasted request. An empty parse result
-  # proves nothing (parser drift, hermetic test fakes), so it falls through
-  # to the legacy attempt-and-report behavior, as does a missing parser/feed.
+  # up-front error beats a wasted request followed by a vague guess. An empty
+  # parse result proves nothing (parser drift, hermetic test fakes), so it
+  # falls through to the legacy attempt-and-report path, as does a missing
+  # parser/feed.
   local feed_versions
   if [ -z "$expected_sha" ] && _gos_has_checksum_parser \
     && feed_json=$(_gos_feed_json "$include_all_checksums" 2>/dev/null); then
@@ -1316,7 +1317,8 @@ _gos_install_version() {
     archive_file="$tmp_file"
     echo "Downloading ${pkg}..."
     _gos_download "$url" "$tmp_file" || {
-      _gos_error "download failed. Version '${version}' may not exist."
+      _gos_error "download of ${pkg} failed."
+      echo "The network may be down or go.dev/the mirror may be temporarily unavailable; try again, or run 'gos list' to confirm the version exists." >&2
       return 1
     }
   fi
