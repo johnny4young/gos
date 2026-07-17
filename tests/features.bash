@@ -809,6 +809,13 @@ assert_contains "$output" '"status":"ok"' "doctor json"
 assert_contains "$output" '"name":"checksum-hash"' "doctor json checks"
 assert_contains "$output" '"name":"residue","status":"ok"' "doctor json residue check"
 assert_contains "$output" '"name":"lock","status":"ok"' "doctor json lock check"
+assert_contains "$output" '"name":"gotoolchain","status":"ok"' "doctor gotoolchain ok without override"
+GOTOOLCHAIN="auto" run_gos "$case_dir" bash "$script" doctor
+[ "$status" -eq 0 ] || fail "doctor with GOTOOLCHAIN set must not fail: ${output}"
+assert_contains "$output" "warn - gotoolchain: GOTOOLCHAIN=auto may run a per-module toolchain" "doctor warns on GOTOOLCHAIN override"
+GOTOOLCHAIN="local" run_gos "$case_dir" bash "$script" doctor
+[ "$status" -eq 0 ] || fail "doctor with GOTOOLCHAIN=local failed: ${output}"
+assert_contains "$output" "ok - gotoolchain: GOTOOLCHAIN does not override" "doctor treats GOTOOLCHAIN=local as ok"
 run_gos "$case_dir" bash "$script" doctor
 [ "$status" -eq 0 ] || fail "doctor human failed: ${output}"
 case "$output" in

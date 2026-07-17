@@ -3380,6 +3380,16 @@ cmd_doctor() {
     _gos_doctor_check "warn" "path-order" "${go_bin} does not exist yet"
   fi
 
+  # Informational: since Go 1.21, GOTOOLCHAIN can make `go` run a different
+  # toolchain per module than the one gos manages on PATH. That is not a
+  # problem — the two compose — but surfacing it explains a surprising
+  # `go version` and reassures users the interaction is understood.
+  if [ -n "${GOTOOLCHAIN:-}" ] && [ "${GOTOOLCHAIN}" != "local" ]; then
+    _gos_doctor_check "warn" "gotoolchain" "GOTOOLCHAIN=${GOTOOLCHAIN} may run a per-module toolchain instead of the go on PATH" "This composes with gos; set GOTOOLCHAIN=local to always use the managed go, or leave it for automatic per-module switching."
+  else
+    _gos_doctor_check "ok" "gotoolchain" "GOTOOLCHAIN does not override the managed go"
+  fi
+
   if command -v curl &>/dev/null || command -v wget &>/dev/null; then
     _gos_doctor_check "ok" "download" "curl or wget is available"
   else
