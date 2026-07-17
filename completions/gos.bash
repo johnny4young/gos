@@ -62,7 +62,7 @@ _gos_completions() {
         words="--fish --auto --json"
         ;;
       completions)
-        words="bash zsh fish"
+        words="bash zsh fish --install"
         ;;
       doctor)
         words="--fix --json"

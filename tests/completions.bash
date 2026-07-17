@@ -240,4 +240,25 @@ set -e
 [ "$status" -ne 0 ] || fail "gos completions should reject trailing arguments"
 assert_contains "$output" "unexpected argument for gos completions" "trailing argument error"
 
-pass "embedded completions stay in sync and validate"
+install_root="${test_root}/xdg"
+XDG_DATA_HOME="${install_root}/data" XDG_CONFIG_HOME="${install_root}/config" \
+  bash "$script" completions bash --install >/dev/null 2>&1 \
+  || fail "gos completions bash --install failed"
+[ -f "${install_root}/data/bash-completion/completions/gos" ] \
+  || fail "bash --install did not write the completion to the XDG data dir"
+XDG_DATA_HOME="${install_root}/data" XDG_CONFIG_HOME="${install_root}/config" \
+  bash "$script" completions zsh --install >/dev/null 2>&1 \
+  || fail "gos completions zsh --install failed"
+[ -f "${install_root}/data/zsh/site-functions/_gos" ] \
+  || fail "zsh --install did not write _gos to the XDG data dir"
+XDG_DATA_HOME="${install_root}/data" XDG_CONFIG_HOME="${install_root}/config" \
+  bash "$script" completions fish --install >/dev/null 2>&1 \
+  || fail "gos completions fish --install failed"
+[ -f "${install_root}/config/fish/completions/gos.fish" ] \
+  || fail "fish --install did not write gos.fish to the XDG config dir"
+# The installed file is byte-identical to what the printing form emits.
+printed_bash="$(bash "$script" completions bash)"
+[ "$printed_bash" = "$(<"${install_root}/data/bash-completion/completions/gos")" ] \
+  || fail "installed bash completion differs from the printed form"
+
+pass "embedded completions stay in sync, validate, and install to XDG dirs"

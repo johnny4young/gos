@@ -22,7 +22,7 @@ _gos() {
     'status:Show an offline dashboard for gos and the active Go'
     'which:Show the active or side-by-side Go binary path'
     'env:Print the PATH setup line or an opt-in per-shell auto-switch hook'
-    'completions:Print a Bash, Zsh, or Fish completion script'
+    'completions:Print a Bash, Zsh, or Fish completion script (or install it with --install)'
     'doctor:Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
     'self-update:Update gos itself to the latest verified release'
     'version:Show gos version'
@@ -71,7 +71,7 @@ _gos() {
           _arguments '--fish[Emit fish shell syntax]' '--auto[Emit opt-in auto-switch hook]' '--json[Output machine-readable JSON]'
           ;;
         completions)
-          _values 'shell' bash zsh fish
+          _arguments '--install[Write the completion to the standard per-user directory]' '*:shell:(bash zsh fish)'
           ;;
         doctor)
           _arguments '--fix[Apply safe non-destructive fixes]' '--json[Output machine-readable JSON]'

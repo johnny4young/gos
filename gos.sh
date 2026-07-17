@@ -3612,7 +3612,7 @@ _gos_completions() {
         words="--fish --auto --json"
         ;;
       completions)
-        words="bash zsh fish"
+        words="bash zsh fish --install"
         ;;
       doctor)
         words="--fix --json"
@@ -3672,7 +3672,7 @@ _gos() {
     'status:Show an offline dashboard for gos and the active Go'
     'which:Show the active or side-by-side Go binary path'
     'env:Print the PATH setup line or an opt-in per-shell auto-switch hook'
-    'completions:Print a Bash, Zsh, or Fish completion script'
+    'completions:Print a Bash, Zsh, or Fish completion script (or install it with --install)'
     'doctor:Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
     'self-update:Update gos itself to the latest verified release'
     'version:Show gos version'
@@ -3721,7 +3721,7 @@ _gos() {
           _arguments '--fish[Emit fish shell syntax]' '--auto[Emit opt-in auto-switch hook]' '--json[Output machine-readable JSON]'
           ;;
         completions)
-          _values 'shell' bash zsh fish
+          _arguments '--install[Write the completion to the standard per-user directory]' '*:shell:(bash zsh fish)'
           ;;
         doctor)
           _arguments '--fix[Apply safe non-destructive fixes]' '--json[Output machine-readable JSON]'
@@ -3764,7 +3764,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'platforms' -d 'List supported OS/
 complete -c gos -n '__fish_use_subcommand' -a 'status' -d 'Show an offline dashboard for gos and the active Go'
 complete -c gos -n '__fish_use_subcommand' -a 'which' -d 'Show the active or side-by-side Go binary path'
 complete -c gos -n '__fish_use_subcommand' -a 'env' -d 'Print the PATH setup line or an opt-in per-shell auto-switch hook'
-complete -c gos -n '__fish_use_subcommand' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script'
+complete -c gos -n '__fish_use_subcommand' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script (or install it with --install)'
 complete -c gos -n '__fish_use_subcommand' -a 'doctor' -d 'Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
 complete -c gos -n '__fish_use_subcommand' -a 'self-update' -d 'Update gos itself to the latest verified release'
 complete -c gos -n '__fish_use_subcommand' -a 'version' -d 'Show gos version'
@@ -3789,32 +3789,84 @@ complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell
 complete -c gos -n '__fish_seen_subcommand_from env' -l auto -d 'Emit opt-in auto-switch hook'
 complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
 complete -c gos -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell'
+complete -c gos -n '__fish_seen_subcommand_from completions' -l install -d 'Write the completion to the standard per-user directory'
 GOS_COMPLETION_FISH
 }
 # gos-completions:fish:end
 
+# Standard per-user, auto-loaded completion path for each shell, honoring the
+# XDG base directories so it stays predictable and testable.
+_gos_completion_target() {
+  case "$1" in
+    bash) printf '%s/bash-completion/completions/gos' "${XDG_DATA_HOME:-${HOME}/.local/share}" ;;
+    zsh) printf '%s/zsh/site-functions/_gos' "${XDG_DATA_HOME:-${HOME}/.local/share}" ;;
+    fish) printf '%s/fish/completions/gos.fish' "${XDG_CONFIG_HOME:-${HOME}/.config}" ;;
+  esac
+}
+
 cmd_completions() {
-  local shell_name="${1:-}"
+  local shell_name="" do_install="false" arg
+
+  for arg in "$@"; do
+    case "$arg" in
+      --install) do_install="true" ;;
+      -*)
+        _gos_error "unknown option for gos completions: ${arg}"
+        echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
+        return 1
+        ;;
+      *)
+        if [ -n "$shell_name" ]; then
+          _gos_error "unexpected argument for gos completions: ${arg}"
+          echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
+          return 1
+        fi
+        shell_name="$arg"
+        ;;
+    esac
+  done
 
   if [ -z "$shell_name" ]; then
-    echo "Usage: gos completions <bash|zsh|fish>" >&2
-    return 1
-  fi
-  if [ "$#" -gt 1 ]; then
-    _gos_error "unexpected argument for gos completions: ${2}"
-    echo "Usage: gos completions <bash|zsh|fish>" >&2
+    echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
     return 1
   fi
 
+  local emitter
   case "$shell_name" in
-    bash) _gos_completion_bash ;;
-    zsh) _gos_completion_zsh ;;
-    fish) _gos_completion_fish ;;
+    bash) emitter=_gos_completion_bash ;;
+    zsh) emitter=_gos_completion_zsh ;;
+    fish) emitter=_gos_completion_fish ;;
     *)
       _gos_error "unsupported shell for gos completions: ${shell_name}"
-      echo "Usage: gos completions <bash|zsh|fish>" >&2
+      echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
       return 1
       ;;
+  esac
+
+  if [ "$do_install" != "true" ]; then
+    "$emitter"
+    return
+  fi
+
+  # --install writes the completion to the shell's standard per-user directory.
+  # It never edits rc files; for bash/zsh it prints the one-time setup line the
+  # user still needs (fish auto-loads its directory).
+  local target target_dir
+  target=$(_gos_completion_target "$shell_name")
+  target_dir=$(dirname "$target")
+  if ! mkdir -p "$target_dir" 2>/dev/null; then
+    _gos_error "could not create completion directory: ${target_dir}"
+    return 1
+  fi
+  if ! "$emitter" >"$target" 2>/dev/null; then
+    _gos_error "could not write completion file: ${target}"
+    return 1
+  fi
+  echo "Installed ${shell_name} completions to ${target}"
+  case "$shell_name" in
+    bash) echo "Ensure bash-completion is enabled, then restart your shell." ;;
+    zsh) echo "Ensure $(dirname "$target") is on your fpath (before compinit), then restart your shell." ;;
+    fish) echo "Restart fish or run: source ${target}" ;;
   esac
 }
 
@@ -3835,7 +3887,7 @@ platforms|platforms [version]|List supported OS/arch archives for a Go version
 status|status|Show an offline dashboard for gos and the active Go
 which|which [version]|Show the active or side-by-side Go binary path
 env|env [--fish] [--auto]|Print the PATH setup line or an opt-in per-shell auto-switch hook
-completions|completions <shell>|Print a Bash, Zsh, or Fish completion script
+completions|completions <shell> [--install]|Print a Bash, Zsh, or Fish completion script (or install it with --install)
 doctor|doctor [--fix]|Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line
 self-update|self-update|Update gos itself to the latest verified release
 version|version|Show gos version

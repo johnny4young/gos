@@ -284,7 +284,7 @@ exec fish          # for Fish
 | `gos status` | Show an offline dashboard for gos and the active Go |
 | `gos which [version]` | Show the active or side-by-side Go binary path |
 | `gos env [--fish] [--auto]` | Print the PATH setup line or an opt-in per-shell auto-switch hook |
-| `gos completions <shell>` | Print a Bash, Zsh, or Fish completion script |
+| `gos completions <shell> [--install]` | Print a Bash, Zsh, or Fish completion script (or install it with `--install`) |
 | `gos doctor [--fix]` | Diagnose gos, Go, PATH, and local tool dependencies; `--fix` creates safe missing directories and prints the shell setup line |
 | `gos self-update` | Update gos itself to the latest verified release |
 | `gos version` | Show gos version |

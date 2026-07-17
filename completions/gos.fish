@@ -17,7 +17,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'platforms' -d 'List supported OS/
 complete -c gos -n '__fish_use_subcommand' -a 'status' -d 'Show an offline dashboard for gos and the active Go'
 complete -c gos -n '__fish_use_subcommand' -a 'which' -d 'Show the active or side-by-side Go binary path'
 complete -c gos -n '__fish_use_subcommand' -a 'env' -d 'Print the PATH setup line or an opt-in per-shell auto-switch hook'
-complete -c gos -n '__fish_use_subcommand' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script'
+complete -c gos -n '__fish_use_subcommand' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script (or install it with --install)'
 complete -c gos -n '__fish_use_subcommand' -a 'doctor' -d 'Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
 complete -c gos -n '__fish_use_subcommand' -a 'self-update' -d 'Update gos itself to the latest verified release'
 complete -c gos -n '__fish_use_subcommand' -a 'version' -d 'Show gos version'
@@ -42,3 +42,4 @@ complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell
 complete -c gos -n '__fish_seen_subcommand_from env' -l auto -d 'Emit opt-in auto-switch hook'
 complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
 complete -c gos -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell'
+complete -c gos -n '__fish_seen_subcommand_from completions' -l install -d 'Write the completion to the standard per-user directory'
