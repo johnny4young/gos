@@ -38,6 +38,27 @@ Compare that to the manual way: visit go.dev, find the right archive for your OS
 
 Works on **macOS**, **Linux**, and **Windows** (via Git Bash or WSL). Auto-detects your OS and CPU architecture. Requires nothing but `curl` and `bash`.
 
+### gos and GOTOOLCHAIN
+
+Since Go 1.21, the `go` command can download a newer toolchain **per module**
+when a `go.mod` asks for one (`GOTOOLCHAIN`). That is great for forward
+compatibility, but it is a different job than gos does, and the two compose:
+
+- GOTOOLCHAIN needs a Go **already installed** (1.21+) to work at all — gos
+  installs that first Go, on a machine that has none.
+- GOTOOLCHAIN only ever switches **up** automatically, and only inside a
+  module. It doesn't change the `go` on your `PATH`, so `go version` in an
+  empty directory still reports whatever you installed — gos is what sets that.
+- Downloaded toolchains pile up in the module cache with no per-version cleanup
+  (only `go clean -modcache`, all-or-nothing). gos keeps versions side by side
+  with `gos list --installed`, `gos uninstall`, and `gos prune`.
+- gos verifies every download against go.dev's published checksums, just as the
+  `go` command verifies toolchains through the checksum database — so you lose
+  no integrity by using gos to manage the global toolchain.
+
+Run `gos doctor` and it will tell you when `GOTOOLCHAIN` is active so the
+interaction is never a surprise.
+
 ---
 
 ## Table of Contents
@@ -99,10 +120,10 @@ Done. That's the whole setup.
 - **TTY diagnostics styling** — interactive `gos doctor` plus stderr `Error:`/`Warning:` lines use color and symbols; pipes, `NO_COLOR`, `GOS_NO_COLOR=1`, and JSON stay plain
 - **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `env`, `doctor`, `prune`, `version`, and `use --print`
 - **Helpful when you mistype** — unknown commands suggest close matches (`gos isntall` → `install`), and `gos help <command>` shows a single command's usage
-- **Auto-detects everything** — OS (`darwin`, `linux`, `windows`) and architecture (`amd64`, `arm64`, `armv6l`, `386`)
+- **Auto-detects everything** — OS (`darwin`, `linux`, `windows`, plus FreeBSD/OpenBSD/NetBSD/DragonFly) and architecture (`amd64`, `arm64`, `armv6l`, `386`, `riscv64`, `loong64`, `ppc64le`, `ppc64`, `s390x`)
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)
 - **Zero dependencies** — just `curl` and `bash`, both pre-installed on most systems
-- **Shell completions** — tab-completion for Bash, Zsh, and Fish, including dynamic installed/cached version suggestions and `gos completions <shell>` for single-file installs
+- **Shell completions** — tab-completion for Bash, Zsh, and Fish, including dynamic installed/cached version suggestions; `gos completions <shell>` prints them and `gos completions <shell> --install` writes them to the standard per-user directory
 - **Lightweight** — single shell script, no compilation, no runtime
 
 ---

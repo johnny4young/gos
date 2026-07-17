@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - Add `gos rollback --dry-run` to preview the swap (which version would become active and which would become the new rollback) without switching anything; the preview neither takes nor is blocked by the mutation lock.
 - `gos doctor` now reports crash residue and the mutation lock, matching `gos status`: orphaned backups and a stale lock are warnings with removal hints, while a lock held by a running gos is reported as fine. Neither check touches anything.
+- Detect the BSD and non-x86 targets go.dev publishes archives for: FreeBSD, OpenBSD, NetBSD, and DragonFly, plus `riscv64`, `loong64`, `ppc64le`, `ppc64`, and `s390x`.
+- Add `gos completions <shell> --install` to write the completion to the shell's standard per-user directory (XDG-aware) instead of only printing it; it never edits rc files.
+- `gos doctor` now notes when `GOTOOLCHAIN` is active, explaining that per-module toolchain switching composes with the go gos manages on `PATH`.
+
+### Performance
+
+- Request gzip for the go.dev downloads feed (`--compressed`), cutting the ~2.1 MB feed to ~0.5 MB on every `list`/`check`/`install` that resolves a checksum.
+- Extract cached archives in place on a cache hit instead of copying the ~70 MB file into a temp dir and re-hashing it.
 
 ### Fixed
 
