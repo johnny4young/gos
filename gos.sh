@@ -3087,6 +3087,7 @@ cmd_self_update() {
 
 cmd_prune() {
   local prune_rollback="false" dry_run="false" arg rollback_dir removed=0 removed_bytes=0 size file rollback_state
+  local removed_feed=0 removed_feed_bytes=0
   local removal_verb="Removed"
 
   for arg in "$@"; do
@@ -3128,6 +3129,22 @@ cmd_prune() {
     fi
   fi
 
+  # The discovery feed cache lives in the same directory and is pure
+  # regenerable metadata (the all-versions feed alone runs to megabytes), so
+  # reclaiming the cache has to include it. Only the two exact filenames gos
+  # writes are touched.
+  local feed_file
+  for feed_file in "$(_gos_feed_cache_path false)" "$(_gos_feed_cache_path true)"; do
+    [ -f "$feed_file" ] || continue
+    size=$(wc -c <"$feed_file" | tr -d '[:space:]') || size=0
+    [ "$dry_run" = "true" ] || rm -f "$feed_file"
+    removed_feed=$((removed_feed + 1))
+    removed_feed_bytes=$((removed_feed_bytes + size))
+  done
+  if ! _gos_json_enabled && [ "$removed_feed" -gt 0 ]; then
+    echo "${removal_verb} ${removed_feed} discovery feed cache file(s) ($(_gos_format_bytes "$removed_feed_bytes"))."
+  fi
+
   rollback_dir=$(_gos_rollback_dir)
   rollback_state="none"
   if [ "$prune_rollback" = "true" ]; then
@@ -3166,7 +3183,8 @@ cmd_prune() {
   done
 
   if _gos_json_enabled; then
-    printf '{"dry_run":%s,"removed_archives":%s,"removed_bytes":%s,"cache_dir":' "$dry_run" "$removed" "$removed_bytes"
+    printf '{"dry_run":%s,"removed_archives":%s,"removed_bytes":%s,"removed_feed_files":%s,"removed_feed_bytes":%s,"cache_dir":' \
+      "$dry_run" "$removed" "$removed_bytes" "$removed_feed" "$removed_feed_bytes"
     _gos_json_string "$GOS_CACHE_DIR"
     printf ',"rollback":'
     _gos_json_string "$rollback_state"

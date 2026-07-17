@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Add `gos rollback --dry-run` to preview the swap (which version would become active and which would become the new rollback) without switching anything; the preview neither takes nor is blocked by the mutation lock.
 - `gos doctor` now reports crash residue and the mutation lock, matching `gos status`: orphaned backups and a stale lock are warnings with removal hints, while a lock held by a running gos is reported as fine. Neither check touches anything.
 
+### Fixed
+
+- `gos prune` now also reclaims the discovery feed cache (`feed-default.json` and `feed-all.json`), which it left behind despite living in `GOS_CACHE_DIR`; the all-versions feed alone can hold megabytes of regenerable metadata. `--dry-run` previews it and `--json` gains `removed_feed_files` and `removed_feed_bytes`.
+
 ### Changed
 
 - Refresh the README feature list and terminal demo for the 1.8.0 command surface (`list --minor`, `pin` defaults, `use --print`, `run --`, dry-run previews, `uninstall --inactive`, `help <command>`, and the full status dashboard).

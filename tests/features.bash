@@ -1226,10 +1226,14 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "prune setup install failed: ${output}"
 [ -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "prune setup did not cache archive"
 [ -d "${case_dir}/go.gos-rollback" ] || fail "prune setup did not create rollback"
+printf '{"fake":"feed"}\n' >"${case_dir}/cache/feed-all.json"
+printf '{"fake":"feed"}\n' >"${case_dir}/cache/feed-default.json"
 run_gos "$case_dir" bash "$script" prune --dry-run
 [ "$status" -eq 0 ] || fail "prune --dry-run failed: ${output}"
 assert_contains "$output" "Would remove 1 cached Go archive(s)" "dry-run previews archive removal"
+assert_contains "$output" "Would remove 2 discovery feed cache file(s)" "dry-run previews feed cache removal"
 [ -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "dry-run must not delete cached archives"
+[ -f "${case_dir}/cache/feed-all.json" ] || fail "dry-run must not delete the feed cache"
 run_gos "$case_dir" bash "$script" prune --rollback --dry-run
 [ "$status" -eq 0 ] || fail "prune --rollback --dry-run failed: ${output}"
 assert_contains "$output" "Would remove rollback installation" "dry-run previews rollback removal"
@@ -1242,6 +1246,9 @@ run_gos "$case_dir" bash "$script" prune
 [ "$status" -eq 0 ] || fail "prune failed: ${output}"
 assert_contains "$output" "Removed 1 cached Go archive(s)" "prune cache"
 assert_contains "$output" "cached Go archive(s) (" "prune reports freed space"
+assert_contains "$output" "Removed 2 discovery feed cache file(s)" "prune reclaims the feed cache"
+[ ! -f "${case_dir}/cache/feed-all.json" ] || fail "prune left the all-versions feed cache behind"
+[ ! -f "${case_dir}/cache/feed-default.json" ] || fail "prune left the default feed cache behind"
 assert_contains "$output" "Rollback installation kept" "prune keeps rollback"
 [ ! -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "prune left cached archive"
 [ -d "${case_dir}/go.gos-rollback" ] || fail "prune must not remove rollback by default"
@@ -1821,6 +1828,7 @@ run_gos "$case_dir" bash "$script" prune --dry-run --json
 assert_json "$output" "prune --dry-run --json"
 assert_contains "$output" '"dry_run":true' "prune json dry-run flag"
 assert_contains "$output" '"removed_archives":1' "prune json dry-run would-remove count"
+assert_contains "$output" '"removed_feed_files":0' "prune json feed fields present"
 run_gos "$case_dir" bash "$script" prune --json
 [ "$status" -eq 0 ] || fail "prune --json failed: ${output}"
 assert_json "$output" "prune --json"
