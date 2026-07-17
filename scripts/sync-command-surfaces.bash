@@ -29,6 +29,7 @@ transaction_targets=(
   completions/gos.bash
   completions/gos.fish
   completions/gos.zsh
+  docs/gos.1
 )
 
 finish_transaction() {
@@ -62,7 +63,7 @@ cleanup_transaction() {
 
 if [ "$mode" = "--write" ]; then
   transaction_dir="$(mktemp -d)"
-  if ! mkdir -p "${transaction_dir}/completions"; then
+  if ! mkdir -p "${transaction_dir}/completions" "${transaction_dir}/docs"; then
     rm -rf "$transaction_dir"
     exit 1
   fi
@@ -84,6 +85,7 @@ scripts/sync-bash-command-completions.bash "$mode"
 scripts/sync-fish-command-completions.bash "$mode"
 scripts/sync-zsh-command-completions.bash "$mode"
 scripts/sync-readme-usage.bash "$mode"
+scripts/sync-man-page.bash "$mode"
 scripts/sync-embedded-completions.bash "$mode"
 
 finish_transaction

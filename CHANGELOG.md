@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Detect the BSD and non-x86 targets go.dev publishes archives for: FreeBSD, OpenBSD, NetBSD, and DragonFly, plus `riscv64`, `loong64`, `ppc64le`, `ppc64`, and `s390x`.
 - Add `gos completions <shell> --install` to write the completion to the shell's standard per-user directory (XDG-aware) instead of only printing it; it never edits rc files.
 - Add `gos each <v1,v2,...> [--] <command>` to run a command against several side-by-side Go versions in one shot (installing any that are missing) and print a color-coded pass/fail summary, exiting non-zero if any version fails.
+- Ship a `gos.1` man page generated from the command manifest (installed by the Homebrew formula), so `man gos` documents every command, and it can never drift from `gos help`.
 - `gos doctor` now notes when `GOTOOLCHAIN` is active, explaining that per-module toolchain switching composes with the go gos manages on `PATH`.
 
 ### Performance

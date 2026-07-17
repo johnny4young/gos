@@ -55,17 +55,18 @@ for sync_helper in "${sync_helpers[@]}"; do
 done
 
 write_fixture="${test_root}/write-fixture"
-mkdir -p "${write_fixture}/completions" "${write_fixture}/scripts"
+mkdir -p "${write_fixture}/completions" "${write_fixture}/scripts" "${write_fixture}/docs"
 cp "${repo_root}/gos.sh" "${repo_root}/README.md" "${write_fixture}/"
 cp "${repo_root}/completions/gos.bash" \
   "${repo_root}/completions/gos.fish" \
   "${repo_root}/completions/gos.zsh" \
   "${write_fixture}/completions/"
+cp "${repo_root}/docs/gos.1" "${write_fixture}/docs/"
 cp "${repo_root}"/scripts/sync-*.bash "${write_fixture}/scripts/"
 git -C "$write_fixture" init -q
-git -C "$write_fixture" add README.md gos.sh completions scripts
+git -C "$write_fixture" add README.md gos.sh completions scripts docs
 bash "${write_fixture}/scripts/sync-command-surfaces.bash" --write
-git -C "$write_fixture" diff --exit-code -- README.md gos.sh completions >/dev/null \
+git -C "$write_fixture" diff --exit-code -- README.md gos.sh completions docs >/dev/null \
   || fail "sync-command-surfaces --write should be idempotent when generated surfaces are current"
 
 # A late generator failure must not leave the earlier completion and README
@@ -89,8 +90,8 @@ File.write(path, current)
 RUBY
 
 rollback_snapshot="${test_root}/rollback-snapshot"
-mkdir -p "${rollback_snapshot}/completions"
-sync_targets=(README.md gos.sh completions/gos.bash completions/gos.fish completions/gos.zsh)
+mkdir -p "${rollback_snapshot}/completions" "${rollback_snapshot}/docs"
+sync_targets=(README.md gos.sh completions/gos.bash completions/gos.fish completions/gos.zsh docs/gos.1)
 for sync_target in "${sync_targets[@]}"; do
   cp -p "${write_fixture}/${sync_target}" "${rollback_snapshot}/${sync_target}"
 done

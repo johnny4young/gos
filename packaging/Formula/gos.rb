@@ -23,6 +23,7 @@ class Gos < Formula
     bash_completion.install "completions/gos.bash" => "gos"
     zsh_completion.install "completions/gos.zsh" => "_gos"
     fish_completion.install "completions/gos.fish"
+    man1.install "docs/gos.1"
   end
 
   test do

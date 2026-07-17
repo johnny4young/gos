@@ -1,0 +1,102 @@
+.TH GOS 1 "" "gos" "User Commands"
+.SH NAME
+gos \- install and switch Go versions in seconds
+.SH SYNOPSIS
+.B gos
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+gos (Go Switch) is a single Bash script that installs and switches Go
+versions. It downloads the official binary from go.dev, verifies its
+SHA256 checksum, installs it transactionally, and can roll back. It needs
+nothing but \fBcurl\fR (or \fBwget\fR) and \fBbash\fR.
+.SH COMMANDS
+.TP
+.B gos latest
+\&Install the latest stable Go version
+.TP
+.B gos install <version>
+\&Install a specific Go version
+.TP
+.B gos run [version] [\-\-] <command> [args...]
+\&Run a command with a side-by-side Go version without activating it globally; a bare \-\- uses the project version
+.TP
+.B gos each <v1,v2,...> [\-\-] <command> [args...]
+\&Run a command against several side-by-side Go versions and report a pass/fail summary
+.TP
+.B gos use [\-\-print] [path]
+\&Install the Go version requested by .go-version, .tool-versions, or go.mod; \-\-print only resolves it
+.TP
+.B gos pin [version]
+\&Write .go-version in the current directory (active version by default)
+.TP
+.B gos check
+\&Check whether newer stable Go or gos releases are available (no install)
+.TP
+.B gos rollback [\-\-dry-run]
+\&Restore the previous Go installation, if available; \-\-dry-run only previews the swap
+.TP
+.B gos uninstall <version or \-\-inactive> [\-\-dry-run]
+\&Remove an installed version (side-by-side mode); \-\-inactive removes all but the active and rollback
+.TP
+.B gos prune [\-\-rollback] [\-\-dry-run]
+\&Remove cached Go archives; \-\-rollback also removes the rollback copy, \-\-dry-run only previews
+.TP
+.B gos current
+\&Show the currently active Go version
+.TP
+.B gos list [\-\-installed] [\-\-minor]
+\&List available Go versions (or locally installed ones); \-\-minor keeps the newest per minor
+.TP
+.B gos platforms [version]
+\&List supported OS/arch archives for a Go version
+.TP
+.B gos status
+\&Show an offline dashboard for gos and the active Go
+.TP
+.B gos which [version]
+\&Show the active or side-by-side Go binary path
+.TP
+.B gos env [\-\-fish] [\-\-auto]
+\&Print the PATH setup line or an opt-in per-shell auto-switch hook
+.TP
+.B gos completions <shell> [\-\-install]
+\&Print a Bash, Zsh, or Fish completion script (or install it with \-\-install)
+.TP
+.B gos doctor [\-\-fix]
+\&Diagnose gos, Go, PATH, and local tool dependencies; \-\-fix creates safe missing directories and prints the shell setup line
+.TP
+.B gos self-update
+\&Update gos itself to the latest verified release
+.TP
+.B gos version
+\&Show gos version
+.TP
+.B gos help [command]
+\&Show this help message, or usage for one command
+.SH ENVIRONMENT
+.TP
+.B GOS_INSTALL_DIR
+\&Where Go is installed (default /usr/local/go). Override to install without sudo.
+.TP
+.B GOS_VERSIONS_DIR
+\&Opt-in side-by-side layout: each version installs under its own directory and the install dir becomes a symlink to the active one.
+.TP
+.B GOS_CACHE_DIR
+\&Where verified archives and the discovery feed cache are stored.
+.TP
+.B GOS_DOWNLOAD_MIRROR
+\&HTTPS base URL to download archives from; checksums are still verified against go.dev.
+.TP
+.B GOS_REQUIRE_CHECKSUM
+\&Set to 1 to fail closed when a checksum cannot be verified, or feed to additionally require the digest to come from the go.dev feed.
+.TP
+.B GOS_FEED_TTL
+\&Seconds to reuse the on-disk discovery feed cache (default 600; 0 disables it).
+.TP
+.B NO_COLOR
+\&When set, disables colored and symbol output (also GOS_NO_COLOR=1).
+.SH SEE ALSO
+.BR go (1)
+.SH HOMEPAGE
+https://github.com/johnny4young/gos
