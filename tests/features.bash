@@ -743,10 +743,17 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "initial cache install failed: ${output}"
 [ ! -e "${case_dir}/go.gos-lock" ] || fail "install left the gos lock behind"
 rm -rf "${case_dir}/go"
+# Portable inode reader: GNU stat uses -c, BSD/macOS stat uses -f.
+cache_inode() { stat -c '%i' "$1" 2>/dev/null || stat -f '%i' "$1"; }
+cached_archive="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+cached_inode_before="$(cache_inode "$cached_archive")"
 GOS_TEST_DOWNLOAD_MODE="fail-archives" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "cached install failed: ${output}"
 assert_contains "$output" "Using cached go1.21.6.darwin-arm64.tar.gz." "cache reuse"
-pass "install reuses verified cached archives"
+# The cache file is extracted in place, so it is neither consumed nor rewritten.
+[ -f "$cached_archive" ] || fail "cache reuse must leave the cached archive in place"
+[ "$(cache_inode "$cached_archive")" = "$cached_inode_before" ] || fail "cache reuse must not rewrite the cached archive"
+pass "install reuses verified cached archives without copying them"
 
 case_dir="${test_root}/lock-held"
 mkdir -p "${case_dir}/go.gos-lock"

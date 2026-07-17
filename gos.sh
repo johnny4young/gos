@@ -612,8 +612,11 @@ _gos_store_cache() {
   _gos_warning "could not write Go archive cache at ${GOS_CACHE_DIR}."
 }
 
+# Validate a cached archive in place. On success the caller extracts straight
+# from the cache file, so nothing is copied and the archive is hashed only
+# once here (not again by the shared verification block below).
 _gos_try_cache() {
-  local pkg="$1" output="$2" expected_sha="$3"
+  local pkg="$1" expected_sha="$2"
   local cache_file actual_sha
 
   cache_file=$(_gos_cache_path "$pkg")
@@ -635,10 +638,6 @@ _gos_try_cache() {
     return 1
   fi
 
-  if ! cp "$cache_file" "$output"; then
-    _gos_warning "cached ${pkg} could not be copied; downloading a fresh archive."
-    return 1
-  fi
   echo "Using cached ${pkg}."
 }
 
@@ -1279,9 +1278,14 @@ _gos_install_version() {
   fi
   cache_hit="false"
 
-  if _gos_try_cache "$pkg" "$tmp_file" "$expected_sha"; then
+  # archive_file is what gets extracted: the cache file on a hit (no copy), or
+  # the freshly downloaded temp file otherwise.
+  local archive_file
+  if _gos_try_cache "$pkg" "$expected_sha"; then
     cache_hit="true"
+    archive_file=$(_gos_cache_path "$pkg")
   else
+    archive_file="$tmp_file"
     echo "Downloading ${pkg}..."
     _gos_download "$url" "$tmp_file" || {
       _gos_error "download failed. Version '${version}' may not exist."
@@ -1289,8 +1293,12 @@ _gos_install_version() {
     }
   fi
 
-  # Verify checksum if tools are available.
-  if [ -n "$expected_sha" ]; then
+  # Verify the freshly downloaded archive. A cache hit is already verified
+  # inside _gos_try_cache (with a non-empty expected_sha), so re-hashing it
+  # would just repeat that work.
+  if [ "$cache_hit" = "true" ]; then
+    :
+  elif [ -n "$expected_sha" ]; then
     actual_sha=$(_gos_sha256 "$tmp_file")
     if [ -z "$actual_sha" ]; then
       if [ -n "$GOS_DOWNLOAD_MIRROR" ]; then
@@ -1305,9 +1313,7 @@ _gos_install_version() {
       return 1
     else
       echo "Checksum verified."
-      if [ "$cache_hit" != "true" ]; then
-        _gos_store_cache "$pkg" "$tmp_file" "$expected_sha"
-      fi
+      _gos_store_cache "$pkg" "$tmp_file" "$expected_sha"
     fi
   else
     local reason
@@ -1321,7 +1327,7 @@ _gos_install_version() {
 
   echo "Extracting..."
   mkdir -p "$stage_dir"
-  if ! _gos_extract_archive "$ext" "$tmp_file" "$stage_dir"; then
+  if ! _gos_extract_archive "$ext" "$archive_file" "$stage_dir"; then
     _gos_error "extraction failed."
     return 1
   fi
