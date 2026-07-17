@@ -124,6 +124,7 @@ expected_commands="$(
 latest
 install
 run
+each
 use
 pin
 check
@@ -148,7 +149,7 @@ assert_not_contains "$commands_output" "__commands" "__commands public list"
 
 commands_json="$(bash "$script" __commands --json)"
 assert_json "$commands_json" "__commands --json"
-assert_contains "$commands_json" '"commands":["latest","install","run","use","pin","check","rollback","uninstall","prune","current","list","platforms","status","which","env","completions","doctor","self-update","version","help"]' "__commands json"
+assert_contains "$commands_json" '"commands":["latest","install","run","each","use","pin","check","rollback","uninstall","prune","current","list","platforms","status","which","env","completions","doctor","self-update","version","help"]' "__commands json"
 commands_details="$(bash "$script" __commands --details)"
 assert_contains "$commands_details" "latest|latest|Install the latest stable Go version" "__commands details latest"
 assert_contains "$commands_details" "self-update|self-update|Update gos itself to the latest verified release" "__commands details self-update"

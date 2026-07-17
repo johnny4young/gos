@@ -293,6 +293,7 @@ exec fish          # for Fish
 | `gos latest` | Install the latest stable Go version |
 | `gos install <version>` | Install a specific Go version |
 | `gos run [version] [--] <command> [args...]` | Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version |
+| `gos each <v1,v2,...> [--] <command> [args...]` | Run a command against several side-by-side Go versions and report a pass/fail summary |
 | `gos use [--print] [path]` | Install the Go version requested by `.go-version`, `.tool-versions`, or `go.mod`; `--print` only resolves it |
 | `gos pin [version]` | Write `.go-version` in the current directory (active version by default) |
 | `gos check` | Check whether newer stable Go or gos releases are available (no install) |

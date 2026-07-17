@@ -2090,6 +2090,26 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
   [ "$status" -ne 0 ] || fail "run -- without a project manifest should fail"
   assert_contains "$output" "no version given and no .go-version or go.mod found" "run project mode without manifest"
 
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each 1.20.0,1.21.6 -- go version
+  [ "$status" -eq 0 ] || fail "each across installed versions failed: ${output}"
+  assert_contains "$output" "=== go1.20.0 ===" "each runs the first version"
+  assert_contains "$output" "=== go1.21.6 ===" "each runs the second version"
+  assert_contains "$output" "go version go1.20.0 darwin/arm64" "each uses the first version's go"
+  assert_contains "$output" "go version go1.21.6 darwin/arm64" "each uses the second version's go"
+  assert_contains "$output" "all 2 version(s) passed." "each reports an all-pass summary"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each 1.20.0,1.21.6 -- false
+  [ "$status" -ne 0 ] || fail "each must fail when a command fails"
+  assert_contains "$output" "2/2 version(s) failed." "each reports failures and exits non-zero"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each
+  [ "$status" -ne 0 ] || fail "each without arguments should fail"
+  assert_contains "$output" "Usage: gos each <v1,v2,...>" "each without a version list prints usage"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each 1.21.6
+  [ "$status" -ne 0 ] || fail "each without a command should fail"
+  assert_contains "$output" "Usage: gos each <v1,v2,...>" "each without a command prints usage"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each --json -- go version
+  [ "$status" -ne 0 ] || fail "each --json should fail"
+  assert_contains "$output" "gos each does not support --json" "each rejects --json"
+
   GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall --inactive --dry-run
   [ "$status" -eq 0 ] || fail "uninstall --inactive --dry-run failed: ${output}"
   assert_contains "$output" "Keeping go1.20.0" "inactive dry-run protects the rollback target"

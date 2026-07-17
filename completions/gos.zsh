@@ -10,6 +10,7 @@ _gos() {
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
     'run:Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
+    'each:Run a command against several side-by-side Go versions and report a pass/fail summary'
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
     'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
@@ -41,7 +42,7 @@ _gos() {
         prune)
           _arguments '--rollback[Also remove the rollback installation]' '--dry-run[Preview removals without deleting]' '--json[Output machine-readable JSON]'
           ;;
-        install | run)
+        install | run | each)
           if command -v gos >/dev/null 2>&1; then
             _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
           fi

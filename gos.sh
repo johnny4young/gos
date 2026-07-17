@@ -1949,8 +1949,67 @@ cmd_install() {
   _gos_install_version "$version" true
 }
 
+# Resolve a requested version to an installed side-by-side directory,
+# installing it if missing. On success sets _gos_ensured_dir (the version's
+# root) and _gos_ensured_version (the resolved bare version). Progress and the
+# "Resolved ..." notice go to stdout as before. Callers must have validated
+# side-by-side mode and the versions dir first. The install lock is held only
+# around the install itself and released immediately, so an exec afterwards
+# (which skips the EXIT trap) never leaves it behind.
+_gos_ensure_version_dir() {
+  local version="$1" resolved version_dir
+  _gos_ensured_dir=""
+  _gos_ensured_version=""
+
+  _gos_validate_version "$version" || return 1
+
+  case "$version" in
+    *rc* | *beta* | *.*.*) ;;
+    *)
+      set +e
+      resolved=$(_gos_resolve_installed_bare_minor "$version")
+      case "$?" in
+        0)
+          set -e
+          version="$resolved"
+          ;;
+        1)
+          set -e
+          _gos_feed_json true >/dev/null 2>&1 || true
+          resolved=$(_gos_resolve_bare_minor "$version")
+          if [ "$resolved" != "$version" ]; then
+            echo "Resolved Go ${version} to go${resolved}."
+            version="$resolved"
+          fi
+          ;;
+        *)
+          set -e
+          return 1
+          ;;
+      esac
+      ;;
+  esac
+
+  version_dir=$(_gos_version_dir_for "$version")
+  if [ ! -x "${version_dir}/bin/go" ]; then
+    _gos_acquire_lock || return 1
+    if ! _gos_install_version "$version" true false; then
+      _gos_release_lock
+      return 1
+    fi
+    _gos_release_lock
+  fi
+  if [ ! -x "${version_dir}/bin/go" ]; then
+    _gos_error "go${version} is not installed under ${GOS_VERSIONS_DIR}."
+    return 1
+  fi
+
+  _gos_ensured_dir="$version_dir"
+  _gos_ensured_version="$version"
+}
+
 cmd_run() {
-  local version="${1:-}" resolved version_dir project_resolved project_source
+  local version="${1:-}" project_resolved project_source
 
   if [ -z "$version" ]; then
     echo "Usage: gos run [version] [--] <command> [args...]" >&2
@@ -1983,7 +2042,6 @@ cmd_run() {
   fi
 
   version="${version#go}"
-  _gos_validate_version "$version" || return 1
 
   if ! _gos_versions_mode; then
     _gos_error "gos run requires side-by-side mode (set GOS_VERSIONS_DIR)."
@@ -1992,46 +2050,119 @@ cmd_run() {
   fi
   _gos_validate_versions_dir || return 1
 
-  case "$version" in
-    *rc* | *beta* | *.*.*) ;;
-    *)
-      set +e
-      resolved=$(_gos_resolve_installed_bare_minor "$version")
-      case "$?" in
-        0)
-          set -e
-          version="$resolved"
-          ;;
-        1)
-          set -e
-          _gos_feed_json true >/dev/null 2>&1 || true
-          resolved=$(_gos_resolve_bare_minor "$version")
-          if [ "$resolved" != "$version" ]; then
-            echo "Resolved Go ${version} to go${resolved}."
-            version="$resolved"
-          fi
-          ;;
-        *)
-          set -e
-          return 1
-          ;;
-      esac
-      ;;
-  esac
-
-  version_dir=$(_gos_version_dir_for "$version")
-  if [ ! -x "${version_dir}/bin/go" ]; then
-    _gos_acquire_lock || return 1
-    _gos_install_version "$version" true false || return 1
-  fi
-  if [ ! -x "${version_dir}/bin/go" ]; then
-    _gos_error "go${version} is not installed under ${GOS_VERSIONS_DIR}."
-    return 1
-  fi
+  _gos_ensure_version_dir "$version" || return 1
 
   _gos_release_lock
   unset GOROOT
-  PATH="${version_dir}/bin:${PATH}" exec "$@"
+  PATH="${_gos_ensured_dir}/bin:${PATH}" exec "$@"
+}
+
+cmd_each() {
+  local versions_arg="" arg saw_versions="false"
+  local -a command=()
+
+  # gos each <v1,v2,...> [--] <command...>. The first bare token is the
+  # comma-separated version list; everything after it (past an optional --)
+  # is the command to run against each version.
+  while [ "$#" -gt 0 ]; do
+    arg="$1"
+    if [ "$saw_versions" != "true" ]; then
+      case "$arg" in
+        --json)
+          _gos_error "gos each does not support --json."
+          return 1
+          ;;
+        --)
+          _gos_error "gos each needs a comma-separated version list before --."
+          echo "Usage: gos each <v1,v2,...> [--] <command> [args...]" >&2
+          return 1
+          ;;
+        *)
+          versions_arg="$arg"
+          saw_versions="true"
+          shift
+          [ "${1:-}" = "--" ] && shift
+          continue
+          ;;
+      esac
+    fi
+    command+=("$arg")
+    shift
+  done
+
+  if [ -z "$versions_arg" ]; then
+    echo "Usage: gos each <v1,v2,...> [--] <command> [args...]" >&2
+    return 1
+  fi
+  if [ "${#command[@]}" -eq 0 ]; then
+    echo "Usage: gos each <v1,v2,...> [--] <command> [args...]" >&2
+    return 1
+  fi
+
+  if ! _gos_versions_mode; then
+    _gos_error "gos each requires side-by-side mode (set GOS_VERSIONS_DIR)."
+    echo "Example: export GOS_INSTALL_DIR=\"\$HOME/.gos/go\"; export GOS_VERSIONS_DIR=\"\$HOME/.gos/versions\"" >&2
+    return 1
+  fi
+  _gos_validate_versions_dir || return 1
+
+  # Split the comma list, preserving order. IFS split is fine: versions never
+  # contain commas or whitespace once validated.
+  local raw_version version rc failures=0 total=0
+  # Parallel result arrays kept as raw data (never pre-colored, since coloring
+  # inside a command substitution always disables itself); the summary is
+  # styled at top level below.
+  local -a result_label=() result_ok=()
+  local old_ifs="$IFS"
+  IFS=','
+  # shellcheck disable=SC2206
+  local -a requested=($versions_arg)
+  IFS="$old_ifs"
+
+  for raw_version in "${requested[@]}"; do
+    [ -n "$raw_version" ] || continue
+    version="${raw_version#go}"
+    total=$((total + 1))
+    _gos_print_styled_value 36 '' "=== go${version} ==="
+    if ! _gos_ensure_version_dir "$version"; then
+      failures=$((failures + 1))
+      result_label+=("go${version}: could not install")
+      result_ok+=("no")
+      continue
+    fi
+    # Run in a subshell so PATH/GOROOT changes never leak into the next
+    # iteration, and capture the command's real exit code. `|| rc=$?` keeps a
+    # non-zero command from tripping set -e and aborting the whole run.
+    rc=0
+    (
+      unset GOROOT
+      PATH="${_gos_ensured_dir}/bin:${PATH}" exec "${command[@]}"
+    ) || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      result_label+=("go${_gos_ensured_version}")
+      result_ok+=("yes")
+    else
+      failures=$((failures + 1))
+      result_label+=("go${_gos_ensured_version} (exit ${rc})")
+      result_ok+=("no")
+    fi
+  done
+
+  echo ""
+  _gos_print_styled_value 36 '' "=== summary ==="
+  local i
+  for i in "${!result_label[@]}"; do
+    if [ "${result_ok[$i]}" = "yes" ]; then
+      _gos_print_styled_value 32 '' "✓ ${result_label[$i]}"
+    else
+      _gos_print_styled_value 31 '' "✗ ${result_label[$i]}"
+    fi
+  done
+  if [ "$failures" -gt 0 ]; then
+    _gos_print_styled_value 31 '' "${failures}/${total} version(s) failed."
+    return 1
+  fi
+  _gos_print_styled_value 32 '' "all ${total} version(s) passed."
 }
 
 cmd___project_version() {
@@ -3554,7 +3685,7 @@ _gos_completion_bash() {
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   # gos-commands:bash:begin
-  local fallback_commands="latest install run use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
+  local fallback_commands="latest install run each use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
   # gos-commands:bash:end
   local commands="$fallback_commands"
   local cmd_index=1 cmd words="" line
@@ -3581,7 +3712,7 @@ _gos_completions() {
       prune)
         words="--rollback --dry-run --json"
         ;;
-      install | run)
+      install | run | each)
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions --remote-cached 2>/dev/null || true)
         fi
@@ -3660,6 +3791,7 @@ _gos() {
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
     'run:Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
+    'each:Run a command against several side-by-side Go versions and report a pass/fail summary'
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
     'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
@@ -3691,7 +3823,7 @@ _gos() {
         prune)
           _arguments '--rollback[Also remove the rollback installation]' '--dry-run[Preview removals without deleting]' '--json[Output machine-readable JSON]'
           ;;
-        install | run)
+        install | run | each)
           if command -v gos >/dev/null 2>&1; then
             _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
           fi
@@ -3752,6 +3884,7 @@ complete -c gos -f
 complete -c gos -n '__fish_use_subcommand' -a 'latest' -d 'Install the latest stable Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'install' -d 'Install a specific Go version'
 complete -c gos -n '__fish_use_subcommand' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
+complete -c gos -n '__fish_use_subcommand' -a 'each' -d 'Run a command against several side-by-side Go versions and report a pass/fail summary'
 complete -c gos -n '__fish_use_subcommand' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
 complete -c gos -n '__fish_use_subcommand' -a 'pin' -d 'Write .go-version in the current directory (active version by default)'
 complete -c gos -n '__fish_use_subcommand' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'
@@ -3781,7 +3914,7 @@ complete -c gos -n '__fish_seen_subcommand_from use' -l print -d 'Only resolve t
 complete -c gos -n '__fish_seen_subcommand_from help' -a '(gos __commands 2>/dev/null)' -d 'gos command'
 complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
 complete -c gos -n '__fish_seen_subcommand_from list' -l minor -d 'Keep only the newest version per minor'
-complete -c gos -n '__fish_seen_subcommand_from install run' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
+complete -c gos -n '__fish_seen_subcommand_from install run each' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
 complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
 complete -c gos -n '__fish_seen_subcommand_from uninstall' -l inactive -d 'Remove all inactive versions'
 complete -c gos -n '__fish_seen_subcommand_from uninstall' -l dry-run -d 'Preview removals without deleting'
@@ -3875,6 +4008,7 @@ _gos_command_manifest() {
 latest|latest|Install the latest stable Go version
 install|install <version>|Install a specific Go version
 run|run [version] [--] <command> [args...]|Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version
+each|each <v1,v2,...> [--] <command> [args...]|Run a command against several side-by-side Go versions and report a pass/fail summary
 use|use [--print] [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it
 pin|pin [version]|Write .go-version in the current directory (active version by default)
 check|check|Check whether newer stable Go or gos releases are available (no install)
@@ -4127,6 +4261,13 @@ main() {
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       _gos_validate_versions_dir || return 1
       cmd_run "$@"
+      ;;
+    each)
+      _gos_validate_checksum_policy || return 1
+      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_versions_dir || return 1
+      # Each version installs under its own lock; no command-level lock here.
+      cmd_each "$@"
       ;;
     use)
       _gos_validate_checksum_policy || return 1
