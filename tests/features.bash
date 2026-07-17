@@ -163,6 +163,20 @@ JSON
       echo "archive download disabled" >&2
       exit 1
     fi
+    if [ "${GOS_TEST_DOWNLOAD_MODE:-ok}" = "truncate-once" ]; then
+      # Simulate a resumable transfer: with an empty target, write half and
+      # fail; on a retry the partial already has bytes, so append the rest.
+      full="fake archive for ${url}"
+      if [ -s "$output" ]; then
+        cur=$(wc -c <"$output" | tr -d '[:space:]')
+        printf '%s' "${full:$cur}" >>"$output"
+        exit 0
+      fi
+      half=$((${#full} / 2))
+      printf '%s' "${full:0:$half}" >"$output"
+      echo "curl: (18) transfer closed" >&2
+      exit 18
+    fi
     printf 'fake archive for %s\n' "$url" >"$output"
     ;;
   https://dl.google.com/go/go*.sha256)
@@ -186,7 +200,10 @@ if grep -q GOS-TEST-CORRUPT "$1" 2>/dev/null; then
   exit 0
 fi
 
-case "$1" in
+# A resumable download hashes the .partial file, which once complete is the
+# archive itself, so match on the archive name regardless of that suffix.
+probe="${1%.partial}"
+case "$probe" in
   */gos.sh)
     printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  %s\n' "$1"
     ;;
@@ -754,6 +771,34 @@ assert_contains "$output" "Using cached go1.21.6.darwin-arm64.tar.gz." "cache re
 [ -f "$cached_archive" ] || fail "cache reuse must leave the cached archive in place"
 [ "$(cache_inode "$cached_archive")" = "$cached_inode_before" ] || fail "cache reuse must not rewrite the cached archive"
 pass "install reuses verified cached archives without copying them"
+
+# PERF-403: an interrupted archive download leaves a .partial that a retry
+# resumes instead of restarting.
+case_dir="${test_root}/resume"
+resume_partial="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
+resume_cached="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+GOS_TEST_DOWNLOAD_MODE="truncate-once" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "a truncated download should fail"
+assert_contains "$output" "the partial was kept" "interrupted download keeps the partial"
+[ -f "$resume_partial" ] || fail "an interrupted download must leave a .partial in the cache"
+GOS_TEST_DOWNLOAD_MODE="truncate-once" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "resumed install failed: ${output}"
+assert_contains "$output" "Resuming download of go1.21.6" "second attempt resumes the partial"
+[ ! -f "$resume_partial" ] || fail "a completed download must not leave a .partial behind"
+[ -f "$resume_cached" ] || fail "the verified partial should be promoted to the cache"
+pass "interrupted archive downloads resume instead of restarting"
+
+# A resumed partial that still fails its checksum is discarded, not resumed
+# forever (resume never rewrites earlier bytes).
+case_dir="${test_root}/resume-corrupt"
+mkdir -p "${case_dir}/cache"
+# Seed a partial whose bytes hash wrong even after the resume appends more.
+printf 'GOS-TEST-CORRUPT' >"${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
+GOS_TEST_DOWNLOAD_MODE="truncate-once" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "a resumed-but-corrupt download should fail its checksum"
+assert_contains "$output" "checksum mismatch" "corrupt resume fails verification"
+[ ! -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial" ] || fail "a checksum-mismatched partial must be discarded"
+pass "a corrupt resumable partial is discarded on a checksum mismatch"
 
 case_dir="${test_root}/lock-held"
 mkdir -p "${case_dir}/go.gos-lock"

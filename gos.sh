@@ -367,16 +367,21 @@ _gos_download_progress_enabled() {
 # For hardened environments, set SSL_CERT_FILE or --cacert as needed.
 # --proto-redir '=https' / --https-only disallow HTTP fallback via redirects.
 _gos_download() {
-  local url="$1" output="$2"
+  local url="$1" output="$2" resume="${3:-}"
+  # A third "resume" argument continues a partially downloaded file instead of
+  # restarting it. Only curl opts in (-C -): wget's -c does not compose cleanly
+  # with -O, and the checksum validates the assembled file regardless.
+  local -a resume_curl=()
+  [ "$resume" = "resume" ] && resume_curl=(-C -)
   # --compressed lets go.dev serve the JSON feed gzip-encoded (~4x smaller);
   # for the already-compressed archives it is a no-op, and if a mirror ever
   # sends Content-Encoding: gzip on one, curl transparently restores the exact
   # bytes the checksum is computed against.
   if command -v curl &>/dev/null; then
     if _gos_download_progress_enabled; then
-      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --compressed --progress-bar -fSL -o "$output" "$url"
+      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --compressed ${resume_curl[@]:+"${resume_curl[@]}"} --progress-bar -fSL -o "$output" "$url"
     else
-      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --compressed -fsSL -o "$output" "$url"
+      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --compressed ${resume_curl[@]:+"${resume_curl[@]}"} -fsSL -o "$output" "$url"
     fi
   elif command -v wget &>/dev/null; then
     if _gos_download_progress_enabled; then
@@ -1307,12 +1312,29 @@ _gos_install_version() {
   fi
   cache_hit="false"
 
-  # archive_file is what gets extracted: the cache file on a hit (no copy), or
-  # the freshly downloaded temp file otherwise.
-  local archive_file
+  # archive_file is what gets extracted: the cache file on a hit (no copy), a
+  # persistent .partial that can resume across runs, or the ephemeral temp file.
+  local archive_file cache_file partial=""
+  cache_file=$(_gos_cache_path "$pkg")
   if _gos_try_cache "$pkg" "$expected_sha"; then
     cache_hit="true"
-    archive_file=$(_gos_cache_path "$pkg")
+    archive_file="$cache_file"
+  elif [ -n "$expected_sha" ] && mkdir -p "$GOS_CACHE_DIR" 2>/dev/null && [ -w "$GOS_CACHE_DIR" ]; then
+    # With a checksum to validate the result and a writable cache, download to a
+    # persistent .partial so an interrupted ~70 MB transfer resumes instead of
+    # restarting. A verified partial is promoted straight to the cache entry.
+    partial="${cache_file}.partial"
+    archive_file="$partial"
+    if [ -s "$partial" ]; then
+      echo "Resuming download of ${pkg}..."
+    else
+      echo "Downloading ${pkg}..."
+    fi
+    _gos_download "$url" "$partial" resume || {
+      _gos_error "download of ${pkg} failed."
+      echo "The network may be down or go.dev/the mirror may be temporarily unavailable; the partial was kept, so 'gos install ${version}' resumes it." >&2
+      return 1
+    }
   else
     archive_file="$tmp_file"
     echo "Downloading ${pkg}..."
@@ -1329,7 +1351,7 @@ _gos_install_version() {
   if [ "$cache_hit" = "true" ]; then
     :
   elif [ -n "$expected_sha" ]; then
-    actual_sha=$(_gos_sha256 "$tmp_file")
+    actual_sha=$(_gos_sha256 "$archive_file")
     if [ -z "$actual_sha" ]; then
       if [ -n "$GOS_DOWNLOAD_MIRROR" ]; then
         _gos_error "GOS_DOWNLOAD_MIRROR is set but no SHA256 tool is available to verify ${pkg}."
@@ -1338,12 +1360,22 @@ _gos_install_version() {
       fi
       _gos_checksum_unavailable "no SHA256 tool output was available" || return 1
     elif [ "$actual_sha" != "$expected_sha" ]; then
+      # A resumed partial that fails is corrupt beyond repair (resume never
+      # rewrites earlier bytes), so discard it to force a clean re-download.
+      [ -n "$partial" ] && rm -f "$partial"
       _gos_error "checksum mismatch! Expected ${expected_sha}, got ${actual_sha}."
       echo "The download may be corrupted. Aborting." >&2
       return 1
     else
       echo "Checksum verified."
-      _gos_store_cache "$pkg" "$tmp_file" "$expected_sha"
+      if [ -n "$partial" ]; then
+        # Promote the verified partial to the cache entry directly (no copy).
+        if mv "$partial" "$cache_file" 2>/dev/null; then
+          archive_file="$cache_file"
+        fi
+      else
+        _gos_store_cache "$pkg" "$tmp_file" "$expected_sha"
+      fi
     fi
   else
     local reason
@@ -3284,10 +3316,11 @@ cmd_prune() {
   fi
   [ "$dry_run" = "true" ] && removal_verb="Would remove"
 
-  # Delete only files that look like cached Go archives. GOS_CACHE_DIR is
+  # Delete only files that look like cached Go archives, including .partial
+  # files left by an interrupted (resumable) download. GOS_CACHE_DIR is
   # user-controlled, so prune never runs rm -rf against it.
   if [ -d "$GOS_CACHE_DIR" ]; then
-    for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip; do
+    for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip "$GOS_CACHE_DIR"/go*.partial; do
       [ -f "$file" ] || continue
       size=$(wc -c <"$file" | tr -d '[:space:]') || size=0
       [ "$dry_run" = "true" ] || rm -f "$file"
