@@ -211,8 +211,34 @@ main() {
 
   _prepare_bin_dir
   _maybe_sudo mv "$tmp_file" "$GOS_BIN_DIR/gos"
+  _next_steps
+}
+
+# Print concrete next steps after a successful install: fix PATH if needed,
+# install Go, enable completions for the detected shell, and where to look next.
+_next_steps() {
+  local shell_name
   echo "gos installed to ${GOS_BIN_DIR}/gos"
-  echo "Run 'gos help' to get started."
+  echo ""
+  echo "Next steps:"
+  case ":${PATH}:" in
+    *":${GOS_BIN_DIR}:"*) ;;
+    *)
+      echo "  • Add gos to your PATH (it is not there yet):"
+      echo "      export PATH=\"${GOS_BIN_DIR}:\$PATH\""
+      ;;
+  esac
+  echo "  • Install the latest Go:   gos latest"
+  shell_name=$(basename "${SHELL:-}")
+  case "$shell_name" in
+    bash | zsh | fish)
+      echo "  • Enable tab-completion:   gos completions ${shell_name} --install"
+      ;;
+    *)
+      echo "  • Enable tab-completion:   gos completions <bash|zsh|fish> --install"
+      ;;
+  esac
+  echo "  • See all commands:        gos help"
 }
 
 # Everything is wrapped in main() so a partially downloaded script does nothing

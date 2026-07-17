@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - Add `gos rollback --dry-run` to preview the swap (which version would become active and which would become the new rollback) without switching anything; the preview neither takes nor is blocked by the mutation lock.
 - `gos doctor` now reports crash residue and the mutation lock, matching `gos status`: orphaned backups and a stale lock are warnings with removal hints, while a lock held by a running gos is reported as fine. Neither check touches anything.
+- `install.sh` now prints concrete next steps after installing (fix PATH if the bin dir is off it, `gos latest`, `gos completions <shell> --install` for the detected shell, `gos help`) instead of only "Run 'gos help'".
 - Detect the BSD and non-x86 targets go.dev publishes archives for: FreeBSD, OpenBSD, NetBSD, and DragonFly, plus `riscv64`, `loong64`, `ppc64le`, `ppc64`, and `s390x`.
 - Add `gos completions <shell> --install` to write the completion to the shell's standard per-user directory (XDG-aware) instead of only printing it; it never edits rc files.
 - Add `gos each <v1,v2,...> [--] <command>` to run a command against several side-by-side Go versions in one shot (installing any that are missing) and print a color-coded pass/fail summary, exiting non-zero if any version fails.

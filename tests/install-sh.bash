@@ -266,7 +266,14 @@ pass "missing custom GOS_BIN_DIR is created"
 run_installer "existing_bin" "existing"
 assert_status 0 "$status" "existing bin" "$output"
 assert_installed "$bin_dir" "existing bin"
-pass "existing GOS_BIN_DIR still works"
+# UX-801: the post-install message lists concrete next steps, and warns when
+# the install dir is not on PATH (the test bin dir never is).
+assert_contains "$output" "Next steps:" "existing bin prints next steps"
+assert_contains "$output" "gos latest" "existing bin suggests installing Go"
+assert_contains "$output" "gos completions" "existing bin suggests enabling completions"
+assert_contains "$output" "gos help" "existing bin points to help"
+assert_contains "$output" "not there yet" "existing bin warns when the bin dir is off PATH"
+pass "existing GOS_BIN_DIR still works and prints next steps"
 
 chmod_case_dir="${test_root}/chmod_failure"
 mkdir -p "${chmod_case_dir}/bin"
