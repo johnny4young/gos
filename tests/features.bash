@@ -1417,6 +1417,7 @@ assert_contains "$output" "Already up to date." "check up to date"
 feed_lookup_args="$(grep 'https://go.dev/dl/?mode=json' "${case_dir}/curl-args.log" | tail -n 1 || true)"
 assert_contains "$feed_lookup_args" "--proto =https" "Go feed HTTPS protocol"
 assert_contains "$feed_lookup_args" "--proto-redir =https" "Go feed redirect protocol"
+assert_contains "$feed_lookup_args" "--compressed" "Go feed requests gzip compression"
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
 [ "$status" -eq 0 ] || fail "check outdated failed: ${output}"
 assert_contains "$output" "Update available. Install it with: gos latest" "check outdated"

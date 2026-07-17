@@ -352,11 +352,15 @@ _gos_download_progress_enabled() {
 # --proto-redir '=https' / --https-only disallow HTTP fallback via redirects.
 _gos_download() {
   local url="$1" output="$2"
+  # --compressed lets go.dev serve the JSON feed gzip-encoded (~4x smaller);
+  # for the already-compressed archives it is a no-op, and if a mirror ever
+  # sends Content-Encoding: gzip on one, curl transparently restores the exact
+  # bytes the checksum is computed against.
   if command -v curl &>/dev/null; then
     if _gos_download_progress_enabled; then
-      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --progress-bar -fSL -o "$output" "$url"
+      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --compressed --progress-bar -fSL -o "$output" "$url"
     else
-      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 -fsSL -o "$output" "$url"
+      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --compressed -fsSL -o "$output" "$url"
     fi
   elif command -v wget &>/dev/null; then
     if _gos_download_progress_enabled; then
@@ -373,8 +377,11 @@ _gos_download() {
 # Download a URL to stdout. Supports curl and wget.
 _gos_download_stdout() {
   local url="$1"
+  # --compressed: the downloads feed is JSON and gzip-encodes to roughly a
+  # quarter of its size; wget's --qO- has no portable equivalent, so only curl
+  # opts in (wget still works, just uncompressed).
   if command -v curl &>/dev/null; then
-    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 -fsSL "$url"
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --compressed -fsSL "$url"
   elif command -v wget &>/dev/null; then
     wget --https-only --timeout=15 --tries=3 -qO- "$url"
   else
