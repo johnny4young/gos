@@ -137,3 +137,49 @@ after_duplicate_hash="$(metadata_hash "$duplicate_repo" after-duplicate)"
   || fail "duplicate update-packaging patterns must not partially mutate package metadata"
 
 pass "Windows package asset and package metadata automation work"
+
+# The AUR PKGBUILD and its generated .SRCINFO must agree, point at a real
+# release tag, and only install files that exist, so `makepkg` cannot fail
+# mid-build and `aur.archlinux.org` cannot reject the push for a metadata drift.
+aur_pkgbuild="packaging/aur/PKGBUILD"
+aur_srcinfo="packaging/aur/.SRCINFO"
+
+pkgbuild_ver="$(sed -n 's/^pkgver=//p' "$aur_pkgbuild")"
+srcinfo_ver="$(sed -n 's/^[[:space:]]*pkgver = //p' "$aur_srcinfo")"
+[ -n "$pkgbuild_ver" ] || fail "AUR PKGBUILD must define pkgver"
+[ "$pkgbuild_ver" = "$srcinfo_ver" ] \
+  || fail "AUR PKGBUILD pkgver (${pkgbuild_ver}) and .SRCINFO (${srcinfo_ver}) disagree"
+
+pkgbuild_rel="$(sed -n 's/^pkgrel=//p' "$aur_pkgbuild")"
+srcinfo_rel="$(sed -n 's/^[[:space:]]*pkgrel = //p' "$aur_srcinfo")"
+[ -n "$pkgbuild_rel" ] || fail "AUR PKGBUILD must define pkgrel"
+[ "$pkgbuild_rel" = "$srcinfo_rel" ] \
+  || fail "AUR PKGBUILD pkgrel (${pkgbuild_rel}) and .SRCINFO (${srcinfo_rel}) disagree"
+
+# Read the digest from the sha256sums field specifically. A bare 64-hex grep
+# would also match any other digest that later lands in these files, and it
+# aborts the whole suite under `set -e` when it finds nothing; awk on the field
+# yields an empty string that the length check below turns into a real failure.
+pkgbuild_sha="$(awk -F"'" '/^sha256sums=/ {print $2}' "$aur_pkgbuild")"
+srcinfo_sha="$(awk '/^[[:space:]]*sha256sums =/ {print $NF}' "$aur_srcinfo")"
+[ "${#pkgbuild_sha}" -eq 64 ] || fail "AUR PKGBUILD sha256sums must be a 64-char hex digest"
+[ "$pkgbuild_sha" = "$srcinfo_sha" ] \
+  || fail "AUR PKGBUILD and .SRCINFO sha256sums disagree"
+
+# PKGBUILD templates the tag through $pkgver; .SRCINFO carries the expanded URL.
+# shellcheck disable=SC2016 # the literal $pkgver is the string we grep for
+grep -qF 'archive/refs/tags/v$pkgver.tar.gz' "$aur_pkgbuild" \
+  || fail "AUR PKGBUILD source must template the release tag through \$pkgver"
+grep -qF "archive/refs/tags/v${srcinfo_ver}.tar.gz" "$aur_srcinfo" \
+  || fail "AUR .SRCINFO source must track the v${srcinfo_ver} release tag"
+
+# Derive the packaged sources from the PKGBUILD's own `install` lines, so a new
+# install target that points at a path missing from the repo fails here too.
+aur_sources="$(awk '/^[[:space:]]*install -Dm/ {print $3}' "$aur_pkgbuild")"
+[ -n "$aur_sources" ] || fail "AUR PKGBUILD must install at least one file"
+while IFS= read -r packaged; do
+  [ -n "$packaged" ] || continue
+  [ -f "$packaged" ] || fail "AUR PKGBUILD installs a missing file: ${packaged}"
+done <<<"$aur_sources"
+
+pass "AUR PKGBUILD and .SRCINFO stay consistent and buildable"
