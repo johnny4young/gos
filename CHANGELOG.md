@@ -27,10 +27,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Fixed
 
 - `gos prune` now also reclaims the discovery feed cache (`feed-default.json` and `feed-all.json`), which it left behind despite living in `GOS_CACHE_DIR`; the all-versions feed alone can hold megabytes of regenerable metadata. `--dry-run` previews it and `--json` gains `removed_feed_files` and `removed_feed_bytes`.
+- Honor the discovery feed cache on GNU coreutils. The cache-age check read the timestamp with BSD `stat -f` first; on Linux (and Windows Git Bash) `-f` means `--file-system` and returned a non-timestamp value instead of failing, so the cache was never fresh and every command re-fetched the feed. It now tries GNU `stat -c` first and falls back to BSD `stat -f`.
 
 ### Changed
 
 - Refresh the README feature list and terminal demo for the 1.8.0 command surface (`list --minor`, `pin` defaults, `use --print`, `run --`, dry-run previews, `uninstall --inactive`, `help <command>`, and the full status dashboard).
+
+### Security
+
+- Pin every GitHub Actions dependency to a full commit SHA (Dependabot still tracks upgrades through the version comment), removing the mutable-tag supply-chain risk and satisfying the OpenSSF Scorecard `Pinned-Dependencies` check.
+- Add an OpenSSF Scorecard workflow that runs weekly and on pushes to `main`, publishing results to the public Scorecard API and to code scanning; surface CI and Scorecard badges in the README.
 
 ## [1.8.0] - 2026-07-16
 
