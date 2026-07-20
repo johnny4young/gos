@@ -137,3 +137,34 @@ after_duplicate_hash="$(metadata_hash "$duplicate_repo" after-duplicate)"
   || fail "duplicate update-packaging patterns must not partially mutate package metadata"
 
 pass "Windows package asset and package metadata automation work"
+
+# The AUR PKGBUILD and its generated .SRCINFO must agree, point at a real
+# release tag, and only install files that exist, so `makepkg` cannot fail
+# mid-build and `aur.archlinux.org` cannot reject the push for a metadata drift.
+aur_pkgbuild="packaging/aur/PKGBUILD"
+aur_srcinfo="packaging/aur/.SRCINFO"
+
+pkgbuild_ver="$(sed -n 's/^pkgver=//p' "$aur_pkgbuild")"
+srcinfo_ver="$(sed -n 's/^[[:space:]]*pkgver = //p' "$aur_srcinfo")"
+[ -n "$pkgbuild_ver" ] || fail "AUR PKGBUILD must define pkgver"
+[ "$pkgbuild_ver" = "$srcinfo_ver" ] \
+  || fail "AUR PKGBUILD pkgver (${pkgbuild_ver}) and .SRCINFO (${srcinfo_ver}) disagree"
+
+pkgbuild_sha="$(grep -oE '[0-9a-f]{64}' "$aur_pkgbuild")"
+srcinfo_sha="$(grep -oE '[0-9a-f]{64}' "$aur_srcinfo")"
+[ "${#pkgbuild_sha}" -eq 64 ] || fail "AUR PKGBUILD sha256sums must be a 64-char hex digest"
+[ "$pkgbuild_sha" = "$srcinfo_sha" ] \
+  || fail "AUR PKGBUILD and .SRCINFO sha256sums disagree"
+
+# PKGBUILD templates the tag through $pkgver; .SRCINFO carries the expanded URL.
+# shellcheck disable=SC2016 # the literal $pkgver is the string we grep for
+grep -qF 'archive/refs/tags/v$pkgver.tar.gz' "$aur_pkgbuild" \
+  || fail "AUR PKGBUILD source must template the release tag through \$pkgver"
+grep -qF "archive/refs/tags/v${srcinfo_ver}.tar.gz" "$aur_srcinfo" \
+  || fail "AUR .SRCINFO source must track the v${srcinfo_ver} release tag"
+
+for packaged in gos.sh completions/gos.bash completions/gos.zsh completions/gos.fish docs/gos.1 LICENSE; do
+  [ -f "$packaged" ] || fail "AUR PKGBUILD installs a missing file: ${packaged}"
+done
+
+pass "AUR PKGBUILD and .SRCINFO stay consistent and buildable"

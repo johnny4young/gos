@@ -1,0 +1,28 @@
+# Maintainer: johnny4young <johnny.iv.young@gmail.com>
+pkgname=gos
+pkgver=1.8.0
+pkgrel=1
+pkgdesc='Install and switch Go versions in seconds. One script, zero dependencies.'
+arch=('any')
+url='https://github.com/johnny4young/gos'
+license=('MIT')
+depends=('bash' 'curl')
+optdepends=(
+  'jq: faster release-metadata parsing'
+  'coreutils: SHA-256 archive verification'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('4fe23a7a2ec840c2a8553b7e24217e204d77e8b87b30ec8b481b1c20244a806d')
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  install -Dm755 gos.sh "$pkgdir/usr/bin/gos"
+
+  install -Dm644 completions/gos.bash "$pkgdir/usr/share/bash-completion/completions/gos"
+  install -Dm644 completions/gos.zsh "$pkgdir/usr/share/zsh/site-functions/_gos"
+  install -Dm644 completions/gos.fish "$pkgdir/usr/share/fish/vendor_completions.d/gos.fish"
+
+  install -Dm644 docs/gos.1 "$pkgdir/usr/share/man/man1/gos.1"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
