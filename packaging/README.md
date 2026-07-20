@@ -30,8 +30,9 @@ standard vendor directories, the `gos.1` man page, and the MIT license.
 Publishing and bumping are manual maintainer steps (the AUR accepts a package
 the moment it is pushed — there is no review queue):
 
-1. Recompute the source digest for the new tag:
-   `curl -sL https://github.com/johnny4young/gos/archive/refs/tags/vX.Y.Z.tar.gz | sha256sum`
+1. Recompute the source digest for the new tag (the trailing `cut` drops the
+   `  -` filename field so you paste exactly the 64-hex digest):
+   `curl -sL https://github.com/johnny4young/gos/archive/refs/tags/vX.Y.Z.tar.gz | sha256sum | cut -d' ' -f1`
 2. Update `pkgver`, reset `pkgrel=1`, and replace `sha256sums` in `PKGBUILD`, then
    mirror the same `pkgver`/`pkgrel`/`sha256sums` into `.SRCINFO`
    (`makepkg --printsrcinfo > .SRCINFO` on an Arch box regenerates it exactly).
