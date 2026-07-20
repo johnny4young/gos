@@ -114,9 +114,15 @@ def script_array(script, name)
   body.lines.map { |line| line.sub(/#.*/, "").strip }.reject(&:empty?)
 end
 
-release = workflow(".github/workflows/release.yml")
-ci = workflow(".github/workflows/ci.yml")
-canary = workflow(".github/workflows/canary.yml")
+workflow_paths = Dir[".github/workflows/*.{yml,yaml}"].sort
+assert(!workflow_paths.empty?, "repository must include GitHub Actions workflows")
+workflows = {}
+workflow_paths.each { |path| workflows[path] = workflow(path) }
+
+release = workflows.fetch(".github/workflows/release.yml")
+ci = workflows.fetch(".github/workflows/ci.yml")
+canary = workflows.fetch(".github/workflows/canary.yml")
+scorecard = workflows.fetch(".github/workflows/scorecard.yml")
 readme = file_text("README.md")
 releasing = file_text("RELEASING.md")
 contributing = file_text("CONTRIBUTING.md")
@@ -142,6 +148,19 @@ tracked_files = `git ls-files`.lines.map(&:strip)
 assert($?.success?, "git ls-files must succeed for repository inventory checks")
 assert(!tracked_files.empty?, "repository inventory must not be empty")
 
+# A mutable tag can silently change the code executed with repository tokens.
+# Cover every current and future workflow, including reusable workflows invoked
+# at the job level, so the supply-chain hardening cannot drift after this PR.
+workflows.each do |path, config|
+  jobs = config.fetch("jobs") { fail!("#{path} must define jobs") }
+  references = jobs.values.flat_map do |job|
+    [job["uses"], *(job["steps"] || []).map { |step| step["uses"] }]
+  end.compact
+  references.reject { |used| used.start_with?("./") }.each do |used|
+    assert(used.match?(/\A[^@\s]+@[0-9a-f]{40}\z/), "#{path} must pin #{used} to a full commit SHA")
+  end
+end
+
 validate_syntax_files = script_array(validate_local, "syntax_files")
 validate_test_scripts = script_array(validate_local, "test_scripts")
 validate_powershell_files = script_array(validate_local, "powershell_files")
@@ -154,6 +173,32 @@ assert(validate_test_scripts.sort == tracked_test_scripts, "validate-local test_
 
 tracked_powershell_files = tracked_files.select { |path| path.end_with?(".ps1") }.sort
 assert(validate_powershell_files.sort == tracked_powershell_files, "validate-local powershell_files must cover every tracked PowerShell script")
+
+scorecard_on = workflow_on(scorecard)
+assert(scorecard_on.keys.map(&:to_s).sort == %w[push schedule], "Scorecard must run only on its supported push and schedule events")
+assert(scorecard_on.dig("push", "branches") == ["main"], "Scorecard push runs must target only main")
+assert(scorecard_on["schedule"].is_a?(Array) && !scorecard_on["schedule"].empty?, "Scorecard must keep a scheduled run")
+assert(scorecard["permissions"] == "read-all", "Scorecard must default to read-only workflow permissions")
+
+scorecard_jobs = scorecard.fetch("jobs") { fail!("Scorecard workflow must define jobs") }
+scorecard_analysis = scorecard_jobs.fetch("analysis") { fail!("Scorecard workflow must define analysis job") }
+assert(scorecard_analysis["runs-on"] == "ubuntu-latest", "Scorecard analysis must use a supported Ubuntu runner")
+assert(scorecard_analysis["permissions"] == {
+  "contents" => "read",
+  "security-events" => "write",
+  "id-token" => "write"
+}, "Scorecard analysis must keep its exact least-privilege permissions")
+scorecard_steps = steps_for(scorecard_jobs, "analysis")
+scorecard_checkout = step_named(scorecard_steps, "Checkout code")
+assert(scorecard_checkout&.dig("with", "persist-credentials") == false, "Scorecard checkout must not persist credentials")
+scorecard_run = step_named(scorecard_steps, "Run analysis")
+assert(scorecard_run&.dig("with", "results_file") == "results.sarif", "Scorecard must write results.sarif")
+assert(scorecard_run&.dig("with", "results_format") == "sarif", "Scorecard must emit SARIF")
+assert(scorecard_run&.dig("with", "publish_results") == true, "Scorecard must publish results for the public badge")
+scorecard_artifact = step_named(scorecard_steps, "Upload artifact")
+assert(scorecard_artifact&.dig("with", "path") == "results.sarif", "Scorecard artifact must upload results.sarif")
+scorecard_upload = step_named(scorecard_steps, "Upload to code scanning")
+assert(scorecard_upload&.dig("with", "sarif_file") == "results.sarif", "Scorecard code scanning upload must use results.sarif")
 
 release_on = workflow_on(release)
 assert(release_on.dig("workflow_dispatch", "inputs", "version"), "release workflow must keep workflow_dispatch version input")
@@ -498,9 +543,9 @@ assert(contributing.include?("optional") && contributing.include?("ShellCheck/sh
   "missing required tool: %s (%s)",
   "--required-only",
   "optional checks disabled",
-  "YAML.load_file(\".github/workflows/ci.yml\")",
-  "YAML.load_file(\".github/workflows/release.yml\")",
-  "YAML.load_file(\".github/workflows/canary.yml\")"
+  'Dir[".github/workflows/*.{yml,yaml}"]',
+  'abort "no GitHub Actions workflows found"',
+  "workflows.each { |path| YAML.load_file(path) }"
 ].each do |fragment|
   assert(validate_local.include?(fragment), "validate-local must include #{fragment}")
 end

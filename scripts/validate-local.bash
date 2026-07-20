@@ -225,7 +225,7 @@ run_optional fish --no-config --no-execute completions/gos.fish
 run_optional_powershell
 run ./gos.sh version
 run_quiet ./gos.sh help
-run ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); YAML.load_file(".github/workflows/release.yml"); YAML.load_file(".github/workflows/canary.yml")'
+run ruby -e 'require "yaml"; workflows = Dir[".github/workflows/*.{yml,yaml}"].sort; abort "no GitHub Actions workflows found" if workflows.empty?; workflows.each { |path| YAML.load_file(path) }'
 run git diff --check
 
 printf 'ok - local validation passed\n'
