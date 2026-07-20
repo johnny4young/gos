@@ -452,7 +452,11 @@ _gos_feed_cache_path() {
 
 _gos_file_mtime() {
   local file="$1"
-  stat -f %m "$file" 2>/dev/null || stat -c %Y "$file" 2>/dev/null
+  # GNU stat first: on GNU coreutils (Linux, Windows Git Bash) `-f` means
+  # --file-system and would succeed with a non-mtime value, so a BSD-first form
+  # never falls through and the feed cache is never honored. BSD stat rejects
+  # `-c`, which lets it fall through to its own `-f` format.
+  stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null
 }
 
 _gos_feed_cache_fresh() {

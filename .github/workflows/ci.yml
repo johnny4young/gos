@@ -120,6 +120,10 @@ jobs:
           bash tests/changelog.bash
 
       - name: Run feature tests
+        # The feature suite drives Unix-only behaviour (pseudo-terminals via
+        # termios, mtime and mode probes, executable fake bins). Windows-facing
+        # paths are covered by the extraction, installer, and completion suites.
+        if: runner.os != 'Windows'
         run: |
           bash tests/features.bash
 
