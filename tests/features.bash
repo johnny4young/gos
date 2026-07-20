@@ -772,7 +772,7 @@ assert_contains "$output" "Using cached go1.21.6.darwin-arm64.tar.gz." "cache re
 [ "$(cache_inode "$cached_archive")" = "$cached_inode_before" ] || fail "cache reuse must not rewrite the cached archive"
 pass "install reuses verified cached archives without copying them"
 
-# PERF-403: an interrupted archive download leaves a .partial that a retry
+# An interrupted archive download leaves a .partial that a retry
 # resumes instead of restarting.
 case_dir="${test_root}/resume"
 resume_partial="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"

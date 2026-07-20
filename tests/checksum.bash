@@ -268,7 +268,7 @@ assert_contains "$output" "Checksum verified." "full feed"
 assert_tar_called "$tar_log" "full feed"
 pass "explicit install verifies checksum from include=all"
 
-# PERF-402: a version already in the small default feed must not pull the
+# A version already in the small default feed must not pull the
 # multi-megabyte include=all feed.
 GOS_TEST_DEFAULT_HAS_PKG=1 run_install "default_feed_hit" "present" "ok" "default"
 assert_status 0 "$status" "default feed hit" "$output"

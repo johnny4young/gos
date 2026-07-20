@@ -6,7 +6,7 @@
   <p align="center">
     <a href="https://github.com/johnny4young/gos/releases"><img src="https://img.shields.io/github/v/release/johnny4young/gos" alt="GitHub Release"></a>
     <a href="https://github.com/johnny4young/gos/blob/main/LICENSE"><img src="https://img.shields.io/github/license/johnny4young/gos" alt="License"></a>
-    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue" alt="Platform">
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20%7C%20BSD-blue" alt="Platform">
     <img src="https://img.shields.io/badge/shell-bash-green" alt="Shell">
     <a href="https://github.com/johnny4young/gos/stargazers"><img src="https://img.shields.io/github/stars/johnny4young/gos?style=social" alt="Stars"></a>
   </p>
@@ -117,6 +117,8 @@ Done. That's the whole setup.
 - **Self-updating** — `gos self-update` upgrades gos itself from the latest verified release
 - **Mirror support** — `GOS_DOWNLOAD_MIRROR` downloads archives from an HTTPS mirror while still verifying official go.dev checksums
 - **TTY download progress** — interactive installs show archive progress while pipes, CI, and JSON stay quiet
+- **Resumable downloads** — an interrupted archive download resumes from where it stopped instead of restarting the whole transfer
+- **Test across versions** — `gos each 1.22,1.23,1.24 -- go test ./...` runs a command against several side-by-side versions and prints a pass/fail summary
 - **TTY diagnostics styling** — interactive `gos doctor` plus stderr `Error:`/`Warning:` lines use color and symbols; pipes, `NO_COLOR`, `GOS_NO_COLOR=1`, and JSON stay plain
 - **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `env`, `doctor`, `prune`, `version`, and `use --print`
 - **Helpful when you mistype** — unknown commands suggest close matches (`gos isntall` → `install`), and `gos help <command>` shows a single command's usage
@@ -124,6 +126,7 @@ Done. That's the whole setup.
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)
 - **Zero dependencies** — just `curl` and `bash`, both pre-installed on most systems
 - **Shell completions** — tab-completion for Bash, Zsh, and Fish, including dynamic installed/cached version suggestions; `gos completions <shell>` prints them and `gos completions <shell> --install` writes them to the standard per-user directory
+- **Man page** — a `gos.1` man page ships with the Homebrew install, so `man gos` documents every command
 - **Lightweight** — single shell script, no compilation, no runtime
 
 ---
@@ -500,9 +503,9 @@ inside the active install slot, because activation moves that slot atomically.
 
 1. Queries the [official Go downloads API](https://go.dev/dl/?mode=json) for available versions
 2. Detects your OS via `uname -s` and architecture via `uname -m`
-3. Downloads the matching archive from `https://go.dev/dl/`
-4. Verifies SHA256 checksum against the Go API (uses `jq` or `python3`), falling back to the archive's published `.sha256` companion file when API metadata cannot be parsed
-5. Reuses a cached archive only after its checksum matches the Go metadata
+3. Downloads the matching archive from `https://go.dev/dl/`, resuming an interrupted transfer instead of restarting it
+4. Verifies the SHA256 checksum against the Go downloads feed (uses `jq` or `python3`) — checking the small default feed first and only fetching the full history for older versions — with the archive's published `.sha256` companion file as a fallback when the feed cannot be parsed
+5. Reuses a verified cached archive in place when one is present, without re-downloading
 6. Extracts the new version into a temporary staging directory
 7. Validates the staged `go/bin/go` before touching `$GOS_INSTALL_DIR`
 8. Backs up the previous Go installation, activates the staged version, and rolls back automatically if activation fails

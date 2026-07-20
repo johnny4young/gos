@@ -266,7 +266,7 @@ pass "missing custom GOS_BIN_DIR is created"
 run_installer "existing_bin" "existing"
 assert_status 0 "$status" "existing bin" "$output"
 assert_installed "$bin_dir" "existing bin"
-# UX-801: the post-install message lists concrete next steps, and warns when
+# The post-install message lists concrete next steps, and warns when
 # the install dir is not on PATH (the test bin dir never is).
 assert_contains "$output" "Next steps:" "existing bin prints next steps"
 assert_contains "$output" "gos latest" "existing bin suggests installing Go"

@@ -580,7 +580,7 @@ assert(releasing.include?("`[Unreleased]` compare link"), "RELEASING.md must inc
   assert(security.include?(fragment), "SECURITY.md must mention #{fragment}")
 end
 
-# ARCH-501: every helper that builds a path under GOS_CACHE_DIR must have a
+# Every helper that builds a path under GOS_CACHE_DIR must have a
 # counterpart in cmd_prune. Without this, adding a new kind of cache file
 # leaves it leaking forever — exactly how the discovery feed cache grew
 # unreclaimed until v1.8.1.
@@ -602,16 +602,16 @@ prune_coverage = {
 }
 cache_path_producers.each do |fn|
   assert(prune_coverage.key?(fn),
-    "cache-path helper #{fn} has no cmd_prune cleanup mapping (ARCH-501): add it to cmd_prune and to this invariant")
+    "cache-path helper #{fn} has no cmd_prune cleanup mapping: add it to cmd_prune and to this invariant")
   assert(prune_coverage[fn],
-    "cmd_prune no longer reclaims the files produced by #{fn} (ARCH-501)")
+    "cmd_prune no longer reclaims the files produced by #{fn}")
 end
 
-# UX-803: errors should tell the user what to do next, not guess. The old
+# Errors should tell the user what to do next, not guess. The old
 # archive-download failure blamed "Version may not exist" even on a network
 # outage; keep that vague phrasing from creeping back.
 assert(!gos_sh.include?("may not exist"),
-  "download errors must give a next step (retry / gos list), not guess 'may not exist' (UX-803)")
+  "download errors must give a next step (retry / gos list), not guess 'may not exist'")
 
 puts "ok - workflow YAML and invariants"
 RUBY
