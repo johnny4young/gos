@@ -5,7 +5,6 @@ name: Scorecard
 # scanning dashboard.
 
 on:
-  branch_protection_rule:
   schedule:
     # Weekly, staggered off the top of the hour.
     - cron: "27 7 * * 1"
@@ -21,6 +20,9 @@ jobs:
     name: Scorecard analysis
     runs-on: ubuntu-latest
     permissions:
+      # Checkout and Scorecard need repository contents, while every other
+      # read scope remains disabled by the job-level override.
+      contents: read
       # Upload the SARIF results to the code scanning dashboard.
       security-events: write
       # Publish results to the OpenSSF API via keyless (OIDC) signing.

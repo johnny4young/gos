@@ -321,10 +321,12 @@ jobs:
 
       - name: Generate SHA256 checksums
         run: |
-          sha256sum gos.sh > checksums.txt
-          sha256sum install.sh >> checksums.txt
-          sha256sum install.ps1 >> checksums.txt
-          sha256sum gos-windows.zip >> checksums.txt
+          {
+            sha256sum gos.sh
+            sha256sum install.sh
+            sha256sum install.ps1
+            sha256sum gos-windows.zip
+          } > checksums.txt
 
       - name: Attest script release assets
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
