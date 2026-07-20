@@ -55,7 +55,10 @@ CHANGELOG
 }
 
 file_mode() {
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+  # GNU stat first: on GNU coreutils (Linux, Windows Git Bash) `-f` means
+  # --file-system and would succeed with the wrong output, so BSD-first would
+  # never fall through. `-c` is rejected by BSD stat, which then uses `-f`.
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
 }
 
 current_changelog_requires_unreleased_notes_when_ahead_of_latest_tag() {

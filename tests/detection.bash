@@ -31,6 +31,17 @@ esac
 FAKE_UNAME
 chmod +x "${fake_bin}/uname"
 
+# doctor exits non-zero when any check reports a problem, and its `go` check
+# runs `command -v go`. Shadow a fake `go` so the platform-detection probe is
+# deterministic regardless of whether the CI runner ships Go on PATH.
+cat >"${fake_bin}/go" <<'FAKE_GO'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'go version go1.99.0 test/amd64\n'
+FAKE_GO
+chmod +x "${fake_bin}/go"
+
 doctor_for() {
   local uname_s="$1" uname_m="$2"
   status=0

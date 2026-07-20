@@ -1217,7 +1217,9 @@ GOS_TEST_INSTALL_DIR="$hostile_dir" run_gos "$case_dir" bash "$script" env --fis
 assert_contains "$output" "fish_add_path --path '" "env fish quotes hostile path"
 assert_contains "$output" "\$weird;go/bin'" "env fish preserves dollar/semicolon"
 if command -v fish >/dev/null 2>&1; then
-  printf '%s\n' "$output" | fish --no-config --no-execute - \
+  fish_check="${test_root}/env-fish-check.fish"
+  printf '%s\n' "$output" >"$fish_check"
+  fish --no-config --no-execute "$fish_check" \
     || fail "env --fish output is not valid fish syntax"
 fi
 pass "env quoting preserves hostile paths for POSIX and Fish"
@@ -1992,7 +1994,9 @@ run_gos "$case_dir" bash "$script" env --auto --fish
 assert_contains "$output" "--on-variable PWD" "env auto fish on PWD"
 assert_contains "$output" "gos __project-version" "env auto fish project lookup"
 if command -v fish >/dev/null 2>&1; then
-  printf '%s\n' "$output" | fish --no-config --no-execute - \
+  fish_check="${test_root}/env-auto-fish-check.fish"
+  printf '%s\n' "$output" >"$fish_check"
+  fish --no-config --no-execute "$fish_check" \
     || fail "env --auto --fish output is not valid fish syntax"
 fi
 pass "env --auto emits offline per-shell auto-switch hooks"
