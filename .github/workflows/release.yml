@@ -34,7 +34,7 @@ jobs:
     steps:
       # Only the tag-push ancestry check below needs the repository; a manual
       # (workflow_dispatch) run validates its inputs from env alone.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: github.event_name == 'push'
         with:
           fetch-depth: 0
@@ -110,7 +110,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -137,7 +137,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
@@ -186,7 +186,7 @@ jobs:
       # builds match, so a rebuild can drift from the checksum stamped into
       # the committed package metadata.
       - name: Upload Windows package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gos-windows-zip
           path: gos-windows.zip
@@ -222,7 +222,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # On workflow_dispatch, fetch the newly pushed tag to get updated code
           ref: ${{ needs.validate-release-ref.outputs.tag }}
@@ -253,7 +253,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.validate-release-ref.outputs.tag }}
 
@@ -280,7 +280,7 @@ jobs:
       # against an identical zip.
       - name: Download Windows package asset
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: gos-windows-zip
 
@@ -327,17 +327,17 @@ jobs:
           sha256sum gos-windows.zip >> checksums.txt
 
       - name: Attest script release assets
-        uses: actions/attest@v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-checksums: checksums.txt
 
       - name: Attest checksum manifest
-        uses: actions/attest@v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: checksums.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ needs.validate-release-ref.outputs.tag }}
           # Pre-release tags (v1.2.3-rc1) must never become the release served
@@ -359,7 +359,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the released gos source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # The vendored bump script and the formula template ship with the
           # released source, so check out the published tag (not the tap).

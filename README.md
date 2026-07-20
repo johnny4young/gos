@@ -6,6 +6,8 @@
   <p align="center">
     <a href="https://github.com/johnny4young/gos/releases"><img src="https://img.shields.io/github/v/release/johnny4young/gos" alt="GitHub Release"></a>
     <a href="https://github.com/johnny4young/gos/blob/main/LICENSE"><img src="https://img.shields.io/github/license/johnny4young/gos" alt="License"></a>
+    <a href="https://github.com/johnny4young/gos/actions/workflows/ci.yml"><img src="https://github.com/johnny4young/gos/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://scorecard.dev/viewer/?uri=github.com/johnny4young/gos"><img src="https://api.securityscorecards.dev/projects/github.com/johnny4young/gos/badge" alt="OpenSSF Scorecard"></a>
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20%7C%20BSD-blue" alt="Platform">
     <img src="https://img.shields.io/badge/shell-bash-green" alt="Shell">
     <a href="https://github.com/johnny4young/gos/stargazers"><img src="https://img.shields.io/github/stars/johnny4young/gos?style=social" alt="Stars"></a>
