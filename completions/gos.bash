@@ -4,7 +4,7 @@
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   # gos-commands:bash:begin
-  local fallback_commands="latest install run use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
+  local fallback_commands="latest install run each use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
   # gos-commands:bash:end
   local commands="$fallback_commands"
   local cmd_index=1 cmd words="" line
@@ -31,7 +31,7 @@ _gos_completions() {
       prune)
         words="--rollback --dry-run --json"
         ;;
-      install | run)
+      install | run | each)
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions --remote-cached 2>/dev/null || true)
         fi
@@ -52,6 +52,9 @@ _gos_completions() {
       list)
         words="--installed --minor --json"
         ;;
+      rollback)
+        words="--dry-run"
+        ;;
       help)
         words="$commands"
         ;;
@@ -59,7 +62,7 @@ _gos_completions() {
         words="--fish --auto --json"
         ;;
       completions)
-        words="bash zsh fish"
+        words="bash zsh fish --install"
         ;;
       doctor)
         words="--fix --json"

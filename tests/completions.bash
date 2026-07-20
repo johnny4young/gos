@@ -55,17 +55,18 @@ for sync_helper in "${sync_helpers[@]}"; do
 done
 
 write_fixture="${test_root}/write-fixture"
-mkdir -p "${write_fixture}/completions" "${write_fixture}/scripts"
+mkdir -p "${write_fixture}/completions" "${write_fixture}/scripts" "${write_fixture}/docs"
 cp "${repo_root}/gos.sh" "${repo_root}/README.md" "${write_fixture}/"
 cp "${repo_root}/completions/gos.bash" \
   "${repo_root}/completions/gos.fish" \
   "${repo_root}/completions/gos.zsh" \
   "${write_fixture}/completions/"
+cp "${repo_root}/docs/gos.1" "${write_fixture}/docs/"
 cp "${repo_root}"/scripts/sync-*.bash "${write_fixture}/scripts/"
 git -C "$write_fixture" init -q
-git -C "$write_fixture" add README.md gos.sh completions scripts
+git -C "$write_fixture" add README.md gos.sh completions scripts docs
 bash "${write_fixture}/scripts/sync-command-surfaces.bash" --write
-git -C "$write_fixture" diff --exit-code -- README.md gos.sh completions >/dev/null \
+git -C "$write_fixture" diff --exit-code -- README.md gos.sh completions docs >/dev/null \
   || fail "sync-command-surfaces --write should be idempotent when generated surfaces are current"
 
 # A late generator failure must not leave the earlier completion and README
@@ -89,8 +90,8 @@ File.write(path, current)
 RUBY
 
 rollback_snapshot="${test_root}/rollback-snapshot"
-mkdir -p "${rollback_snapshot}/completions"
-sync_targets=(README.md gos.sh completions/gos.bash completions/gos.fish completions/gos.zsh)
+mkdir -p "${rollback_snapshot}/completions" "${rollback_snapshot}/docs"
+sync_targets=(README.md gos.sh completions/gos.bash completions/gos.fish completions/gos.zsh docs/gos.1)
 for sync_target in "${sync_targets[@]}"; do
   cp -p "${write_fixture}/${sync_target}" "${rollback_snapshot}/${sync_target}"
 done
@@ -124,6 +125,7 @@ expected_commands="$(
 latest
 install
 run
+each
 use
 pin
 check
@@ -148,7 +150,7 @@ assert_not_contains "$commands_output" "__commands" "__commands public list"
 
 commands_json="$(bash "$script" __commands --json)"
 assert_json "$commands_json" "__commands --json"
-assert_contains "$commands_json" '"commands":["latest","install","run","use","pin","check","rollback","uninstall","prune","current","list","platforms","status","which","env","completions","doctor","self-update","version","help"]' "__commands json"
+assert_contains "$commands_json" '"commands":["latest","install","run","each","use","pin","check","rollback","uninstall","prune","current","list","platforms","status","which","env","completions","doctor","self-update","version","help"]' "__commands json"
 commands_details="$(bash "$script" __commands --details)"
 assert_contains "$commands_details" "latest|latest|Install the latest stable Go version" "__commands details latest"
 assert_contains "$commands_details" "self-update|self-update|Update gos itself to the latest verified release" "__commands details self-update"
@@ -240,4 +242,25 @@ set -e
 [ "$status" -ne 0 ] || fail "gos completions should reject trailing arguments"
 assert_contains "$output" "unexpected argument for gos completions" "trailing argument error"
 
-pass "embedded completions stay in sync and validate"
+install_root="${test_root}/xdg"
+XDG_DATA_HOME="${install_root}/data" XDG_CONFIG_HOME="${install_root}/config" \
+  bash "$script" completions bash --install >/dev/null 2>&1 \
+  || fail "gos completions bash --install failed"
+[ -f "${install_root}/data/bash-completion/completions/gos" ] \
+  || fail "bash --install did not write the completion to the XDG data dir"
+XDG_DATA_HOME="${install_root}/data" XDG_CONFIG_HOME="${install_root}/config" \
+  bash "$script" completions zsh --install >/dev/null 2>&1 \
+  || fail "gos completions zsh --install failed"
+[ -f "${install_root}/data/zsh/site-functions/_gos" ] \
+  || fail "zsh --install did not write _gos to the XDG data dir"
+XDG_DATA_HOME="${install_root}/data" XDG_CONFIG_HOME="${install_root}/config" \
+  bash "$script" completions fish --install >/dev/null 2>&1 \
+  || fail "gos completions fish --install failed"
+[ -f "${install_root}/config/fish/completions/gos.fish" ] \
+  || fail "fish --install did not write gos.fish to the XDG config dir"
+# The installed file is byte-identical to what the printing form emits.
+printed_bash="$(bash "$script" completions bash)"
+[ "$printed_bash" = "$(<"${install_root}/data/bash-completion/completions/gos")" ] \
+  || fail "installed bash completion differs from the printed form"
+
+pass "embedded completions stay in sync, validate, and install to XDG dirs"

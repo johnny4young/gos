@@ -163,6 +163,20 @@ JSON
       echo "archive download disabled" >&2
       exit 1
     fi
+    if [ "${GOS_TEST_DOWNLOAD_MODE:-ok}" = "truncate-once" ]; then
+      # Simulate a resumable transfer: with an empty target, write half and
+      # fail; on a retry the partial already has bytes, so append the rest.
+      full="fake archive for ${url}"
+      if [ -s "$output" ]; then
+        cur=$(wc -c <"$output" | tr -d '[:space:]')
+        printf '%s' "${full:$cur}" >>"$output"
+        exit 0
+      fi
+      half=$((${#full} / 2))
+      printf '%s' "${full:0:$half}" >"$output"
+      echo "curl: (18) transfer closed" >&2
+      exit 18
+    fi
     printf 'fake archive for %s\n' "$url" >"$output"
     ;;
   https://dl.google.com/go/go*.sha256)
@@ -186,7 +200,10 @@ if grep -q GOS-TEST-CORRUPT "$1" 2>/dev/null; then
   exit 0
 fi
 
-case "$1" in
+# A resumable download hashes the .partial file, which once complete is the
+# archive itself, so match on the archive name regardless of that suffix.
+probe="${1%.partial}"
+case "$probe" in
   */gos.sh)
     printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  %s\n' "$1"
     ;;
@@ -743,10 +760,60 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "initial cache install failed: ${output}"
 [ ! -e "${case_dir}/go.gos-lock" ] || fail "install left the gos lock behind"
 rm -rf "${case_dir}/go"
+# Portable inode reader: GNU stat uses -c, BSD/macOS stat uses -f.
+cache_inode() { stat -c '%i' "$1" 2>/dev/null || stat -f '%i' "$1"; }
+cached_archive="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+cached_inode_before="$(cache_inode "$cached_archive")"
 GOS_TEST_DOWNLOAD_MODE="fail-archives" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "cached install failed: ${output}"
 assert_contains "$output" "Using cached go1.21.6.darwin-arm64.tar.gz." "cache reuse"
-pass "install reuses verified cached archives"
+# The cache file is extracted in place, so it is neither consumed nor rewritten.
+[ -f "$cached_archive" ] || fail "cache reuse must leave the cached archive in place"
+[ "$(cache_inode "$cached_archive")" = "$cached_inode_before" ] || fail "cache reuse must not rewrite the cached archive"
+pass "install reuses verified cached archives without copying them"
+
+# An interrupted archive download leaves a .partial that a retry
+# resumes instead of restarting.
+case_dir="${test_root}/resume"
+resume_partial="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
+resume_cached="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+GOS_TEST_DOWNLOAD_MODE="truncate-once" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "a truncated download should fail"
+assert_contains "$output" "the partial was kept" "interrupted download keeps the partial"
+[ -f "$resume_partial" ] || fail "an interrupted download must leave a .partial in the cache"
+GOS_TEST_DOWNLOAD_MODE="truncate-once" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "resumed install failed: ${output}"
+assert_contains "$output" "Resuming download of go1.21.6" "second attempt resumes the partial"
+[ ! -f "$resume_partial" ] || fail "a completed download must not leave a .partial behind"
+[ -f "$resume_cached" ] || fail "the verified partial should be promoted to the cache"
+pass "interrupted archive downloads resume instead of restarting"
+
+# A verified partial still becomes a reusable cache entry when an atomic rename
+# is unavailable; otherwise a later retry would resume an already-complete file.
+case_dir="${test_root}/resume-promotion-fallback"
+fallback_partial="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
+fallback_cached="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+GOS_TEST_MV_FAIL_DEST="$fallback_cached" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "install with cache promotion rename failure failed: ${output}"
+[ ! -f "$fallback_partial" ] || fail "cache promotion fallback must remove the completed .partial"
+[ -f "$fallback_cached" ] || fail "cache promotion fallback must create the reusable cache entry"
+rm -rf "${case_dir}/go"
+GOS_TEST_DOWNLOAD_MODE="fail-archives" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "install did not reuse the fallback cache entry: ${output}"
+assert_contains "$output" "Using cached go1.21.6.darwin-arm64.tar.gz." "fallback cache reuse"
+pass "verified partials fall back to copy when cache promotion rename fails"
+
+# A resumed partial that still fails its checksum is discarded, not resumed
+# forever (resume never rewrites earlier bytes).
+case_dir="${test_root}/resume-corrupt"
+mkdir -p "${case_dir}/cache"
+# Seed a partial whose bytes hash wrong even after the resume appends more.
+printf 'GOS-TEST-CORRUPT' >"${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
+GOS_TEST_DOWNLOAD_MODE="truncate-once" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "a resumed-but-corrupt download should fail its checksum"
+assert_contains "$output" "checksum mismatch" "corrupt resume fails verification"
+[ ! -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial" ] || fail "a checksum-mismatched partial must be discarded"
+pass "a corrupt resumable partial is discarded on a checksum mismatch"
 
 case_dir="${test_root}/lock-held"
 mkdir -p "${case_dir}/go.gos-lock"
@@ -775,6 +842,19 @@ create_old_install "${case_dir}/go"
 run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "install before rollback failed: ${output}"
 [ -d "${case_dir}/go.gos-rollback" ] || fail "rollback snapshot was not saved"
+run_gos "$case_dir" bash "$script" rollback --dry-run
+[ "$status" -eq 0 ] || fail "rollback --dry-run failed: ${output}"
+assert_contains "$output" "Would roll back to go1.20.0 from ${case_dir}/go.gos-rollback." "rollback dry-run target"
+assert_contains "$output" "The active go1.21.6 would become the new rollback." "rollback dry-run swap"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "rollback --dry-run must not switch the install"
+[ -d "${case_dir}/go.gos-rollback" ] || fail "rollback --dry-run must not consume the rollback"
+mkdir -p "${case_dir}/go.gos-lock"
+run_gos "$case_dir" bash "$script" rollback --dry-run
+[ "$status" -eq 0 ] || fail "rollback --dry-run must not take or be blocked by the mutation lock: ${output}"
+rmdir "${case_dir}/go.gos-lock"
+run_gos "$case_dir" bash "$script" rollback --bogus
+[ "$status" -ne 0 ] || fail "rollback should reject unknown flags"
+assert_contains "$output" "unexpected argument for gos rollback: --bogus" "rollback unknown flag"
 run_gos "$case_dir" bash "$script" rollback
 [ "$status" -eq 0 ] || fail "rollback failed: ${output}"
 [ "$(<"${case_dir}/go/VERSION_MARKER")" = "old" ] || fail "rollback did not restore previous install"
@@ -787,12 +867,40 @@ run_gos "$case_dir" bash "$script" doctor --json
 assert_json "$output" "doctor --json"
 assert_contains "$output" '"status":"ok"' "doctor json"
 assert_contains "$output" '"name":"checksum-hash"' "doctor json checks"
+assert_contains "$output" '"name":"residue","status":"ok"' "doctor json residue check"
+assert_contains "$output" '"name":"lock","status":"ok"' "doctor json lock check"
+assert_contains "$output" '"name":"gotoolchain","status":"ok"' "doctor gotoolchain ok without override"
+GOTOOLCHAIN="auto" run_gos "$case_dir" bash "$script" doctor
+[ "$status" -eq 0 ] || fail "doctor with GOTOOLCHAIN set must not fail: ${output}"
+assert_contains "$output" "warn - gotoolchain: GOTOOLCHAIN=auto may run a per-module toolchain" "doctor warns on GOTOOLCHAIN override"
+GOTOOLCHAIN="local" run_gos "$case_dir" bash "$script" doctor
+[ "$status" -eq 0 ] || fail "doctor with GOTOOLCHAIN=local failed: ${output}"
+assert_contains "$output" "ok - gotoolchain: GOTOOLCHAIN does not override" "doctor treats GOTOOLCHAIN=local as ok"
 run_gos "$case_dir" bash "$script" doctor
 [ "$status" -eq 0 ] || fail "doctor human failed: ${output}"
 case "$output" in
   *$'\033['*) fail "doctor non-tty output must not contain ANSI: ${output}" ;;
 esac
 pass "doctor emits machine-readable diagnostics"
+
+case_dir="${test_root}/doctor-residue-lock"
+mkdir -p "${case_dir}/go.gos-backup.4242"
+mkdir -p "${case_dir}/go.gos-lock"
+printf '99999999\n' >"${case_dir}/go.gos-lock/pid"
+run_gos "$case_dir" bash "$script" doctor
+[ "$status" -eq 0 ] || fail "doctor must not fail on warnings: ${output}"
+assert_contains "$output" "warn - residue: 1 orphaned backup(s)" "doctor residue warning"
+assert_contains "$output" "fix - Remove them with: gos prune --rollback" "doctor residue fix hint"
+assert_contains "$output" "warn - lock: a stale lock at ${case_dir}/go.gos-lock" "doctor stale lock warning"
+run_gos "$case_dir" bash "$script" doctor --json
+[ "$status" -eq 0 ] || fail "doctor --json with residue failed: ${output}"
+assert_json "$output" "doctor --json with residue"
+assert_contains "$output" '"name":"residue","status":"warn"' "doctor json residue warn"
+assert_contains "$output" '"name":"lock","status":"warn"' "doctor json lock warn"
+[ -d "${case_dir}/go.gos-lock" ] || fail "doctor must not remove the lock"
+[ -d "${case_dir}/go.gos-backup.4242" ] || fail "doctor must not remove residue"
+rm -rf "${case_dir}/go.gos-backup.4242" "${case_dir}/go.gos-lock"
+pass "doctor reports crash residue and a stale lock without touching them"
 
 case_dir="${test_root}/doctor-color"
 mkdir -p "$case_dir"
@@ -1124,7 +1232,9 @@ GOS_TEST_INSTALL_DIR="$hostile_dir" run_gos "$case_dir" bash "$script" env --fis
 assert_contains "$output" "fish_add_path --path '" "env fish quotes hostile path"
 assert_contains "$output" "\$weird;go/bin'" "env fish preserves dollar/semicolon"
 if command -v fish >/dev/null 2>&1; then
-  printf '%s\n' "$output" | fish --no-config --no-execute - \
+  fish_check="${test_root}/env-fish-check.fish"
+  printf '%s\n' "$output" >"$fish_check"
+  fish --no-config --no-execute "$fish_check" \
     || fail "env --fish output is not valid fish syntax"
 fi
 pass "env quoting preserves hostile paths for POSIX and Fish"
@@ -1179,7 +1289,8 @@ GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" list
 assert_contains "$output" "could not fetch the Go version list" "offline list"
 GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -ne 0 ] || fail "offline install should fail"
-assert_contains "$output" "download failed" "offline install"
+assert_contains "$output" "download of go1.21.6.darwin-arm64.tar.gz failed" "offline install error"
+assert_contains "$output" "run 'gos list' to confirm the version exists" "offline install next step"
 GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" platforms 1.21.6
 [ "$status" -ne 0 ] || fail "offline platforms should fail"
 assert_contains "$output" "could not fetch the Go downloads feed" "offline platforms"
@@ -1192,10 +1303,14 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "prune setup install failed: ${output}"
 [ -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "prune setup did not cache archive"
 [ -d "${case_dir}/go.gos-rollback" ] || fail "prune setup did not create rollback"
+printf '{"fake":"feed"}\n' >"${case_dir}/cache/feed-all.json"
+printf '{"fake":"feed"}\n' >"${case_dir}/cache/feed-default.json"
 run_gos "$case_dir" bash "$script" prune --dry-run
 [ "$status" -eq 0 ] || fail "prune --dry-run failed: ${output}"
 assert_contains "$output" "Would remove 1 cached Go archive(s)" "dry-run previews archive removal"
+assert_contains "$output" "Would remove 2 discovery feed cache file(s)" "dry-run previews feed cache removal"
 [ -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "dry-run must not delete cached archives"
+[ -f "${case_dir}/cache/feed-all.json" ] || fail "dry-run must not delete the feed cache"
 run_gos "$case_dir" bash "$script" prune --rollback --dry-run
 [ "$status" -eq 0 ] || fail "prune --rollback --dry-run failed: ${output}"
 assert_contains "$output" "Would remove rollback installation" "dry-run previews rollback removal"
@@ -1208,6 +1323,9 @@ run_gos "$case_dir" bash "$script" prune
 [ "$status" -eq 0 ] || fail "prune failed: ${output}"
 assert_contains "$output" "Removed 1 cached Go archive(s)" "prune cache"
 assert_contains "$output" "cached Go archive(s) (" "prune reports freed space"
+assert_contains "$output" "Removed 2 discovery feed cache file(s)" "prune reclaims the feed cache"
+[ ! -f "${case_dir}/cache/feed-all.json" ] || fail "prune left the all-versions feed cache behind"
+[ ! -f "${case_dir}/cache/feed-default.json" ] || fail "prune left the default feed cache behind"
 assert_contains "$output" "Rollback installation kept" "prune keeps rollback"
 [ ! -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "prune left cached archive"
 [ -d "${case_dir}/go.gos-rollback" ] || fail "prune must not remove rollback by default"
@@ -1376,6 +1494,7 @@ assert_contains "$output" "Already up to date." "check up to date"
 feed_lookup_args="$(grep 'https://go.dev/dl/?mode=json' "${case_dir}/curl-args.log" | tail -n 1 || true)"
 assert_contains "$feed_lookup_args" "--proto =https" "Go feed HTTPS protocol"
 assert_contains "$feed_lookup_args" "--proto-redir =https" "Go feed redirect protocol"
+assert_contains "$feed_lookup_args" "--compressed" "Go feed requests gzip compression"
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check
 [ "$status" -eq 0 ] || fail "check outdated failed: ${output}"
 assert_contains "$output" "Update available. Install it with: gos latest" "check outdated"
@@ -1787,6 +1906,7 @@ run_gos "$case_dir" bash "$script" prune --dry-run --json
 assert_json "$output" "prune --dry-run --json"
 assert_contains "$output" '"dry_run":true' "prune json dry-run flag"
 assert_contains "$output" '"removed_archives":1' "prune json dry-run would-remove count"
+assert_contains "$output" '"removed_feed_files":0' "prune json feed fields present"
 run_gos "$case_dir" bash "$script" prune --json
 [ "$status" -eq 0 ] || fail "prune --json failed: ${output}"
 assert_json "$output" "prune --json"
@@ -1889,7 +2009,9 @@ run_gos "$case_dir" bash "$script" env --auto --fish
 assert_contains "$output" "--on-variable PWD" "env auto fish on PWD"
 assert_contains "$output" "gos __project-version" "env auto fish project lookup"
 if command -v fish >/dev/null 2>&1; then
-  printf '%s\n' "$output" | fish --no-config --no-execute - \
+  fish_check="${test_root}/env-auto-fish-check.fish"
+  printf '%s\n' "$output" >"$fish_check"
+  fish --no-config --no-execute "$fish_check" \
     || fail "env --auto --fish output is not valid fish syntax"
 fi
 pass "env --auto emits offline per-shell auto-switch hooks"
@@ -2032,6 +2154,26 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
   popd >/dev/null
   [ "$status" -ne 0 ] || fail "run -- without a project manifest should fail"
   assert_contains "$output" "no version given and no .go-version or go.mod found" "run project mode without manifest"
+
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each 1.20.0,1.21.6 -- go version
+  [ "$status" -eq 0 ] || fail "each across installed versions failed: ${output}"
+  assert_contains "$output" "=== go1.20.0 ===" "each runs the first version"
+  assert_contains "$output" "=== go1.21.6 ===" "each runs the second version"
+  assert_contains "$output" "go version go1.20.0 darwin/arm64" "each uses the first version's go"
+  assert_contains "$output" "go version go1.21.6 darwin/arm64" "each uses the second version's go"
+  assert_contains "$output" "all 2 version(s) passed." "each reports an all-pass summary"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each 1.20.0,1.21.6 -- false
+  [ "$status" -ne 0 ] || fail "each must fail when a command fails"
+  assert_contains "$output" "2/2 version(s) failed." "each reports failures and exits non-zero"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each
+  [ "$status" -ne 0 ] || fail "each without arguments should fail"
+  assert_contains "$output" "Usage: gos each <v1,v2,...>" "each without a version list prints usage"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each 1.21.6
+  [ "$status" -ne 0 ] || fail "each without a command should fail"
+  assert_contains "$output" "Usage: gos each <v1,v2,...>" "each without a command prints usage"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each --json -- go version
+  [ "$status" -ne 0 ] || fail "each --json should fail"
+  assert_contains "$output" "gos each does not support --json" "each rejects --json"
 
   GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall --inactive --dry-run
   [ "$status" -eq 0 ] || fail "uninstall --inactive --dry-run failed: ${output}"

@@ -55,7 +55,17 @@ done
 printf '%s\n' "$url" >>"$GOS_TEST_URL_LOG"
 
 case "$url" in
-  'https://go.dev/dl/?mode=json'|'https://go.dev/dl/?mode=json&include=all')
+  'https://go.dev/dl/?mode=json')
+    # The small default feed normally lacks the pinned old version, forcing gos
+    # to escalate to include=all. With GOS_TEST_DEFAULT_HAS_PKG=1 it carries the
+    # package, standing in for a recent version that needs no escalation.
+    if [ "${GOS_TEST_DEFAULT_HAS_PKG:-0}" = "1" ]; then
+      cat "$GOS_TEST_JSON_FILE"
+    else
+      printf '[]\n'
+    fi
+    ;;
+  'https://go.dev/dl/?mode=json&include=all')
     cat "$GOS_TEST_JSON_FILE"
     ;;
   https://dl.google.com/go/go*.sha256)
@@ -101,13 +111,16 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-cat >/dev/null
+input="$(cat)"
 
 if [ "${GOS_TEST_METADATA:-present}" = "missing" ]; then
   exit 0
 fi
 
-if [ "$pkg" = "$GOS_TEST_EXPECTED_PKG" ]; then
+# Only the include=all feed carries the package entry, so the digest is emitted
+# only when the parsed feed actually lists it (the default feed is an empty
+# array). This mirrors gos escalating from the small feed to the full one.
+if [ "$pkg" = "$GOS_TEST_EXPECTED_PKG" ] && printf '%s' "$input" | grep -Fq "$pkg"; then
   printf '%s\n' "$GOS_TEST_EXPECTED_SHA"
 fi
 FAKE_JQ
@@ -201,7 +214,13 @@ run_install() {
   mkdir -p "$case_dir"
   : >"$url_log"
   : >"$tar_log"
-  printf '[]\n' >"$json_file"
+  # The include=all feed lists the package only when metadata is present; the
+  # default feed (served separately by the fake curl) is always empty.
+  if [ "$metadata" = "missing" ]; then
+    printf '[]\n' >"$json_file"
+  else
+    printf '[{"files":[{"filename":"go1.21.6.darwin-arm64.tar.gz"}]}]\n' >"$json_file"
+  fi
 
   # The .sha256 companion fallback validates strict 64-hex digests, so those
   # cases need a syntactically valid checksum value.
@@ -221,6 +240,7 @@ run_install() {
     "GOS_TEST_SHA256_FILE_MODE=${sha_file_mode}"
     "GOS_TEST_EXPECTED_PKG=go1.21.6.darwin-arm64.tar.gz"
     "GOS_TEST_EXPECTED_SHA=${expected_sha}"
+    "GOS_TEST_DEFAULT_HAS_PKG=${GOS_TEST_DEFAULT_HAS_PKG:-0}"
   )
 
   case "$strict" in
@@ -247,6 +267,17 @@ assert_file_contains "$url_log" "https://go.dev/dl/?mode=json&include=all" "full
 assert_contains "$output" "Checksum verified." "full feed"
 assert_tar_called "$tar_log" "full feed"
 pass "explicit install verifies checksum from include=all"
+
+# A version already in the small default feed must not pull the
+# multi-megabyte include=all feed.
+GOS_TEST_DEFAULT_HAS_PKG=1 run_install "default_feed_hit" "present" "ok" "default"
+assert_status 0 "$status" "default feed hit" "$output"
+assert_contains "$output" "Checksum verified." "default feed hit"
+assert_tar_called "$tar_log" "default feed hit"
+if grep -Fq "https://go.dev/dl/?mode=json&include=all" "$url_log"; then
+  fail "default feed hit: a default-feed version must not fetch the include=all feed"
+fi
+pass "installing a default-feed version skips the include=all feed"
 
 run_install "feed_required" "present" "ok" "feed"
 assert_status 0 "$status" "feed required" "$output"

@@ -66,6 +66,7 @@ syntax_files=(
   scripts/sync-command-surfaces.bash
   scripts/sync-embedded-completions.bash
   scripts/sync-fish-command-completions.bash
+  scripts/sync-man-page.bash
   scripts/sync-readme-usage.bash
   scripts/sync-zsh-command-completions.bash
   scripts/update-changelog.bash

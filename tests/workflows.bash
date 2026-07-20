@@ -369,7 +369,7 @@ assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surf
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
   "bash scripts/sync-command-surfaces.bash --check",
-  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-bash-command-completions.bash scripts/sync-command-surfaces.bash scripts/sync-embedded-completions.bash scripts/sync-fish-command-completions.bash scripts/sync-readme-usage.bash scripts/sync-zsh-command-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash scripts/validate-local.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-bash-command-completions.bash scripts/sync-command-surfaces.bash scripts/sync-embedded-completions.bash scripts/sync-fish-command-completions.bash scripts/sync-man-page.bash scripts/sync-readme-usage.bash scripts/sync-zsh-command-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash scripts/validate-local.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -579,6 +579,39 @@ assert(releasing.include?("`[Unreleased]` compare link"), "RELEASING.md must inc
 ].each do |fragment|
   assert(security.include?(fragment), "SECURITY.md must mention #{fragment}")
 end
+
+# Every helper that builds a path under GOS_CACHE_DIR must have a
+# counterpart in cmd_prune. Without this, adding a new kind of cache file
+# leaves it leaking forever — exactly how the discovery feed cache grew
+# unreclaimed until v1.8.1.
+gos_sh = file_text("gos.sh")
+cmd_prune_body = gos_sh[/^cmd_prune\(\) \{.*?^\}/m]
+assert(!cmd_prune_body.nil?, "could not locate cmd_prune in gos.sh")
+
+cache_path_producers = gos_sh.scan(/^(_gos_\w+)\(\) \{/).flatten.select do |fn|
+  body = gos_sh[/^#{Regexp.escape(fn)}\(\) \{.*?^\}/m]
+  body && body =~ /printf\s+'[^']*%s[^']*'\s+"\$GOS_CACHE_DIR"/
+end
+assert(!cache_path_producers.empty?, "found no GOS_CACHE_DIR path helpers to check (regex drift?)")
+
+# How cmd_prune reclaims each producer's files: the archive helper is globbed,
+# the feed helper is called by name.
+prune_coverage = {
+  "_gos_cache_path" => cmd_prune_body.include?("/go*.tar.gz") && cmd_prune_body.include?("/go*.zip"),
+  "_gos_feed_cache_path" => cmd_prune_body.include?("_gos_feed_cache_path"),
+}
+cache_path_producers.each do |fn|
+  assert(prune_coverage.key?(fn),
+    "cache-path helper #{fn} has no cmd_prune cleanup mapping: add it to cmd_prune and to this invariant")
+  assert(prune_coverage[fn],
+    "cmd_prune no longer reclaims the files produced by #{fn}")
+end
+
+# Errors should tell the user what to do next, not guess. The old
+# archive-download failure blamed "Version may not exist" even on a network
+# outage; keep that vague phrasing from creeping back.
+assert(!gos_sh.include?("may not exist"),
+  "download errors must give a next step (retry / gos list), not guess 'may not exist'")
 
 puts "ok - workflow YAML and invariants"
 RUBY

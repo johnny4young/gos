@@ -1,0 +1,8 @@
+# Shell sources and generated shell completions must stay LF on every platform.
+# tests/completions.bash compares the embedded completions byte-for-byte against
+# the tracked files, and a Windows checkout (core.autocrlf=true) would otherwise
+# rewrite them with CRLF and break the comparison.
+*.sh   text eol=lf
+*.bash text eol=lf
+*.fish text eol=lf
+*.zsh  text eol=lf

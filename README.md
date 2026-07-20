@@ -6,7 +6,7 @@
   <p align="center">
     <a href="https://github.com/johnny4young/gos/releases"><img src="https://img.shields.io/github/v/release/johnny4young/gos" alt="GitHub Release"></a>
     <a href="https://github.com/johnny4young/gos/blob/main/LICENSE"><img src="https://img.shields.io/github/license/johnny4young/gos" alt="License"></a>
-    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue" alt="Platform">
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20%7C%20BSD-blue" alt="Platform">
     <img src="https://img.shields.io/badge/shell-bash-green" alt="Shell">
     <a href="https://github.com/johnny4young/gos/stargazers"><img src="https://img.shields.io/github/stars/johnny4young/gos?style=social" alt="Stars"></a>
   </p>
@@ -37,6 +37,27 @@ gos current       # shows what you're running
 Compare that to the manual way: visit go.dev, find the right archive for your OS and arch, download it, remove the old install, extract, verify. **gos does all of that in one command.**
 
 Works on **macOS**, **Linux**, and **Windows** (via Git Bash or WSL). Auto-detects your OS and CPU architecture. Requires nothing but `curl` and `bash`.
+
+### gos and GOTOOLCHAIN
+
+Since Go 1.21, the `go` command can download a newer toolchain **per module**
+when a `go.mod` asks for one (`GOTOOLCHAIN`). That is great for forward
+compatibility, but it is a different job than gos does, and the two compose:
+
+- GOTOOLCHAIN needs a Go **already installed** (1.21+) to work at all — gos
+  installs that first Go, on a machine that has none.
+- GOTOOLCHAIN only ever switches **up** automatically, and only inside a
+  module. It doesn't change the `go` on your `PATH`, so `go version` in an
+  empty directory still reports whatever you installed — gos is what sets that.
+- Downloaded toolchains pile up in the module cache with no per-version cleanup
+  (only `go clean -modcache`, all-or-nothing). gos keeps versions side by side
+  with `gos list --installed`, `gos uninstall`, and `gos prune`.
+- gos verifies every download against go.dev's published checksums, just as the
+  `go` command verifies toolchains through the checksum database — so you lose
+  no integrity by using gos to manage the global toolchain.
+
+Run `gos doctor` and it will tell you when `GOTOOLCHAIN` is active so the
+interaction is never a surprise.
 
 ---
 
@@ -96,13 +117,16 @@ Done. That's the whole setup.
 - **Self-updating** — `gos self-update` upgrades gos itself from the latest verified release
 - **Mirror support** — `GOS_DOWNLOAD_MIRROR` downloads archives from an HTTPS mirror while still verifying official go.dev checksums
 - **TTY download progress** — interactive installs show archive progress while pipes, CI, and JSON stay quiet
+- **Resumable downloads** — an interrupted archive download resumes from where it stopped instead of restarting the whole transfer
+- **Test across versions** — `gos each 1.22,1.23,1.24 -- go test ./...` runs a command against several side-by-side versions and prints a pass/fail summary
 - **TTY diagnostics styling** — interactive `gos doctor` plus stderr `Error:`/`Warning:` lines use color and symbols; pipes, `NO_COLOR`, `GOS_NO_COLOR=1`, and JSON stay plain
 - **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `env`, `doctor`, `prune`, `version`, and `use --print`
 - **Helpful when you mistype** — unknown commands suggest close matches (`gos isntall` → `install`), and `gos help <command>` shows a single command's usage
-- **Auto-detects everything** — OS (`darwin`, `linux`, `windows`) and architecture (`amd64`, `arm64`, `armv6l`, `386`)
+- **Auto-detects everything** — OS (`darwin`, `linux`, `windows`, plus FreeBSD/OpenBSD/NetBSD/DragonFly) and architecture (`amd64`, `arm64`, `armv6l`, `386`, `riscv64`, `loong64`, `ppc64le`, `ppc64`, `s390x`)
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)
 - **Zero dependencies** — just `curl` and `bash`, both pre-installed on most systems
-- **Shell completions** — tab-completion for Bash, Zsh, and Fish, including dynamic installed/cached version suggestions and `gos completions <shell>` for single-file installs
+- **Shell completions** — tab-completion for Bash, Zsh, and Fish, including dynamic installed/cached version suggestions; `gos completions <shell>` prints them and `gos completions <shell> --install` writes them to the standard per-user directory
+- **Man page** — a `gos.1` man page ships with the Homebrew install, so `man gos` documents every command
 - **Lightweight** — single shell script, no compilation, no runtime
 
 ---
@@ -272,10 +296,11 @@ exec fish          # for Fish
 | `gos latest` | Install the latest stable Go version |
 | `gos install <version>` | Install a specific Go version |
 | `gos run [version] [--] <command> [args...]` | Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version |
+| `gos each <v1,v2,...> [--] <command> [args...]` | Run a command against several side-by-side Go versions and report a pass/fail summary |
 | `gos use [--print] [path]` | Install the Go version requested by `.go-version`, `.tool-versions`, or `go.mod`; `--print` only resolves it |
 | `gos pin [version]` | Write `.go-version` in the current directory (active version by default) |
 | `gos check` | Check whether newer stable Go or gos releases are available (no install) |
-| `gos rollback` | Restore the previous Go installation, if available |
+| `gos rollback [--dry-run]` | Restore the previous Go installation, if available; `--dry-run` only previews the swap |
 | `gos uninstall <version or --inactive> [--dry-run]` | Remove an installed version (side-by-side mode); `--inactive` removes all but the active and rollback |
 | `gos prune [--rollback] [--dry-run]` | Remove cached Go archives; `--rollback` also removes the rollback copy, `--dry-run` only previews |
 | `gos current` | Show the currently active Go version |
@@ -284,7 +309,7 @@ exec fish          # for Fish
 | `gos status` | Show an offline dashboard for gos and the active Go |
 | `gos which [version]` | Show the active or side-by-side Go binary path |
 | `gos env [--fish] [--auto]` | Print the PATH setup line or an opt-in per-shell auto-switch hook |
-| `gos completions <shell>` | Print a Bash, Zsh, or Fish completion script |
+| `gos completions <shell> [--install]` | Print a Bash, Zsh, or Fish completion script (or install it with `--install`) |
 | `gos doctor [--fix]` | Diagnose gos, Go, PATH, and local tool dependencies; `--fix` creates safe missing directories and prints the shell setup line |
 | `gos self-update` | Update gos itself to the latest verified release |
 | `gos version` | Show gos version |
@@ -478,9 +503,9 @@ inside the active install slot, because activation moves that slot atomically.
 
 1. Queries the [official Go downloads API](https://go.dev/dl/?mode=json) for available versions
 2. Detects your OS via `uname -s` and architecture via `uname -m`
-3. Downloads the matching archive from `https://go.dev/dl/`
-4. Verifies SHA256 checksum against the Go API (uses `jq` or `python3`), falling back to the archive's published `.sha256` companion file when API metadata cannot be parsed
-5. Reuses a cached archive only after its checksum matches the Go metadata
+3. Downloads the matching archive from `https://go.dev/dl/`, resuming an interrupted transfer instead of restarting it
+4. Verifies the SHA256 checksum against the Go downloads feed (uses `jq` or `python3`) — checking the small default feed first and only fetching the full history for older versions — with the archive's published `.sha256` companion file as a fallback when the feed cannot be parsed
+5. Reuses a verified cached archive in place when one is present, without re-downloading
 6. Extracts the new version into a temporary staging directory
 7. Validates the staged `go/bin/go` before touching `$GOS_INSTALL_DIR`
 8. Backs up the previous Go installation, activates the staged version, and rolls back automatically if activation fails

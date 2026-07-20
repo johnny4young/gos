@@ -10,10 +10,11 @@ _gos() {
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
     'run:Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
+    'each:Run a command against several side-by-side Go versions and report a pass/fail summary'
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
     'pin:Write .go-version in the current directory (active version by default)'
     'check:Check whether newer stable Go or gos releases are available (no install)'
-    'rollback:Restore the previous Go installation, if available'
+    'rollback:Restore the previous Go installation, if available; --dry-run only previews the swap'
     'uninstall:Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
     'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
     'current:Show the currently active Go version'
@@ -22,7 +23,7 @@ _gos() {
     'status:Show an offline dashboard for gos and the active Go'
     'which:Show the active or side-by-side Go binary path'
     'env:Print the PATH setup line or an opt-in per-shell auto-switch hook'
-    'completions:Print a Bash, Zsh, or Fish completion script'
+    'completions:Print a Bash, Zsh, or Fish completion script (or install it with --install)'
     'doctor:Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
     'self-update:Update gos itself to the latest verified release'
     'version:Show gos version'
@@ -41,7 +42,7 @@ _gos() {
         prune)
           _arguments '--rollback[Also remove the rollback installation]' '--dry-run[Preview removals without deleting]' '--json[Output machine-readable JSON]'
           ;;
-        install | run)
+        install | run | each)
           if command -v gos >/dev/null 2>&1; then
             _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
           fi
@@ -61,6 +62,9 @@ _gos() {
         list)
           _arguments '--installed[List locally installed versions]' '--minor[Keep only the newest version per minor]' '--json[Output machine-readable JSON]'
           ;;
+        rollback)
+          _arguments '--dry-run[Preview the rollback without switching]'
+          ;;
         help)
           _describe -t commands 'gos command' commands
           ;;
@@ -68,7 +72,7 @@ _gos() {
           _arguments '--fish[Emit fish shell syntax]' '--auto[Emit opt-in auto-switch hook]' '--json[Output machine-readable JSON]'
           ;;
         completions)
-          _values 'shell' bash zsh fish
+          _arguments '--install[Write the completion to the standard per-user directory]' '*:shell:(bash zsh fish)'
           ;;
         doctor)
           _arguments '--fix[Apply safe non-destructive fixes]' '--json[Output machine-readable JSON]'

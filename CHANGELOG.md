@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- Add `gos rollback --dry-run` to preview the swap (which version would become active and which would become the new rollback) without switching anything; the preview neither takes nor is blocked by the mutation lock.
+- `gos doctor` now reports crash residue and the mutation lock, matching `gos status`: orphaned backups and a stale lock are warnings with removal hints, while a lock held by a running gos is reported as fine. Neither check touches anything.
+- `install.sh` now prints concrete next steps after installing (fix PATH if the bin dir is off it, `gos latest`, `gos completions <shell> --install` for the detected shell, `gos help`) instead of only "Run 'gos help'".
+- Detect the BSD and non-x86 targets go.dev publishes archives for: FreeBSD, OpenBSD, NetBSD, and DragonFly, plus `riscv64`, `loong64`, `ppc64le`, `ppc64`, and `s390x`.
+- Add `gos completions <shell> --install` to write the completion to the shell's standard per-user directory (XDG-aware) instead of only printing it; it never edits rc files.
+- Add `gos each <v1,v2,...> [--] <command>` to run a command against several side-by-side Go versions in one shot (installing any that are missing) and print a color-coded pass/fail summary, exiting non-zero if any version fails.
+- Ship a `gos.1` man page generated from the command manifest (installed by the Homebrew formula), so `man gos` documents every command, and it can never drift from `gos help`.
+- `gos doctor` now notes when `GOTOOLCHAIN` is active, explaining that per-module toolchain switching composes with the go gos manages on `PATH`.
+
+### Performance
+
+- Request gzip for the go.dev downloads feed (`--compressed`), cutting the ~2.1 MB feed to ~0.5 MB on every `list`/`check`/`install` that resolves a checksum.
+- Extract cached archives in place on a cache hit instead of copying the ~70 MB file into a temp dir and re-hashing it.
+- Resume interrupted archive downloads: a checksum-backed download now streams to a persistent `.partial` in the cache dir with `curl -C -`, so retrying after a dropped 70 MB transfer continues instead of restarting; the verified partial is promoted straight to the cache, a checksum mismatch discards it, and `gos prune` reclaims stray partials.
+- Resolve install checksums from the small default downloads feed first and only escalate to the multi-megabyte `include=all` feed when the requested version is older than the last two minors, so installing a recent version no longer downloads the full release history.
+
+### Fixed
+
+- `gos prune` now also reclaims the discovery feed cache (`feed-default.json` and `feed-all.json`), which it left behind despite living in `GOS_CACHE_DIR`; the all-versions feed alone can hold megabytes of regenerable metadata. `--dry-run` previews it and `--json` gains `removed_feed_files` and `removed_feed_bytes`.
+
 ### Changed
 
 - Refresh the README feature list and terminal demo for the 1.8.0 command surface (`list --minor`, `pin` defaults, `use --print`, `run --`, dry-run previews, `uninstall --inactive`, `help <command>`, and the full status dashboard).
