@@ -399,7 +399,7 @@ _gos_download() {
 _gos_download_stdout() {
   local url="$1"
   # --compressed: the downloads feed is JSON and gzip-encodes to roughly a
-  # quarter of its size; wget's --qO- has no portable equivalent, so only curl
+  # quarter of its size; wget's -qO- has no portable equivalent, so only curl
   # opts in (wget still works, just uncompressed).
   if command -v curl &>/dev/null; then
     curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --compressed -fsSL "$url"
@@ -1373,9 +1373,15 @@ _gos_install_version() {
     else
       echo "Checksum verified."
       if [ -n "$partial" ]; then
-        # Promote the verified partial to the cache entry directly (no copy).
+        # Promote the verified partial to the cache entry directly. If rename
+        # is unavailable (for example because another process briefly locks
+        # the destination), copy it so the completed partial is not resumed on
+        # the next install.
         if mv "$partial" "$cache_file" 2>/dev/null; then
           archive_file="$cache_file"
+        elif cp "$partial" "$cache_file" 2>/dev/null; then
+          archive_file="$cache_file"
+          rm -f "$partial" || _gos_warning "could not remove completed partial at ${partial}."
         fi
       else
         _gos_store_cache "$pkg" "$tmp_file" "$expected_sha"

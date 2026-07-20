@@ -788,6 +788,21 @@ assert_contains "$output" "Resuming download of go1.21.6" "second attempt resume
 [ -f "$resume_cached" ] || fail "the verified partial should be promoted to the cache"
 pass "interrupted archive downloads resume instead of restarting"
 
+# A verified partial still becomes a reusable cache entry when an atomic rename
+# is unavailable; otherwise a later retry would resume an already-complete file.
+case_dir="${test_root}/resume-promotion-fallback"
+fallback_partial="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
+fallback_cached="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+GOS_TEST_MV_FAIL_DEST="$fallback_cached" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "install with cache promotion rename failure failed: ${output}"
+[ ! -f "$fallback_partial" ] || fail "cache promotion fallback must remove the completed .partial"
+[ -f "$fallback_cached" ] || fail "cache promotion fallback must create the reusable cache entry"
+rm -rf "${case_dir}/go"
+GOS_TEST_DOWNLOAD_MODE="fail-archives" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "install did not reuse the fallback cache entry: ${output}"
+assert_contains "$output" "Using cached go1.21.6.darwin-arm64.tar.gz." "fallback cache reuse"
+pass "verified partials fall back to copy when cache promotion rename fails"
+
 # A resumed partial that still fails its checksum is discarded, not resumed
 # forever (resume never rewrites earlier bytes).
 case_dir="${test_root}/resume-corrupt"
