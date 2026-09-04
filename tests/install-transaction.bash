@@ -509,20 +509,29 @@ pass "install uses sudo for sibling renames when parent is not writable"
 # staged tree moves into the versions dir without sudo (a sudo mv there would
 # leave root-owned directories under $HOME), while the symlink swap in the
 # protected parent still escalates.
-create_old_install "${test_root}/protected_parent_sbs/usr/local/go"
-mkdir -p "${test_root}/protected_parent_sbs/home/.gos"
-chmod u-w "${test_root}/protected_parent_sbs/usr/local"
-run_install "protected_parent_sbs" "ok" "protected-parent" "${test_root}/protected_parent_sbs/home/.gos/versions"
-chmod u+w "${test_root}/protected_parent_sbs/usr/local"
-assert_status 0 "$status" "protected parent side-by-side" "$output"
-sbs_versions_dir="${test_root}/protected_parent_sbs/home/.gos/versions"
-[ -L "$install_dir" ] || fail "protected parent side-by-side: install dir is not a symlink"
-[ "$(readlink "$install_dir")" = "${sbs_versions_dir}/go1.21.6" ] || fail "protected parent side-by-side: symlink target is $(readlink "$install_dir")"
-assert_new_install_active "$install_dir" "protected parent side-by-side"
-assert_contains "$output" "sudo ln -s ${sbs_versions_dir}/go1.21.6 ${install_dir}" "protected parent side-by-side link sudo"
-sudo_in_versions_dir=$(printf '%s\n' "$output" | grep -E "^sudo (mkdir|mv|rm) .*${sbs_versions_dir}" || true)
-[ -z "$sudo_in_versions_dir" ] || fail "protected parent side-by-side: sudo was used inside the user-owned versions dir: ${sudo_in_versions_dir}"
-pass "sudo follows the path being written, not the install slot"
+# Side-by-side mode needs real symlinks; Git Bash's ln -s copies (and the fake
+# uname above reports Darwin, so gos would not refuse), so probe the filesystem
+# like tests/features.bash does and skip the case where links are not links.
+symlink_probe="${test_root}/symlink-probe"
+if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
+  rm -f "$symlink_probe"
+  create_old_install "${test_root}/protected_parent_sbs/usr/local/go"
+  mkdir -p "${test_root}/protected_parent_sbs/home/.gos"
+  chmod u-w "${test_root}/protected_parent_sbs/usr/local"
+  run_install "protected_parent_sbs" "ok" "protected-parent" "${test_root}/protected_parent_sbs/home/.gos/versions"
+  chmod u+w "${test_root}/protected_parent_sbs/usr/local"
+  assert_status 0 "$status" "protected parent side-by-side" "$output"
+  sbs_versions_dir="${test_root}/protected_parent_sbs/home/.gos/versions"
+  [ -L "$install_dir" ] || fail "protected parent side-by-side: install dir is not a symlink"
+  [ "$(readlink "$install_dir")" = "${sbs_versions_dir}/go1.21.6" ] || fail "protected parent side-by-side: symlink target is $(readlink "$install_dir")"
+  assert_new_install_active "$install_dir" "protected parent side-by-side"
+  assert_contains "$output" "sudo ln -s ${sbs_versions_dir}/go1.21.6 ${install_dir}" "protected parent side-by-side link sudo"
+  sudo_in_versions_dir=$(printf '%s\n' "$output" | grep -E "^sudo (mkdir|mv|rm) .*${sbs_versions_dir}" || true)
+  [ -z "$sudo_in_versions_dir" ] || fail "protected parent side-by-side: sudo was used inside the user-owned versions dir: ${sudo_in_versions_dir}"
+  pass "sudo follows the path being written, not the install slot"
+else
+  echo "ok - mixed-layout sudo case skipped: this filesystem has no real symlinks"
+fi
 
 create_old_install "${test_root}/rollback_mv_failure/usr/local/go"
 run_install "rollback_mv_failure" "ok" "rollback-mv-fail"
