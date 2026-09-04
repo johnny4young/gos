@@ -418,6 +418,12 @@ _gos_download_stdout() {
 
 GOS_FEED_JSON_DEFAULT=""
 GOS_FEED_JSON_ALL=""
+# Whether the memoized copy came from the on-disk TTL cache. Discovery
+# lookups (resolving a bare minor, listing) may use the disk cache, but
+# checksum lookups never trust it: a caller that asks for a fresh feed while
+# the memo is disk-backed triggers a re-download.
+GOS_FEED_JSON_DEFAULT_FROM_DISK=0
+GOS_FEED_JSON_ALL_FROM_DISK=0
 
 _gos_validate_feed_ttl() {
   case "$GOS_FEED_TTL" in
@@ -514,21 +520,25 @@ _gos_feed_json() {
   fi
 
   if [ "$include_all" = "true" ]; then
-    if [ -z "$GOS_FEED_JSON_ALL" ]; then
+    if [ -z "$GOS_FEED_JSON_ALL" ] || { [ "$allow_disk_cache" != "true" ] && [ "$GOS_FEED_JSON_ALL_FROM_DISK" = "1" ]; }; then
       if [ "$allow_disk_cache" = "true" ] && json=$(_gos_cached_feed_json true); then
         GOS_FEED_JSON_ALL="$json"
+        GOS_FEED_JSON_ALL_FROM_DISK=1
       else
         GOS_FEED_JSON_ALL=$(_gos_download_stdout 'https://go.dev/dl/?mode=json&include=all') || return 1
+        GOS_FEED_JSON_ALL_FROM_DISK=0
         [ "$allow_disk_cache" = "true" ] && _gos_write_feed_cache true "$GOS_FEED_JSON_ALL"
       fi
     fi
     printf '%s\n' "$GOS_FEED_JSON_ALL"
   else
-    if [ -z "$GOS_FEED_JSON_DEFAULT" ]; then
+    if [ -z "$GOS_FEED_JSON_DEFAULT" ] || { [ "$allow_disk_cache" != "true" ] && [ "$GOS_FEED_JSON_DEFAULT_FROM_DISK" = "1" ]; }; then
       if [ "$allow_disk_cache" = "true" ] && json=$(_gos_cached_feed_json false); then
         GOS_FEED_JSON_DEFAULT="$json"
+        GOS_FEED_JSON_DEFAULT_FROM_DISK=1
       else
         GOS_FEED_JSON_DEFAULT=$(_gos_download_stdout 'https://go.dev/dl/?mode=json') || return 1
+        GOS_FEED_JSON_DEFAULT_FROM_DISK=0
         [ "$allow_disk_cache" = "true" ] && _gos_write_feed_cache false "$GOS_FEED_JSON_DEFAULT"
       fi
     fi
@@ -587,7 +597,10 @@ _gos_resolve_bare_minor() {
       ;;
   esac
 
-  json=$(_gos_feed_json true) || {
+  # Discovery only: the TTL disk cache is fine here (the checksum lookup that
+  # follows always fetches fresh metadata), and it is what keeps
+  # `gos install 1.24` from downloading the full release history every run.
+  json=$(_gos_feed_json true true) || {
     printf '%s\n' "$version"
     return 0
   }
@@ -606,7 +619,10 @@ _gos_resolve_bare_minor() {
   fi
 }
 
-# Compute SHA256 checksum (cross-platform: Linux has sha256sum, macOS has shasum)
+# Compute SHA256 checksum (cross-platform: Linux has sha256sum, macOS has shasum).
+# Callers must guard the substitution (|| actual_sha=""): under pipefail a
+# present-but-broken tool makes it fail, and set -e would otherwise abort the
+# install silently instead of reaching the "no hash output" handling.
 _gos_sha256() {
   local file="$1"
   if command -v sha256sum &>/dev/null; then
@@ -652,7 +668,7 @@ _gos_try_cache() {
     return 1
   fi
 
-  actual_sha=$(_gos_sha256 "$cache_file")
+  actual_sha=$(_gos_sha256 "$cache_file") || actual_sha=""
   if [ -z "$actual_sha" ]; then
     _gos_warning "cached ${pkg} was not reused because no SHA256 tool output was available."
     return 1
@@ -721,7 +737,10 @@ _gos_fetch_checksum() {
   }
 
   if command -v jq &>/dev/null; then
-    printf '%s\n' "$json" | jq -r --arg pkg "$pkg" '.[].files[] | select(.filename == $pkg) | .sha256'
+    # (.files // []) tolerates entries without a files array (the feed has
+    # published such entries); a bare .files[] aborts jq on the first one and
+    # silently turns a present checksum into "not found".
+    printf '%s\n' "$json" | jq -r --arg pkg "$pkg" '.[] | (.files // [])[] | select(.filename == $pkg) | .sha256'
   elif command -v python3 &>/dev/null; then
     printf '%s\n' "$json" | python3 -c "
 import json, sys
@@ -1389,7 +1408,7 @@ _gos_install_version() {
   if [ "$cache_hit" = "true" ]; then
     :
   elif [ -n "$expected_sha" ]; then
-    actual_sha=$(_gos_sha256 "$archive_file")
+    actual_sha=$(_gos_sha256 "$archive_file") || actual_sha=""
     if [ -z "$actual_sha" ]; then
       if [ -n "$GOS_DOWNLOAD_MIRROR" ]; then
         _gos_error "GOS_DOWNLOAD_MIRROR is set but no SHA256 tool is available to verify ${pkg}."
@@ -1651,7 +1670,7 @@ _gos_platforms_for_version() {
   if command -v jq &>/dev/null; then
     echo "$json" \
       | jq -r --arg version "$go_version" \
-        '.[] | select(.version == $version) | .files[] | select(.kind == "archive") | "\(.os)/\(.arch)"' \
+        '.[] | select(.version == $version) | (.files // [])[] | select(.kind == "archive") | "\(.os)/\(.arch)"' \
       | sort -u
   elif command -v python3 &>/dev/null; then
     echo "$json" | python3 -c '
@@ -2017,7 +2036,8 @@ cmd_install() {
   case "$version" in
     *rc* | *beta* | *.*.*) ;;
     *)
-      _gos_feed_json true >/dev/null 2>&1 || true
+      _gos_validate_feed_ttl || return 1
+      _gos_feed_json true true >/dev/null 2>&1 || true
       resolved=$(_gos_resolve_bare_minor "$version")
       if [ "$resolved" != "$version" ]; then
         echo "Resolved Go ${version} to go${resolved}."
@@ -2065,7 +2085,8 @@ _gos_ensure_version_dir() {
           ;;
         1)
           set -e
-          _gos_feed_json true >/dev/null 2>&1 || true
+          _gos_validate_feed_ttl || return 1
+          _gos_feed_json true true >/dev/null 2>&1 || true
           resolved=$(_gos_resolve_bare_minor "$version")
           if [ "$resolved" != "$version" ]; then
             echo "Resolved Go ${version} to go${resolved}."
@@ -3074,6 +3095,17 @@ _gos_env_auto_posix() {
 __gos_auto_switch() {
   [ -n "${GOS_VERSIONS_DIR:-}" ] || return 0
 
+  # PROMPT_COMMAND runs this on every prompt, and each evaluation spawns a
+  # gos process. Only the directory can change the answer, so skip the work
+  # while PWD is unchanged. A missing version keeps being re-checked so the
+  # switch happens right after `gos use` installs it, without a cd.
+  if [ "$PWD" = "${GOS_AUTO_PWD:-}" ] && [ "${GOS_AUTO_STATE:-}" != "missing" ]; then
+    return 0
+  fi
+  GOS_AUTO_PWD="$PWD"
+  GOS_AUTO_STATE="none"
+  export GOS_AUTO_PWD GOS_AUTO_STATE
+
   local gos_version gos_bin gos_key
   gos_version=$(gos __project-version 2>/dev/null || true)
   if [ -n "$gos_version" ]; then
@@ -3085,10 +3117,13 @@ __gos_auto_switch() {
       fi
       PATH="${gos_bin}:${GOS_AUTO_PREV}"
       GOS_AUTO_BIN="$gos_bin"
-      export PATH GOS_AUTO_BIN
+      GOS_AUTO_STATE="switched"
+      export PATH GOS_AUTO_BIN GOS_AUTO_STATE
       return 0
     fi
 
+    GOS_AUTO_STATE="missing"
+    export GOS_AUTO_STATE
     gos_key="${PWD}:${gos_version}"
     if [ "${GOS_AUTO_HINTED:-}" != "$gos_key" ]; then
       echo "gos: go${gos_version} is not installed; run: gos use" >&2
@@ -3315,7 +3350,7 @@ cmd_self_update() {
     return 1
   fi
   expected_sha=$(printf '%s' "$expected_sha_candidates" | tr '[:upper:]' '[:lower:]')
-  actual_sha=$(_gos_sha256 "$new_script")
+  actual_sha=$(_gos_sha256 "$new_script") || actual_sha=""
   if [ -z "$actual_sha" ]; then
     _gos_error "no SHA256 tool is available to verify the downloaded gos release; refusing to self-update."
     echo "Install sha256sum or shasum, or re-run the installer instead." >&2

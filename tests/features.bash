@@ -216,6 +216,11 @@ cat >"${fake_bin}/sha256sum" <<'FAKE_SHA256SUM'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ "${GOS_TEST_SHA256_FAIL:-0}" = "1" ]; then
+  echo "sha256sum: simulated tool failure" >&2
+  exit 1
+fi
+
 if grep -q GOS-TEST-CORRUPT "$1" 2>/dev/null; then
   printf 'corruptsha  %s\n' "$1"
   exit 0
@@ -339,6 +344,7 @@ run_gos() {
       GOS_TEST_SELFUPDATE_CHECKSUMS_FILE="${GOS_TEST_SELFUPDATE_CHECKSUMS_FILE:-}" \
       GOS_TEST_GOS_RELEASE_EFFECTIVE_URL="${GOS_TEST_GOS_RELEASE_EFFECTIVE_URL:-}" \
       GOS_TEST_MV_FAIL_DEST="${GOS_TEST_MV_FAIL_DEST:-}" \
+      GOS_TEST_SHA256_FAIL="${GOS_TEST_SHA256_FAIL:-0}" \
       GOS_TEST_REAL_MV="$real_mv" \
       GOS_REQUIRE_CHECKSUM="${GOS_TEST_REQUIRE_CHECKSUM:-}" \
       GOS_FEED_TTL="${GOS_TEST_FEED_TTL:-}" \
@@ -1507,6 +1513,44 @@ assert_json "$output" "doctor invalid feed TTL"
 assert_contains "$output" '"name":"feed-ttl","status":"problem"' "doctor feed TTL check"
 assert_contains "$output" "GOS_FEED_TTL='forever' must be a non-negative integer" "doctor feed TTL message"
 
+# Discovery may use the TTL cache, verification never does: resolving a bare
+# minor reads the cached all-versions feed (no include=all download), while
+# the checksum still comes from a fresh default-feed fetch.
+run_gos "$case_dir" bash "$script" list --json
+[ "$status" -eq 0 ] || fail "feed-cache warm-up list failed: ${output}"
+run_gos "$case_dir" bash "$script" install 1.21
+[ "$status" -eq 0 ] || fail "bare minor install with a warm feed cache failed: ${output}"
+assert_contains "$output" "Resolved Go 1.21 to go1.21.6." "bare minor resolved from the cached feed"
+assert_contains "$output" "Checksum verified." "bare minor install still verifies"
+if grep -q 'include=all' "${case_dir}/urls.log"; then
+  fail "bare minor resolution should reuse the cached all-versions feed: $(cat "${case_dir}/urls.log")"
+fi
+grep -q 'https://go.dev/dl/?mode=json$' "${case_dir}/urls.log" \
+  || fail "the install checksum must still come from a fresh feed fetch: $(cat "${case_dir}/urls.log")"
+# A poisoned cache can steer discovery but never verification: it resolves the
+# minor to a version the real feed does not have, and the escalated checksum
+# lookup re-downloads include=all instead of trusting the memoized disk copy.
+cat >"${case_dir}/cache/feed-all.json" <<'POISONED_FEED'
+[{"version": "go1.21.9", "files": [{"filename": "go1.21.9.darwin-arm64.tar.gz", "os": "darwin", "arch": "arm64", "kind": "archive", "sha256": "poisonedsha"}]}]
+POISONED_FEED
+run_gos "$case_dir" bash "$script" install 1.21
+[ "$status" -ne 0 ] || fail "install steered by a poisoned feed cache should fail closed: ${output}"
+assert_contains "$output" "go1.21.9 was not found in the go.dev downloads feed" "poisoned cache cannot supply a checksum"
+grep -q 'https://go.dev/dl/?mode=json&include=all' "${case_dir}/urls.log" \
+  || fail "checksum escalation must re-fetch include=all instead of trusting the disk cache: $(cat "${case_dir}/urls.log")"
+assert_not_contains "$output" "Downloading go1.21.9" "poisoned cache must not reach the archive download"
+pass "install uses the feed cache for discovery only and never for checksums"
+
+case_dir="${test_root}/sha256-tool-failure"
+GOS_TEST_SHA256_FAIL=1 run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "install with a failing sha256 tool should warn and continue by default: ${output}"
+assert_contains "$output" "skipping integrity verification (no SHA256 tool output was available)" "failing sha256 tool warns"
+[ -x "${case_dir}/go/bin/go" ] || fail "install with a failing sha256 tool left no go binary"
+GOS_TEST_SHA256_FAIL=1 GOS_TEST_REQUIRE_CHECKSUM=1 run_gos "$case_dir" bash "$script" install 1.20.0
+[ "$status" -ne 0 ] || fail "install with a failing sha256 tool must fail under GOS_REQUIRE_CHECKSUM=1: ${output}"
+assert_contains "$output" "checksum verification required but no SHA256 tool output was available" "failing sha256 tool fails closed when required"
+pass "a present-but-broken SHA256 tool is reported instead of aborting silently"
+
 case_dir="${test_root}/check-feed-cache"
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json
 [ "$status" -eq 0 ] || fail "check feed-cache initial run failed: ${output}"
@@ -1534,8 +1578,11 @@ printf '[{\"version\":\"go1.21.6\",\"files\":[]}]\n' >"${case_dir}/cache/feed-al
 GOS_TEST_REQUIRE_CHECKSUM=feed run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "install should ignore poisoned feed cache: ${output}"
 [ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "install with poisoned feed cache did not complete"
-grep -q 'https://go.dev/dl/?mode=json&include=all' "${case_dir}/urls.log" \
-  || fail "install must fetch fresh feed metadata instead of reading cache"
+assert_contains "$output" "Checksum verified." "install with poisoned feed cache verifies from fresh metadata"
+# The poisoned cache lists no files for 1.21.6, so under GOS_REQUIRE_CHECKSUM=feed
+# the install can only have succeeded by fetching the feed fresh.
+grep -q 'https://go.dev/dl/?mode=json$' "${case_dir}/urls.log" \
+  || fail "install must fetch fresh feed metadata instead of reading cache: $(cat "${case_dir}/urls.log")"
 
 case_dir="${test_root}/feed-cache-poisoned-latest"
 mkdir -p "${case_dir}/cache"
@@ -2130,6 +2177,28 @@ minor_output=$(
 ) || fail "env --auto hook failed for a bare go.mod minor: ${minor_output}"
 assert_contains "$minor_output" "go version go1.21.6" "env auto switches for a bare go.mod minor"
 assert_not_contains "$minor_output" "is not installed" "env auto must not hint when the minor is installed"
+# The hook runs on every prompt; it must only spawn gos when the directory
+# changes (or while the project version is still missing).
+mkdir -p "${case_dir}/counting-bin"
+cat >"${case_dir}/counting-bin/gos" <<COUNTING_GOS
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${case_dir}/hook-calls.log"
+exec bash "$script" "\$@"
+COUNTING_GOS
+chmod +x "${case_dir}/counting-bin/gos"
+: >"${case_dir}/hook-calls.log"
+mkdir -p "${case_dir}/neutral"
+PATH="${case_dir}/counting-bin:${fake_bin}:${original_path}" \
+  GOS_INSTALL_DIR="${case_dir}/go" \
+  GOS_VERSIONS_DIR="${case_dir}/versions" \
+  bash -c 'set -euo pipefail; cd "$5"; source "$1"; cd "$2"; __gos_auto_switch; __gos_auto_switch; __gos_auto_switch; cd "$3"; __gos_auto_switch; __gos_auto_switch; cd "$4"; __gos_auto_switch; __gos_auto_switch' \
+  bash "${case_dir}/hook.sh" "${case_dir}/project" "$case_dir" "${case_dir}/missing" "${case_dir}/neutral" 2>/dev/null \
+  || fail "env --auto hook invocation counting run failed"
+hook_calls=$(grep -c '__project-version' "${case_dir}/hook-calls.log" || true)
+# 1 when the hook is sourced (in the neutral dir), 1 for the project dir (two
+# repeats skipped), 1 for the plain dir (repeat skipped), 2 for the
+# missing-version dir (re-checked every prompt until it is installed).
+[ "$hook_calls" -eq 5 ] || fail "env --auto should spawn gos only when PWD changes or the version is missing, got ${hook_calls} calls: $(cat "${case_dir}/hook-calls.log")"
 hint_output=$(
   PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
     GOS_INSTALL_DIR="${case_dir}/go" \

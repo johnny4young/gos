@@ -11,7 +11,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `gos rollback` is now crash-safe like `gos install`: an interrupt between moving the active Go aside and moving the rollback into place used to leave the machine with no Go at all, because rollback never armed the EXIT trap that restores the displaced installation. The trap also stays armed when a post-activation restore fails midway, instead of being disarmed right after the failed attempt.
 - The `gos env --auto` hook and `gos status` now resolve a bare minor from `go.mod` (`go 1.24`) against the installed versions, offline: with `go1.24.3` installed the hook switches to it instead of printing `go1.24 is not installed` on every directory change, and `status` reports `satisfied by active go1.24.3` instead of `differs from active`. `gos status --json` gains a `project.resolved` field.
 - Side-by-side installs no longer escalate to `sudo` for the versions tree just because `GOS_INSTALL_DIR` needs it (and vice versa): the escalation decision now follows the path being written, so a root-owned `/usr/local/go` next to a user-owned `GOS_VERSIONS_DIR` no longer leaves root-owned version directories under `$HOME` or prompts for a password it does not need.
+- A present-but-broken SHA256 tool (for example a `shasum` missing a Perl module) is now reported through the normal "no SHA256 tool output" path instead of aborting `gos install`/`gos self-update` silently under `set -e`.
+- The `jq` checksum and platform lookups tolerate feed entries without a `files` array instead of aborting on the first one, which turned a present checksum into "not found" and forced a needless `include=all` download.
 - `gos platforms` works again on hosts that have `python3` but no `jq`: the python3 feed parser contained a syntax error, so every such host reported "no supported platforms found".
+
+### Performance
+
+- `gos install 1.24` (a bare minor) and the `gos run`/`gos each` fast paths now resolve the minor from the on-disk discovery feed cache instead of downloading the multi-megabyte `include=all` feed on every run. Checksums still come from a fresh feed fetch: a memoized feed that came from disk is re-downloaded before any checksum lookup, so the cache can only ever influence discovery.
+- The `gos env --auto` hook no longer spawns a `gos` process on every prompt: it re-evaluates only when the directory changes (or while the project's version is still missing, so the switch happens right after `gos use`).
 
 ### Changed
 
