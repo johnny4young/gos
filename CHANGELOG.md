@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Fixed
+
+- `gos platforms` works again on hosts that have `python3` but no `jq`: the python3 feed parser contained a syntax error, so every such host reported "no supported platforms found".
+
+### Changed
+
+- The test harness now runs discovery and install cases against jq only, python3 only, and no feed parser at all, so every parser branch is exercised on every machine instead of whichever the host happens to provide; and a TTY test whose runner breaks now fails the suite instead of reporting a skipped branch (two TTY blocks had never actually run).
+- Every GitHub Actions job now sets `timeout-minutes`, the release smoke matrix no longer cancels the other platforms when one fails, ShellCheck is installed from a pinned release like shfmt, CI checks every tracked file for whitespace errors and conflict markers, and the Bash syntax gate derives its file list from `git ls-files`.
+- The nightly canary opens (or updates) a `canary`-labelled tracking issue when it fails instead of relying on the default workflow e-mail.
+- `scripts/validate-local.bash --strict` fails when an optional tool that CI runs (shellcheck, shfmt, zsh, fish, pwsh) is missing locally.
+
 ## [1.9.0] - 2026-07-20
 
 ### Added

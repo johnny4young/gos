@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: validate-local.bash [--required-only|--help]
+Usage: validate-local.bash [--required-only|--strict|--help]
 
 Run the local gos validation bundle.
 
@@ -20,6 +20,7 @@ Required external tools:
 
 Options:
   --required-only  skip optional tools and run only required checks
+  --strict         fail when an optional tool is missing (CI parity)
   --help, -h       show this help
 
 Optional tools are run when installed unless --required-only is set:
@@ -32,6 +33,7 @@ EOF
 }
 
 run_optional_checks=1
+strict_optional_tools=0
 
 if [ "$#" -gt 1 ]; then
   usage >&2
@@ -43,6 +45,9 @@ case "${1:-}" in
     ;;
   --required-only)
     run_optional_checks=0
+    ;;
+  --strict)
+    strict_optional_tools=1
     ;;
   --help | -h)
     usage
@@ -157,8 +162,11 @@ run_optional() {
 
   if command -v "$tool" >/dev/null 2>&1; then
     run "$tool" "$@"
+  elif [ "$strict_optional_tools" -eq 1 ]; then
+    printf 'missing optional tool required by --strict: %s (CI runs it)\n' "$tool" >&2
+    exit 127
   else
-    printf '== skipped: %s is not installed ==\n' "$tool"
+    printf '== skipped: %s is not installed (CI runs it) ==\n' "$tool"
   fi
 }
 run_optional_powershell() {
@@ -179,7 +187,11 @@ run_optional_powershell() {
     powershell_bin="powershell"
     powershell_args=("$powershell_bin" -NoProfile -ExecutionPolicy Bypass)
   else
-    printf '== skipped: pwsh/powershell is not installed ==\n'
+    if [ "$strict_optional_tools" -eq 1 ]; then
+      printf 'missing optional tool required by --strict: pwsh or powershell (CI runs it)\n' >&2
+      exit 127
+    fi
+    printf '== skipped: pwsh/powershell is not installed (CI runs it) ==\n'
     return 0
   fi
 
