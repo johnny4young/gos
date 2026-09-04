@@ -14,6 +14,7 @@ test_root="$(mktemp -d)"
 fake_bin="${test_root}/bin"
 original_path="$PATH"
 real_mv="$(command -v mv)"
+real_cp="$(command -v cp)"
 
 cleanup() {
   rm -rf "$test_root"
@@ -288,6 +289,24 @@ fi
 echo "go version go${GOS_TEST_GO_VERSION:-1.20rc1} darwin/arm64"
 FAKE_GO
 
+cat >"${fake_bin}/cp" <<'FAKE_CP'
+#!/usr/bin/env bash
+set -euo pipefail
+
+dest=""
+for arg in "$@"; do
+  dest="$arg"
+done
+
+if [ -n "${GOS_TEST_CP_FAIL_DEST:-}" ] \
+  && { [ "$dest" = "$GOS_TEST_CP_FAIL_DEST" ] || [ "${dest##*/}" = "${GOS_TEST_CP_FAIL_DEST##*/}" ]; }; then
+  printf 'simulated cp failure: %s\n' "$dest" >&2
+  exit 1
+fi
+
+exec "$GOS_TEST_REAL_CP" "$@"
+FAKE_CP
+
 cat >"${fake_bin}/mv" <<'FAKE_MV'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -307,7 +326,7 @@ exec "$GOS_TEST_REAL_MV" "$@"
 FAKE_MV
 
 chmod +x "${fake_bin}/uname" "${fake_bin}/curl" "${fake_bin}/sha256sum" \
-  "${fake_bin}/tar" "${fake_bin}/go" "${fake_bin}/mv"
+  "${fake_bin}/tar" "${fake_bin}/go" "${fake_bin}/mv" "${fake_bin}/cp"
 
 run_gos() {
   local case_dir="$1"
@@ -331,7 +350,7 @@ run_gos() {
   output="$(
     PATH="$gos_path" \
       GOS_INSTALL_DIR="${GOS_TEST_INSTALL_DIR:-${case_dir}/go}" \
-      GOS_CACHE_DIR="${case_dir}/cache" \
+      GOS_CACHE_DIR="${GOS_TEST_CACHE_DIR:-${case_dir}/cache}" \
       GOS_DOWNLOAD_MIRROR="${GOS_TEST_MIRROR:-}" \
       GOS_VERSIONS_DIR="${GOS_TEST_VERSIONS_DIR:-}" \
       GOS_TEST_URL_LOG="${case_dir}/urls.log" \
@@ -346,6 +365,8 @@ run_gos() {
       GOS_TEST_MV_FAIL_DEST="${GOS_TEST_MV_FAIL_DEST:-}" \
       GOS_TEST_SHA256_FAIL="${GOS_TEST_SHA256_FAIL:-0}" \
       GOS_TEST_REAL_MV="$real_mv" \
+      GOS_TEST_REAL_CP="$real_cp" \
+      GOS_TEST_CP_FAIL_DEST="${GOS_TEST_CP_FAIL_DEST:-}" \
       GOS_REQUIRE_CHECKSUM="${GOS_TEST_REQUIRE_CHECKSUM:-}" \
       GOS_FEED_TTL="${GOS_TEST_FEED_TTL:-}" \
       "$@" 2>&1
@@ -915,6 +936,20 @@ GOS_TEST_DOWNLOAD_MODE="fail-archives" run_gos "$case_dir" bash "$script" instal
 assert_contains "$output" "Using cached go1.21.6.darwin-arm64.tar.gz." "fallback cache reuse"
 pass "verified partials fall back to copy when cache promotion rename fails"
 
+# When neither rename nor copy can promote the verified partial (disk full),
+# the install still completes from it and the partial is discarded so the
+# next run does not "resume" a complete file forever.
+case_dir="${test_root}/resume-promotion-impossible"
+stuck_partial="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
+stuck_cached="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+GOS_TEST_MV_FAIL_DEST="$stuck_cached" GOS_TEST_CP_FAIL_DEST="$stuck_cached" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -eq 0 ] || fail "install must still complete when the cache cannot be written: ${output}"
+assert_contains "$output" "could not write Go archive cache" "cache promotion impossible warning"
+assert_contains "$output" "Done! go version go1.21.6" "cache promotion impossible still installs"
+[ ! -f "$stuck_partial" ] || fail "an unpromotable completed partial must be discarded"
+[ ! -f "$stuck_cached" ] || fail "no cache entry should exist when promotion failed"
+pass "an unpromotable verified partial is used once and discarded"
+
 # A resumed partial that still fails its checksum is discarded, not resumed
 # forever (resume never rewrites earlier bytes).
 case_dir="${test_root}/resume-corrupt"
@@ -927,6 +962,41 @@ assert_contains "$output" "checksum mismatch" "corrupt resume fails verification
 [ ! -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial" ] || fail "a checksum-mismatched partial must be discarded"
 pass "a corrupt resumable partial is discarded on a checksum mismatch"
 
+case_dir="${test_root}/version-flags"
+run_gos "$case_dir" bash "$script" --version
+[ "$status" -eq 0 ] || fail "gos --version failed: ${output}"
+[ "$output" = "gos v${gos_version}" ] || fail "gos --version output changed: ${output}"
+run_gos "$case_dir" bash "$script" -V
+[ "$output" = "gos v${gos_version}" ] || fail "gos -V output changed: ${output}"
+pass "--version and -V print the gos version"
+
+case_dir="${test_root}/cache-dir-validation"
+GOS_TEST_CACHE_DIR="relative/cache" run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "relative GOS_CACHE_DIR should be rejected"
+assert_contains "$output" "GOS_CACHE_DIR='relative/cache' must be an absolute path" "relative cache dir"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "GOS_CACHE_DIR validation must happen before network access"
+fi
+GOS_TEST_CACHE_DIR="${case_dir}/../cache" run_gos "$case_dir" bash "$script" list
+[ "$status" -ne 0 ] || fail "GOS_CACHE_DIR with .. should be rejected"
+assert_contains "$output" "must not contain . or .. path components" "dot-component cache dir"
+GOS_TEST_CACHE_DIR="${case_dir}/bad"$'\t'"cache" run_gos "$case_dir" bash "$script" doctor --json
+[ "$status" -ne 0 ] || fail "doctor should fail on a GOS_CACHE_DIR with control characters"
+assert_json "$output" "doctor invalid cache dir"
+assert_contains "$output" '"name":"cache-dir","status":"problem"' "doctor cache dir check"
+run_gos "$case_dir" bash "$script" doctor --json
+assert_contains "$output" '"name":"cache-dir","status":"ok"' "doctor cache dir ok"
+pass "GOS_CACHE_DIR is validated like the other user-controlled directories"
+
+case_dir="${test_root}/json-control-chars"
+mkdir -p "$case_dir/versions/go1.20rc1"$'\x01'"x/bin"
+ln -s "$case_dir/versions/go1.20rc1"$'\x01'"x" "$case_dir/go"
+run_gos "$case_dir" bash "$script" status --json
+[ "$status" -eq 0 ] || fail "status --json with a control character in the layout target failed: ${output}"
+assert_json "$output" "status --json control character"
+assert_contains "$output" 'go1.20rc1\u0001x' "status json escapes control characters"
+pass "JSON output escapes every control character"
+
 case_dir="${test_root}/lock-held"
 mkdir -p "${case_dir}/go.gos-lock"
 printf '%s\n' "$$" >"${case_dir}/go.gos-lock/pid"
@@ -934,6 +1004,12 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -ne 0 ] || fail "install should fail when another gos lock is held"
 assert_contains "$output" "another gos operation is running" "held lock error"
 assert_contains "$output" "${case_dir}/go.gos-lock" "held lock path"
+run_gos "$case_dir" bash "$script" self-update
+[ "$status" -ne 0 ] || fail "self-update should fail when another gos lock is held"
+assert_contains "$output" "another gos operation is running" "self-update held lock error"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "self-update must take the lock before downloading"
+fi
 if [ -s "${case_dir}/urls.log" ]; then
   fail "lock acquisition failure must happen before network access"
 fi

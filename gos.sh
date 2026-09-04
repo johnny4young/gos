@@ -117,6 +117,25 @@ _gos_json_escape() {
   value=${value//$'\n'/\\n}
   value=${value//$'\r'/\\r}
   value=${value//$'\t'/\\t}
+  # Any other control character (a symlink target or PATH entry can carry
+  # one) would make the document invalid; escape it as \u00XX. Only the
+  # rare string that contains one pays for the per-character loop.
+  case "$value" in
+    *[[:cntrl:]]*)
+      local escaped="" char code i
+      for ((i = 0; i < ${#value}; i++)); do
+        char=${value:i:1}
+        case "$char" in
+          [[:cntrl:]])
+            printf -v code '%d' "'$char"
+            printf -v char '\\u%04x' "$code"
+            ;;
+        esac
+        escaped="${escaped}${char}"
+      done
+      value="$escaped"
+      ;;
+  esac
   printf '%s' "$value"
 }
 
@@ -301,6 +320,20 @@ _gos_validate_versions_dir() {
     _gos_error "GOS_VERSIONS_DIR='${GOS_VERSIONS_DIR}' must not equal or be inside GOS_INSTALL_DIR='${GOS_INSTALL_DIR}'."
     return 1
   fi
+}
+
+# The cache dir is user-controlled like the install and versions dirs and
+# feeds mkdir -p, globbed rm -f, and JSON output, so it gets the same
+# absolute-path and metacharacter checks.
+_gos_validate_cache_dir() {
+  case "$GOS_CACHE_DIR" in
+    /*) ;;
+    *)
+      _gos_error "GOS_CACHE_DIR='${GOS_CACHE_DIR}' must be an absolute path."
+      return 1
+      ;;
+  esac
+  _gos_reject_unsafe_path "GOS_CACHE_DIR" "$GOS_CACHE_DIR" || return 1
 }
 
 _gos_versions_mode() {
@@ -1417,7 +1450,7 @@ _gos_install_version() {
 
   # archive_file is what gets extracted: the cache file on a hit (no copy), a
   # persistent .partial that can resume across runs, or the ephemeral temp file.
-  local archive_file cache_file partial=""
+  local archive_file cache_file partial="" partial_cleanup=""
   cache_file=$(_gos_cache_path "$pkg")
   if _gos_try_cache "$pkg" "$expected_sha"; then
     cache_hit="true"
@@ -1482,6 +1515,12 @@ _gos_install_version() {
         elif cp "$partial" "$cache_file" 2>/dev/null; then
           archive_file="$cache_file"
           rm -f "$partial" || _gos_warning "could not remove completed partial at ${partial}."
+        else
+          # Neither rename nor copy worked (disk full, permissions): extract
+          # from the partial and discard it afterwards, so the next install
+          # starts clean instead of "resuming" a complete file forever.
+          _gos_warning "could not write Go archive cache at ${cache_file}; this download will not be reused."
+          partial_cleanup="$partial"
         fi
       else
         _gos_store_cache "$pkg" "$tmp_file" "$expected_sha"
@@ -1505,6 +1544,7 @@ _gos_install_version() {
   fi
 
   _gos_validate_staged_install "$staged_go_dir" || return 1
+  [ -z "$partial_cleanup" ] || rm -f "$partial_cleanup"
 
   _gos_prepare_install_parent || return 1
 
@@ -1535,25 +1575,6 @@ _gos_install_version() {
 
   rm -rf "$tmp_dir"
   GOS_TMP_DIR=""
-}
-
-_gos_find_upward() {
-  local start_dir="$1" filename="$2" dir candidate
-  dir=$(cd "$start_dir" 2>/dev/null && pwd) || return 1
-
-  # The loop body runs for "/" too, so a manifest at the filesystem root is
-  # still found.
-  while :; do
-    candidate="${dir%/}/${filename}"
-    if [ -f "$candidate" ]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-    [ "$dir" = "/" ] && break
-    dir=$(dirname "$dir")
-  done
-
-  return 1
 }
 
 _gos_read_go_version_file() {
@@ -3759,6 +3780,13 @@ cmd_doctor() {
     _gos_doctor_check "problem" "feed-ttl" "$feed_ttl_error" "Set GOS_FEED_TTL to a non-negative integer number of seconds."
   fi
 
+  local cache_dir_error
+  if cache_dir_error=$(_gos_validate_cache_dir 2>&1); then
+    _gos_doctor_check "ok" "cache-dir" "archives and feed metadata cache under ${GOS_CACHE_DIR}"
+  else
+    _gos_doctor_check "problem" "cache-dir" "$cache_dir_error" "Set GOS_CACHE_DIR to a safe absolute path or unset it."
+  fi
+
   # Crash residue and the lock are diagnosable state, so doctor reports them
   # like status does. Neither is a "problem": an interrupted install left the
   # backup on purpose, and a held lock means another gos is simply running.
@@ -4115,7 +4143,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'help' -d 'Show this help message,
 # gos-commands:fish:end
 # --json only where gos actually supports it (leading flag or per command).
 complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable JSON where supported'
-complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version' -l json -d 'Output machine-readable JSON'
+complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version use' -l json -d 'Output machine-readable JSON'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l dry-run -d 'Preview removals without deleting'
 complete -c gos -n '__fish_seen_subcommand_from rollback' -l dry-run -d 'Preview the rollback without switching'
@@ -4455,6 +4483,7 @@ main() {
     latest)
       _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_cache_dir || return 1
       _gos_validate_versions_dir || return 1
       _gos_acquire_lock || return 1
       cmd_latest "$@"
@@ -4462,6 +4491,7 @@ main() {
     install)
       _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_cache_dir || return 1
       _gos_validate_versions_dir || return 1
       _gos_acquire_lock || return 1
       cmd_install "$@"
@@ -4469,12 +4499,14 @@ main() {
     run)
       _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_cache_dir || return 1
       _gos_validate_versions_dir || return 1
       cmd_run "$@"
       ;;
     each)
       _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_cache_dir || return 1
       _gos_validate_versions_dir || return 1
       # Each version installs under its own lock; no command-level lock here.
       cmd_each "$@"
@@ -4482,6 +4514,7 @@ main() {
     use)
       _gos_validate_checksum_policy || return 1
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_cache_dir || return 1
       _gos_validate_versions_dir || return 1
       # --print only resolves; a read-only query must not take (or be
       # blocked by) the mutation lock.
@@ -4504,10 +4537,20 @@ main() {
       ;;
     prune)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_validate_cache_dir || return 1
       cmd_prune "$@"
       ;;
-    check) cmd_check "$@" ;;
-    self-update | selfupdate) cmd_self_update "$@" ;;
+    check)
+      _gos_validate_cache_dir || return 1
+      cmd_check "$@"
+      ;;
+    self-update | selfupdate)
+      # Replacing the running script races with a concurrent self-update;
+      # the mutation lock serializes them like every other mutating command.
+      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_acquire_lock || return 1
+      cmd_self_update "$@"
+      ;;
     uninstall)
       _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
       _gos_validate_versions_dir || return 1
@@ -4527,13 +4570,19 @@ main() {
     __project-version) cmd___project_version "$@" ;;
     completions) cmd_completions "$@" ;;
     current) cmd_current "$@" ;;
-    list) cmd_list "$@" ;;
-    platforms) cmd_platforms "$@" ;;
+    list)
+      _gos_validate_cache_dir || return 1
+      cmd_list "$@"
+      ;;
+    platforms)
+      _gos_validate_cache_dir || return 1
+      cmd_platforms "$@"
+      ;;
     status) cmd_status "$@" ;;
     which) cmd_which "$@" ;;
     __versions) cmd___versions "$@" ;;
     doctor) cmd_doctor "$@" ;;
-    version) cmd_version "$@" ;;
+    version | --version | -V) cmd_version "$@" ;;
     help | --help | -h) cmd_help "$@" ;;
     *)
       local suggestion suggestions

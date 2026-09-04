@@ -26,7 +26,7 @@ complete -c gos -n '__fish_use_subcommand' -a 'help' -d 'Show this help message,
 # gos-commands:fish:end
 # --json only where gos actually supports it (leading flag or per command).
 complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable JSON where supported'
-complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version' -l json -d 'Output machine-readable JSON'
+complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version use' -l json -d 'Output machine-readable JSON'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__fish_seen_subcommand_from prune' -l dry-run -d 'Preview removals without deleting'
 complete -c gos -n '__fish_seen_subcommand_from rollback' -l dry-run -d 'Preview the rollback without switching'

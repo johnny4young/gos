@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- `gos --version` and `gos -V` print the gos version like `gos version`.
+
 ### Fixed
 
 - `gos rollback` is now crash-safe like `gos install`: an interrupt between moving the active Go aside and moving the rollback into place used to leave the machine with no Go at all, because rollback never armed the EXIT trap that restores the displaced installation. The trap also stays armed when a post-activation restore fails midway, instead of being disarmed right after the failed attempt.
@@ -17,6 +21,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - The `jq` checksum and platform lookups tolerate feed entries without a `files` array instead of aborting on the first one, which turned a present checksum into "not found" and forced a needless `include=all` download.
 - `gos install` no longer promises "Resuming download" on wget-only hosts, where `wget -O` restarts the file; and `gos doctor`'s hash probe uses an explicit `mktemp` template so strict BSD `mktemp` implementations no longer produce a false "no working SHA256 tool".
 - A rollback slot left as a dangling symlink (its side-by-side version was uninstalled) is reported consistently: `gos status` shows `Rollback: broken link -> …` with a `gos prune --rollback` hint (and `rollback_available:false` plus a new `rollback_state` field in `--json`), and `gos rollback`/`rollback --dry-run` explain the stale link instead of claiming no rollback exists.
+- `gos self-update` now takes the mutation lock, so two concurrent self-updates cannot race on the final rename.
+- A verified `.partial` download that can be neither renamed nor copied into the cache (disk full) is now extracted once and discarded with a warning, instead of being left behind to be "resumed" on every later install.
+- JSON output escapes every control character (`\u00XX`), not only newline, carriage return, and tab, so a symlink target or PATH entry containing one can no longer produce an invalid document.
+- `GOS_CACHE_DIR` is validated like `GOS_INSTALL_DIR` and `GOS_VERSIONS_DIR` (absolute, no `.`/`..` components, no control characters) before any command that touches the cache, and `gos doctor` gains a `cache-dir` check.
+- Fish completion offers `--json` for `gos use` like the Bash and Zsh completions already did.
 - `gos platforms` works again on hosts that have `python3` but no `jq`: the python3 feed parser contained a syntax error, so every such host reported "no supported platforms found".
 
 ### Performance
