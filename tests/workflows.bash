@@ -550,9 +550,10 @@ assert(readme.include?(".gos-lock"), "README must mention the concurrent-operati
 assert(bash_completion.include?("__versions --remote-cached"), "Bash completion must use cached dynamic versions")
 assert(zsh_completion.include?("__versions --remote-cached"), "Zsh completion must use cached dynamic versions")
 assert(fish_completion_file.include?("__versions --remote-cached"), "Fish completion must use cached dynamic versions")
-assert(bash_completion.include?("install | run"), "Bash completion must complete install/run versions")
-assert(zsh_completion.include?("install | run"), "Zsh completion must complete install/run versions")
-assert(fish_completion_file.include?("__fish_seen_subcommand_from install run"), "Fish completion must complete install/run versions")
+assert(bash_completion.include?("install | platforms)") && bash_completion.include?("run | each)"), "Bash completion must complete install/platforms and run/each versions")
+assert(zsh_completion.include?("install)") && zsh_completion.include?("run | each)"), "Zsh completion must complete install and run/each versions")
+assert(fish_completion_file.include?("__fish_seen_subcommand_from install platforms") && fish_completion_file.include?("__fish_seen_subcommand_from run each; and __gos_wants_version"), "Fish completion must complete install/platforms and run/each versions")
+assert(fish_completion_file.include?("function __gos_needs_command"), "Fish completion must keep offering commands after a leading --json")
 assert(bash_completion.include?("--fix"), "Bash completion must include doctor --fix")
 assert(zsh_completion.include?("--fix"), "Zsh completion must include doctor --fix")
 assert(fish_completion_file.include?("-l fix"), "Fish completion must include doctor --fix")
@@ -705,6 +706,19 @@ end
 # Errors should tell the user what to do next, not guess. The old
 # archive-download failure blamed "Version may not exist" even on a network
 # outage; keep that vague phrasing from creeping back.
+# Usage lines in argument errors come from the manifest (_gos_usage); a literal
+# is only allowed for the hidden __ commands that the manifest does not list.
+gos_sh.each_line do |line|
+  next unless line =~ /echo "Usage: gos ([^ "]+)/
+  assert(Regexp.last_match(1).start_with?("__"), "gos.sh must print usage through _gos_usage instead of a literal for #{Regexp.last_match(1)}")
+end
+
+# The section map at the top of gos.sh must list exactly the section headers
+# that exist, in order, so it stays a usable index.
+map_sections = gos_sh.scan(/^#   (Helpers|Go downloads feed|Commands|Entrypoint) /).flatten
+real_sections = gos_sh.scan(/^# [^A-Za-z\s]+ ([A-Za-z ]+?) [^A-Za-z\s]+$/).flatten.map(&:strip)
+assert(map_sections == real_sections, "gos.sh section map #{map_sections.inspect} must match the section headers #{real_sections.inspect}")
+
 assert(!gos_sh.include?("may not exist"),
   "download errors must give a next step (retry / gos list), not guess 'may not exist'")
 
