@@ -34,6 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Performance
 
 - `gos install 1.24` (a bare minor) and the `gos run`/`gos each` fast paths now resolve the minor from the on-disk discovery feed cache instead of downloading the multi-megabyte `include=all` feed on every run. Checksums still come from a fresh feed fetch: a memoized feed that came from disk is re-downloaded before any checksum lookup, so the cache can only ever influence discovery.
+- Version validation, path-depth checks, the project-manifest directory walk, and the feed TTL parse no longer fork `grep`, `tr`/`wc`, `dirname`, or `sed`; `gos status` and the auto-switch hook's `gos __project-version` each drop roughly 10-20 ms of process spawning per run.
 - The `gos env --auto` hook no longer spawns a `gos` process on every prompt: it re-evaluates only when the directory changes (or while the project's version is still missing, so the switch happens right after `gos use`).
 
 ### Security

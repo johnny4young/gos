@@ -223,8 +223,11 @@ _gos_set_json_from_args() {
 # Validate version string to prevent path traversal and URL injection.
 # Accepts: 1.22, 1.22.0, 1.23rc1, 1.23beta2
 _gos_validate_version() {
-  local version="$1"
-  if ! printf '%s\n' "$version" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$'; then
+  local version="$1" LC_ALL=C
+  # Bash's own matcher: this runs on every prompt from the auto-switch hook
+  # and on every command that takes a version, so it must not fork grep.
+  local pattern='^[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$'
+  if ! [[ "$version" =~ $pattern ]]; then
     _gos_error "invalid version format '${version}'."
     echo "Expected format: X.Y[.Z][rcN|betaN]  e.g. 1.22.0, 1.23rc1" >&2
     return 1
@@ -254,6 +257,28 @@ _gos_reject_unsafe_path() {
   esac
 }
 
+# Number of slashes in a path, without the tr | wc | tr pipeline.
+_gos_path_depth() {
+  local slashes="${1//[!\/]/}"
+  printf '%s\n' "${#slashes}"
+}
+
+# dirname for absolute paths without the fork: the project-manifest walk
+# runs it once per directory level on every prompt from the auto-switch hook.
+_gos_dirname() {
+  local path="$1"
+  while [ "$path" != "/" ] && [ "$path" != "${path%/}" ]; do
+    path="${path%/}"
+  done
+  case "$path" in
+    */*)
+      path="${path%/*}"
+      printf '%s\n' "${path:-/}"
+      ;;
+    *) printf '.\n' ;;
+  esac
+}
+
 # Guard against catastrophic rm -rf on dangerous paths.
 _gos_validate_install_dir() {
   local dir="$1"
@@ -280,14 +305,14 @@ _gos_validate_install_dir() {
   esac
   # Require at least 2 path components (e.g. /usr/local/go, not /go)
   local depth
-  depth=$(printf '%s' "$dir" | tr -cd '/' | wc -c | tr -d ' ')
+  depth=$(_gos_path_depth "$dir")
   if [ "$depth" -lt 2 ]; then
     _gos_error "GOS_INSTALL_DIR='${dir}' is too shallow. Use a path like /usr/local/go."
     return 1
   fi
   # Require basename to contain "go" to prevent accidental misconfiguration
   local base
-  base=$(basename "$dir")
+  base="${dir##*/}"
   case "$base" in
     *go*) ;;
     *)
@@ -316,7 +341,7 @@ _gos_validate_versions_dir() {
   _gos_reject_unsafe_path "GOS_VERSIONS_DIR" "$GOS_VERSIONS_DIR" || return 1
 
   local depth
-  depth=$(printf '%s' "$GOS_VERSIONS_DIR" | tr -cd '/' | wc -c | tr -d ' ')
+  depth=$(_gos_path_depth "$GOS_VERSIONS_DIR")
   if [ "$depth" -lt 2 ]; then
     _gos_error "GOS_VERSIONS_DIR='${GOS_VERSIONS_DIR}' is too shallow. Use a path like /home/user/.gos/versions."
     return 1
@@ -482,9 +507,11 @@ _gos_validate_feed_ttl() {
 }
 
 _gos_feed_ttl_seconds() {
-  local ttl
+  local ttl="$GOS_FEED_TTL"
   _gos_validate_feed_ttl >/dev/null 2>&1 || return 1
-  ttl=$(printf '%s\n' "$GOS_FEED_TTL" | sed 's/^0*//')
+  while [ "${#ttl}" -gt 1 ] && [ "${ttl#0}" != "$ttl" ]; do
+    ttl="${ttl#0}"
+  done
   printf '%s\n' "${ttl:-0}"
 }
 
@@ -868,10 +895,10 @@ _gos_active_install_matches() {
 
 _gos_existing_parent_for() {
   local dir="$1" parent
-  parent=$(dirname "$dir")
+  parent=$(_gos_dirname "$dir")
 
   while [ ! -d "$parent" ] && [ "$parent" != "/" ]; do
-    parent=$(dirname "$parent")
+    parent=$(_gos_dirname "$parent")
   done
 
   printf '%s\n' "$parent"
@@ -1064,7 +1091,7 @@ _gos_report_existing_lock() {
 _gos_acquire_lock() {
   local lock_dir lock_parent pid_file
   lock_dir=$(_gos_lock_dir)
-  lock_parent=$(dirname "$lock_dir")
+  lock_parent=$(_gos_dirname "$lock_dir")
   pid_file="${lock_dir}/pid"
 
   if [ -n "$GOS_LOCK_DIR" ]; then
@@ -1111,7 +1138,7 @@ _gos_ensure_dir() {
 
 _gos_prepare_install_parent() {
   local parent
-  parent=$(dirname "$GOS_INSTALL_DIR")
+  parent=$(_gos_dirname "$GOS_INSTALL_DIR")
 
   if ! _gos_ensure_dir "$parent"; then
     _gos_error "failed to create parent directory for GOS_INSTALL_DIR: ${parent}"
@@ -1716,7 +1743,8 @@ _gos_resolve_project_version() {
     fi
 
     [ "$dir" = "/" ] && break
-    dir=$(dirname "$dir")
+    dir="${dir%/*}"
+    [ -n "$dir" ] || dir="/"
   done
 
   return 1
@@ -1883,8 +1911,9 @@ _gos_format_bytes() {
 }
 
 _gos_semver_is_valid() {
-  printf '%s\n' "$1" \
-    | LC_ALL=C grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+  local LC_ALL=C
+  local pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+  [[ "$1" =~ $pattern ]]
 }
 
 # Compare canonical, non-negative decimal strings without coercing them to the
@@ -3395,7 +3424,7 @@ cmd_self_update() {
     _gos_error "could not resolve the path of the running gos script."
     return 1
   }
-  script_dir=$(dirname "$script_path")
+  script_dir=$(_gos_dirname "$script_path")
 
   # Package-manager installs own this file; self-updating would fight them.
   case "$script_path" in
@@ -3694,7 +3723,7 @@ _gos_doctor_path_setup_line() {
 
 _gos_doctor_apply_fixes() {
   local install_parent path_setup
-  install_parent=$(dirname "$GOS_INSTALL_DIR")
+  install_parent=$(_gos_dirname "$GOS_INSTALL_DIR")
 
   if ! _gos_validate_install_dir "$GOS_INSTALL_DIR" >/dev/null 2>&1; then
     _gos_warning "GOS_INSTALL_DIR is invalid; not creating its parent."
@@ -3907,7 +3936,7 @@ cmd_doctor() {
   # Resolve symlinks (a symlinked gos on PATH is common for git-clone
   # installs) so the completions check looks next to the real script.
   if self_path=$(_gos_self_path); then
-    script_dir=$(dirname "$self_path")
+    script_dir=$(_gos_dirname "$self_path")
     if [ -f "${script_dir}/completions/gos.bash" ] && [ -f "${script_dir}/completions/gos.zsh" ] && [ -f "${script_dir}/completions/gos.fish" ]; then
       _gos_doctor_check "ok" "completions" "Bash, Zsh, and Fish completion files are present"
     else
@@ -4267,7 +4296,7 @@ cmd_completions() {
   # user still needs (fish auto-loads its directory).
   local target target_dir
   target=$(_gos_completion_target "$shell_name")
-  target_dir=$(dirname "$target")
+  target_dir=$(_gos_dirname "$target")
   if ! mkdir -p "$target_dir" 2>/dev/null; then
     _gos_error "could not create completion directory: ${target_dir}"
     return 1
