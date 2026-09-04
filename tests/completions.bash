@@ -165,6 +165,47 @@ help_output="$(bash "$script" help)"
 bash_completion_text="$(<"${test_root}/gos.bash")"
 zsh_completion_text="$(<"${test_root}/gos.zsh")"
 fish_completion_text="$(<"${test_root}/gos.fish")"
+
+# Flag parity: every --flag a command's manifest usage line advertises must be
+# offered by all three completions for that command. The command lists are
+# generated; the per-command flag arms are hand-written per shell and used to
+# drift (fish lacked use --json, pin completed nothing).
+shell_block() {
+  # Print the case arm of $2 (bash or zsh completion text in $1): the lines
+  # from a label such as "install | run | each)" that names the command up to
+  # the closing ";;".
+  printf '%s\n' "$1" | awk -v cmd="$2" '
+    /^[[:space:]]+[A-Za-z_|[:space:]-]+\)$/ {
+      label = $0
+      sub(/^[[:space:]]+/, "", label)
+      sub(/\)$/, "", label)
+      n = split(label, names, /[[:space:]]*\|[[:space:]]*/)
+      in_block = 0
+      for (i = 1; i <= n; i++) if (names[i] == cmd) in_block = 1
+    }
+    in_block { print }
+    in_block && /^[[:space:]]+;;$/ { in_block = 0 }
+  '
+}
+parity_failures=""
+while IFS='|' read -r command_name command_usage _command_description; do
+  for flag in $(printf '%s\n' "$command_usage" | grep -oE -- '--[a-z][a-z-]*' || true); do
+    case "$(shell_block "$bash_completion_text" "$command_name")" in
+      *"$flag"*) ;;
+      *) parity_failures="${parity_failures}bash:${command_name}:${flag} " ;;
+    esac
+    case "$(shell_block "$zsh_completion_text" "$command_name")" in
+      *"${flag}["*) ;;
+      *) parity_failures="${parity_failures}zsh:${command_name}:${flag} " ;;
+    esac
+    if ! printf '%s\n' "$fish_completion_text" | grep -E "__fish_seen_subcommand_from[^']* ${command_name}[ ']" | grep -q -- " -l ${flag#--} "; then
+      parity_failures="${parity_failures}fish:${command_name}:${flag} "
+    fi
+  done
+done <<<"$(bash "$script" __commands --details)"
+[ -z "$parity_failures" ] || fail "completion flags missing for manifest usage: ${parity_failures}"
+pass "every manifest flag is offered by the bash, zsh, and fish completions"
+
 commands_space="$(printf '%s\n' "$commands_output" | tr '\n' ' ' | sed 's/ $//')"
 assert_contains "$bash_completion_text" "local fallback_commands=\"${commands_space}\"" "bash fallback command list"
 assert_not_contains "$help_output" "__commands" "help hides internal command manifest"
@@ -227,7 +268,7 @@ output="$(bash "$script" completions 2>&1)"
 status=$?
 set -e
 [ "$status" -ne 0 ] || fail "gos completions without a shell should fail"
-assert_contains "$output" "Usage: gos completions <bash|zsh|fish>" "missing shell usage"
+assert_contains "$output" "Usage: gos completions <shell> [--install]" "missing shell usage"
 
 set +e
 output="$(bash "$script" completions powershell 2>&1)"

@@ -42,7 +42,25 @@ _gos() {
         prune)
           _arguments '--rollback[Also remove the rollback installation]' '--dry-run[Preview removals without deleting]' '--json[Output machine-readable JSON]'
           ;;
-        install | run | each)
+        install)
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
+          fi
+          ;;
+        run | each)
+          # First slot is the version; the rest is the command to run.
+          _arguments '1: :->gos_versions' '*:: :_normal'
+          if [ "$state" = "gos_versions" ] && command -v gos >/dev/null 2>&1; then
+            _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
+          fi
+          ;;
+        pin)
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
+          fi
+          ;;
+        platforms)
+          _arguments '--json[Output machine-readable JSON]'
           if command -v gos >/dev/null 2>&1; then
             _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
           fi
@@ -77,7 +95,7 @@ _gos() {
         doctor)
           _arguments '--fix[Apply safe non-destructive fixes]' '--json[Output machine-readable JSON]'
           ;;
-        check | current | platforms | status | version)
+        check | current | status | version)
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)

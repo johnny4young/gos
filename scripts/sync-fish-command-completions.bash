@@ -55,7 +55,7 @@ end
 fail!("gos __commands --details returned no commands") if commands.empty?
 
 block = ([MARKER_BEGIN] + commands.map do |command|
-  "complete -c gos -n '__fish_use_subcommand' -a #{fish_single_quote(command.fetch(:name))} -d #{fish_single_quote(command.fetch(:description))}"
+  "complete -c gos -n '__gos_needs_command' -a #{fish_single_quote(command.fetch(:name))} -d #{fish_single_quote(command.fetch(:description))}"
 end + [MARKER_END, ""]).join("\n")
 
 current = File.read("completions/gos.fish")
