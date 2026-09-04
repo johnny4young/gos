@@ -22,6 +22,27 @@ trap cleanup EXIT
 
 mkdir -p "$fake_bin"
 
+# Parser matrix. gos parses the downloads feed with jq, then python3, then a
+# grep scrape, but the host machine decides which branch a test exercises, so
+# a bug in a fallback (the python3 platforms parser was a SyntaxError for
+# months) stays green wherever jq is installed. GOS_TEST_PARSERS=jq|python3|none
+# runs a case with a restricted PATH exposing exactly that parser; the default
+# (host) keeps the machine's own PATH.
+tools_bin="${test_root}/tools-bin"
+parser_jq_bin="${test_root}/parser-jq"
+parser_python3_bin="${test_root}/parser-python3"
+mkdir -p "$tools_bin" "$parser_jq_bin" "$parser_python3_bin"
+for tool in bash sh env uname grep sed awk sort cut tr head tail wc mktemp tar mkdir rm mv cp ln readlink dirname basename date stat cat du uniq realpath chmod touch id; do
+  tool_path="$(command -v "$tool" 2>/dev/null)" || continue
+  case "$tool_path" in /*) ln -s "$tool_path" "${tools_bin}/${tool}" ;; esac
+done
+if tool_path="$(command -v jq 2>/dev/null)"; then
+  ln -s "$tool_path" "${parser_jq_bin}/jq"
+fi
+if tool_path="$(command -v python3 2>/dev/null)"; then
+  ln -s "$tool_path" "${parser_python3_bin}/python3"
+fi
+
 cat >"${fake_bin}/uname" <<'FAKE_UNAME'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -292,9 +313,18 @@ run_gos() {
   : >"${case_dir}/urls.log"
   : >"${case_dir}/curl-args.log"
 
+  local gos_path
+  case "${GOS_TEST_PARSERS:-host}" in
+    host) gos_path="${fake_bin}:${original_path}" ;;
+    jq) gos_path="${fake_bin}:${parser_jq_bin}:${tools_bin}" ;;
+    python3) gos_path="${fake_bin}:${parser_python3_bin}:${tools_bin}" ;;
+    none) gos_path="${fake_bin}:${tools_bin}" ;;
+    *) fail "unknown GOS_TEST_PARSERS value: ${GOS_TEST_PARSERS}" ;;
+  esac
+
   set +e
   output="$(
-    PATH="${fake_bin}:${original_path}" \
+    PATH="$gos_path" \
       GOS_INSTALL_DIR="${GOS_TEST_INSTALL_DIR:-${case_dir}/go}" \
       GOS_CACHE_DIR="${case_dir}/cache" \
       GOS_DOWNLOAD_MIRROR="${GOS_TEST_MIRROR:-}" \
@@ -594,6 +624,38 @@ run_gos "$case_dir" bash "$script" platforms 1.21.6 --json
 [ "$status" -eq 0 ] || fail "platforms --json failed: ${output}"
 assert_json "$output" "platforms --json"
 assert_contains "$output" '"platforms":["darwin/arm64","linux/amd64"]' "platforms json"
+
+# Every feed parser branch must produce the same answers: discovery (list,
+# platforms) works with jq, python3, or the grep scrape alone, and install
+# verifies through jq/python3 metadata while the scrape-only host falls back
+# to the companion .sha256 (404 in this harness) and warns instead of dying.
+for parsers in jq python3 none; do
+  case "$parsers" in
+    jq | python3)
+      if [ ! -x "${test_root}/parser-${parsers}/${parsers}" ]; then
+        echo "ok - feed parser ${parsers} cases skipped: ${parsers} not installed on this host"
+        continue
+      fi
+      ;;
+  esac
+  case_dir="${test_root}/parsers-${parsers}"
+  GOS_TEST_PARSERS="$parsers" run_gos "$case_dir" bash "$script" platforms 1.21.6 --json
+  [ "$status" -eq 0 ] || fail "platforms --json with parsers=${parsers} failed: ${output}"
+  assert_contains "$output" '"platforms":["darwin/arm64","linux/amd64"]' "platforms json (parsers=${parsers})"
+  GOS_TEST_PARSERS="$parsers" run_gos "$case_dir" bash "$script" list --json
+  [ "$status" -eq 0 ] || fail "list --json with parsers=${parsers} failed: ${output}"
+  assert_contains "$output" '"versions":["go1.20.0","go1.21rc1","go1.21.6","go1.22rc1"]' "list json (parsers=${parsers})"
+  GOS_TEST_PARSERS="$parsers" run_gos "$case_dir" bash "$script" install 1.21.6
+  [ "$status" -eq 0 ] || fail "install with parsers=${parsers} failed: ${output}"
+  if [ "$parsers" = "none" ]; then
+    assert_contains "$output" "skipping integrity verification" "install without a feed parser warns (parsers=none)"
+    assert_not_contains "$output" "Checksum verified." "install without a feed parser cannot verify (parsers=none)"
+  else
+    assert_contains "$output" "Checksum verified." "install verifies via feed metadata (parsers=${parsers})"
+  fi
+  [ -x "${case_dir}/go/bin/go" ] || fail "install with parsers=${parsers} left no go binary"
+done
+pass "feed parsing agrees across jq, python3, and the grep fallback"
 
 case_dir="${test_root}/status"
 mkdir -p "$case_dir/project" "$case_dir/cache"

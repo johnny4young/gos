@@ -1632,7 +1632,7 @@ for item in data:
         continue
     for file in item.get("files", []):
         if file.get("kind") == "archive":
-            platforms.add(f"{file.get(\"os\")}/{file.get(\"arch\")}")
+            platforms.add("%s/%s" % (file.get("os"), file.get("arch")))
 for platform in sorted(platforms):
     print(platform)
 ' "$go_version"
