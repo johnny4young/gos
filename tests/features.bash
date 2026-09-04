@@ -318,10 +318,16 @@ run_gos() {
   set -e
 }
 
+# Run a script under a pseudo-terminal and return its exit status. pty_ran
+# records whether a harness was available at all, so callers can tell "no PTY
+# on this machine" (skip) apart from "the command under test failed" (fail).
+pty_ran=0
 run_with_pty() {
   local runner="$1" out_file="$2"
+  pty_ran=0
 
   if command -v python3 >/dev/null 2>&1; then
+    pty_ran=1
     python3 - "$runner" >"$out_file" 2>&1 <<'PYPTY'
 import os
 import pty
@@ -338,11 +344,30 @@ PYPTY
   fi
 
   if command -v script >/dev/null 2>&1; then
+    pty_ran=1
     script -q /dev/null "$runner" >"$out_file" 2>&1
     return $?
   fi
 
   return 127
+}
+
+# Run a TTY case that must succeed. Returns 0 when it ran and exited 0 (the
+# caller then asserts on the captured output) and 1 when no PTY harness
+# exists (printing a skip line). Any other exit status fails the suite, so a
+# broken runner can never masquerade as a skipped branch: two of these blocks
+# silently "skipped" for months because the runner lacked an env var.
+run_tty_ok() {
+  local runner="$1" out_file="$2" name="$3" rc=0
+  run_with_pty "$runner" "$out_file" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$pty_ran" -eq 0 ]; then
+    echo "ok - ${name} TTY branch skipped: no usable pseudo-terminal harness"
+    return 1
+  fi
+  fail "${name}: TTY runner failed (status ${rc}): $(cat "$out_file")"
 }
 
 create_old_install() {
@@ -916,12 +941,10 @@ GOS_CACHE_DIR="${case_dir}/cache" \
   bash "$script" doctor
 TTY_DOCTOR
 chmod +x "$runner"
-if run_with_pty "$runner" "${case_dir}/doctor-tty.out"; then
+if run_tty_ok "$runner" "${case_dir}/doctor-tty.out" "doctor color"; then
   doctor_tty=$(<"${case_dir}/doctor-tty.out")
   assert_contains "$doctor_tty" $'\033[32m✓\033[0m' "doctor tty ok symbol"
   assert_contains "$doctor_tty" $'\033[32mok\033[0m' "doctor tty ok label"
-else
-  echo "ok - doctor color TTY branch skipped: no usable pseudo-terminal harness"
 fi
 runner="${case_dir}/doctor-no-color.sh"
 cat >"$runner" <<TTY_DOCTOR_NO_COLOR
@@ -935,7 +958,7 @@ GOS_CACHE_DIR="${case_dir}/plain-cache" \
   bash "$script" doctor
 TTY_DOCTOR_NO_COLOR
 chmod +x "$runner"
-if run_with_pty "$runner" "${case_dir}/doctor-no-color.out"; then
+if run_tty_ok "$runner" "${case_dir}/doctor-no-color.out" "doctor NO_COLOR"; then
   doctor_plain=$(<"${case_dir}/doctor-no-color.out")
   case "$doctor_plain" in
     *$'\033['*) fail "NO_COLOR doctor output must not contain ANSI: ${doctor_plain}" ;;
@@ -943,8 +966,6 @@ if run_with_pty "$runner" "${case_dir}/doctor-no-color.out"; then
   case "$doctor_plain" in
     *"✓"*) fail "NO_COLOR doctor output must not contain symbols: ${doctor_plain}" ;;
   esac
-else
-  echo "ok - doctor NO_COLOR TTY branch skipped: no usable pseudo-terminal harness"
 fi
 pass "doctor color is limited to interactive output and honors NO_COLOR"
 
@@ -962,11 +983,9 @@ GOS_CACHE_DIR="${case_dir}/cache" \
   bash "$script" status
 TTY_STATUS
 chmod +x "$runner"
-if run_with_pty "$runner" "${case_dir}/status-tty.out"; then
+if run_tty_ok "$runner" "${case_dir}/status-tty.out" "status color"; then
   status_tty=$(<"${case_dir}/status-tty.out")
   assert_contains "$status_tty" $'\033[32mgo' "status tty active version is green"
-else
-  echo "ok - status color TTY branch skipped: no usable pseudo-terminal harness"
 fi
 pass "status color is limited to interactive output"
 
@@ -990,12 +1009,10 @@ GOS_CACHE_DIR="${case_dir}/cache" \
   bash "$script" list --installed
 TTY_LIST
 chmod +x "$runner"
-if run_with_pty "$runner" "${case_dir}/list-tty.out"; then
+if run_tty_ok "$runner" "${case_dir}/list-tty.out" "list installed color"; then
   list_tty=$(<"${case_dir}/list-tty.out")
   assert_contains "$list_tty" $'\033[32mgo1.20rc1\033[0m (active)' "list installed tty marks active in green"
   assert_not_contains "$list_tty" "go1.19.9 (active)" "list installed tty leaves inactive unmarked"
-else
-  echo "ok - list installed color TTY branch skipped: no usable pseudo-terminal harness"
 fi
 pass "list --installed marks the active version only interactively"
 
@@ -1021,6 +1038,8 @@ TTY_ERROR
 chmod +x "$runner"
 if run_with_pty "$runner" "${case_dir}/error-tty.out"; then
   fail "bad install version under TTY should fail"
+elif [ "$pty_ran" -eq 0 ]; then
+  echo "ok - stderr style error TTY branch skipped: no usable pseudo-terminal harness"
 else
   error_tty=$(<"${case_dir}/error-tty.out")
   assert_contains "$error_tty" $'\033[31m✗\033[0m' "tty error symbol"
@@ -1044,6 +1063,7 @@ PATH="${fake_bin}:${original_path}" \
 TERM="xterm-256color" \
 GOS_INSTALL_DIR="${case_dir}/active-go" \
 GOS_CACHE_DIR="${case_dir}/cache" \
+GOS_TEST_REAL_MV="${real_mv}" \
 GOS_TEST_URL_LOG="${case_dir}/warning-urls.log" \
 GOS_TEST_CURL_ARGS_LOG="${case_dir}/warning-curl-args.log" \
 GOS_TEST_DOWNLOAD_MODE="ok" \
@@ -1058,12 +1078,10 @@ TTY_WARNING
 chmod +x "$runner"
 : >"${case_dir}/warning-urls.log"
 : >"${case_dir}/warning-curl-args.log"
-if run_with_pty "$runner" "${case_dir}/warning-tty.out"; then
+if run_tty_ok "$runner" "${case_dir}/warning-tty.out" "stderr style warning"; then
   warning_tty=$(<"${case_dir}/warning-tty.out")
   assert_contains "$warning_tty" $'\033[33m!\033[0m' "tty warning symbol"
   assert_contains "$warning_tty" $'\033[33mWarning:' "tty warning label"
-else
-  echo "ok - stderr style warning TTY branch skipped: no usable pseudo-terminal harness"
 fi
 runner="${case_dir}/error-no-color.sh"
 cat >"$runner" <<TTY_ERROR_NO_COLOR
@@ -1079,6 +1097,8 @@ TTY_ERROR_NO_COLOR
 chmod +x "$runner"
 if run_with_pty "$runner" "${case_dir}/error-no-color.out"; then
   fail "bad install version with NO_COLOR should fail"
+elif [ "$pty_ran" -eq 0 ]; then
+  echo "ok - NO_COLOR error TTY branch skipped: no usable pseudo-terminal harness"
 else
   error_plain=$(<"${case_dir}/error-no-color.out")
   case "$error_plain" in
@@ -1615,6 +1635,7 @@ GOS_INSTALL_DIR="${case_dir}/go" \
 GOS_CACHE_DIR="${case_dir}/cache" \
 GOS_DOWNLOAD_MIRROR="" \
 GOS_VERSIONS_DIR="" \
+GOS_TEST_REAL_MV="${real_mv}" \
 GOS_TEST_URL_LOG="${case_dir}/urls.log" \
 GOS_TEST_CURL_ARGS_LOG="${case_dir}/curl-args.log" \
 GOS_TEST_DOWNLOAD_MODE="ok" \
@@ -1627,12 +1648,10 @@ GOS_FEED_TTL="" \
   bash "$script" install 1.21.6
 TTY_RUNNER
 chmod +x "$runner"
-if run_with_pty "$runner" "${case_dir}/pty.out"; then
+if run_tty_ok "$runner" "${case_dir}/pty.out" "download progress"; then
   archive_args=$(grep 'go1.21.6.darwin-arm64.tar.gz' "${case_dir}/curl-args.log" | tail -n 1 || true)
   assert_contains "$archive_args" "--progress-bar" "tty archive download enables curl progress"
   assert_contains "$archive_args" "-fSL" "tty archive download keeps curl fail/location flags"
-else
-  echo "ok - download progress TTY branch skipped: no usable pseudo-terminal harness"
 fi
 pass "download progress is limited to interactive archive downloads"
 
