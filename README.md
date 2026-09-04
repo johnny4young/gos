@@ -561,6 +561,9 @@ issues for sensitive vulnerability details.
 
 ## Contributing
 
+Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a map of the
+script, the install transaction, and the bash 3.2 rules.
+
 Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for
 setup, issue reporting, validation commands, and pull request expectations.
 

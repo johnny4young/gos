@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 
 - `gos --version` and `gos -V` print the gos version like `gos version`.
+- `docs/ARCHITECTURE.md` maps `gos.sh`, the command manifest and its generated surfaces, the install transaction and its crash-recovery trap, the trust boundaries, the on-disk state, and the bash 3.2 rules; CONTRIBUTING and the README point to it.
 
 ### Fixed
 

@@ -100,6 +100,10 @@ Use `scripts/validate-local.bash --strict` before opening a pull request when
 you want CI parity: it fails instead of skipping when one of those optional
 tools is missing locally, because CI treats every one of them as required.
 
+Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first: it maps `gos.sh`,
+explains the install transaction and the command manifest, and lists the
+portability rules below in full.
+
 gos targets bash 3.2 (the stock `/bin/bash` on macOS), so avoid bash 4+
 constructs such as `mapfile`, `declare -A`, `${var^^}`, and unguarded
 `"${array[@]}"` on possibly-empty arrays under `set -u` (use
