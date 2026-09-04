@@ -87,9 +87,9 @@ if [ "$tarball_sha" = "000000000000000000000000000000000000000000000000000000000
   exit 1
 fi
 
-# Every rewrite requires exactly one match and nothing is written until all
-# succeed, so a drifted file can never be half-updated (same discipline as
-# scripts/update-packaging.bash).
+# Every rewrite requires exactly one match. Both complete outputs are staged
+# beside their targets before either target is replaced; if a later rename
+# fails, every target already replaced is restored from its original backup.
 ruby -EUTF-8 - "$pkgbuild" "$srcinfo" "$version" "$tarball_sha" "$tarball_url" <<'RUBY'
 pkgbuild, srcinfo, version, sha, url = ARGV
 
@@ -112,7 +112,66 @@ replace!(updates, srcinfo, /^\tpkgrel = .*$/, "\tpkgrel = 1")
 replace!(updates, srcinfo, /^\tsource = .*$/, "\tsource = gos-#{version}.tar.gz::#{url}")
 replace!(updates, srcinfo, /^\tsha256sums = .*$/, "\tsha256sums = #{sha}")
 
-updates.each { |path, updated| File.write(path, updated) }
+staged = {}
+backups = {}
+touched = []
+success = false
+
+begin
+  # Stage in the target directory so the later rename is atomic on that
+  # filesystem. Preserve each metadata file's executable/permission bits.
+  updates.each do |path, updated|
+    staged_path = "#{path}.gos-new.#{Process.pid}"
+    backup_path = "#{path}.gos-old.#{Process.pid}"
+    if File.exist?(staged_path) || File.symlink?(staged_path) ||
+       File.exist?(backup_path) || File.symlink?(backup_path)
+      raise "transaction path already exists for #{path}"
+    end
+    mode = File.stat(path).mode & 0o7777
+    File.open(staged_path, File::WRONLY | File::CREAT | File::EXCL, mode) do |file|
+      staged[path] = staged_path
+      file.write(updated)
+      file.flush
+      file.fsync
+    end
+    File.chmod(mode, staged_path)
+    backups[path] = backup_path
+  end
+
+  updates.each_key do |path|
+    touched << path
+    File.rename(path, backups.fetch(path))
+    File.rename(staged.fetch(path), path)
+  end
+  success = true
+rescue => error
+  restore_errors = []
+  touched.reverse_each do |path|
+    begin
+      backup_path = backups.fetch(path)
+      if File.exist?(backup_path) || File.symlink?(backup_path)
+        File.delete(path) if File.exist?(path) || File.symlink?(path)
+        File.rename(backup_path, path)
+      end
+    rescue => restore_error
+      restore_errors << "#{path}: #{restore_error.message}"
+    end
+  end
+  warn "could not update AUR metadata transactionally: #{error.message}"
+  unless restore_errors.empty?
+    warn "could not restore original metadata: #{restore_errors.join('; ')}"
+  end
+  exit 1
+ensure
+  staged.each_value do |path|
+    File.delete(path) if File.exist?(path) || File.symlink?(path)
+  end
+  if success
+    backups.each_value do |path|
+      File.delete(path) if File.exist?(path) || File.symlink?(path)
+    end
+  end
+end
 RUBY
 
 echo "AUR package now points at v${version} (${tarball_sha})."

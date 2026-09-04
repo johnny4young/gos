@@ -11,12 +11,15 @@ constraints (bash 3.2, no dependencies) that decide what code is acceptable.
 it, so the whole thing has to be readable before it runs, and it has to run on a
 stock machine: bash 3.2 (macOS ships that), plus `curl` or `wget`, `tar`, and a
 SHA-256 tool. `jq` or `python3` make feed parsing nicer but a `grep` scrape works
-without them. Nothing is compiled, downloaded, or generated at runtime.
+without them. gos never installs optional parser dependencies or generates
+runtime code; it only downloads the release metadata and Go archives requested
+by its commands.
 
-That is why there is no module system, no config file, no shims, no telemetry,
-and no rewrite in Go: a Go version manager that needs Go is a bootstrap paradox,
-and every one of those would cost the auditability that makes `curl | bash`
-defensible.
+That is why there is no module system, no config file, no generated per-version
+shim layer, no telemetry, and no rewrite in Go: a Go version manager that needs
+Go is a bootstrap paradox, and every one of those would cost the auditability
+that makes `curl | bash` defensible. The packaged Windows `gos.cmd` launcher is
+the narrow exception that locates Git Bash and delegates to the same `gos.sh`.
 
 ## Map of `gos.sh`
 
@@ -95,14 +98,18 @@ mv  backup          ->  GOS_INSTALL_DIR.gos-rollback           (keep for gos rol
 Between the first and the second step the machine has no Go. That window is
 covered by `GOS_ACTIVATION_BACKUP`: while it is set, the EXIT trap
 (`_gos_cleanup_tmp`, also reached from the INT/TERM traps) moves the backup back
-if the slot is empty. It is armed right after the backup rename, kept armed
+if the slot is empty. It is armed before the backup rename (Bash can defer a
+trapped signal until the foreground `mv` returns), kept armed
 through validation and any restore attempt, and cleared only once the swap is
 complete or the restore succeeded. `gos rollback` (`_gos_activate_rollback`)
 runs the same saga with the rollback slot as the source.
 
-Every mutating command holds `GOS_INSTALL_DIR.gos-lock/` (a `mkdir` lock with
-the pid inside) so concurrent installs, switches, rollbacks, and self-updates
-fail fast instead of racing. Read-only commands and dry runs never take it.
+Commands that mutate a Go installation hold `GOS_INSTALL_DIR.gos-lock/` (a
+`mkdir` lock with the pid inside) so concurrent installs, switches, and
+rollbacks fail fast instead of racing. `gos self-update` instead locks the
+resolved gos script path (`gos.sh.gos-lock/`): shells with different
+`GOS_INSTALL_DIR` values can still replace the same script. Read-only commands
+and dry runs never take a lock.
 
 ## Privilege
 
@@ -143,6 +150,7 @@ gos has no database; its state is the filesystem:
 | `$GOS_INSTALL_DIR.gos-rollback` | The previous installation, target of `gos rollback`. A dangling link here means its version was uninstalled (`gos prune --rollback` clears it). |
 | `$GOS_INSTALL_DIR.gos-backup.<pid>`, `.gos-current.<pid>` | Transient slots of an activation in progress; crash residue if left behind (`gos status`/`doctor` report it, `gos prune --rollback` removes it). |
 | `$GOS_INSTALL_DIR.gos-lock/pid` | The mutation lock. |
+| `<resolved gos script>.gos-lock/pid` | The path-scoped self-update lock. |
 | `$GOS_VERSIONS_DIR/go<version>/` | Installed versions in side-by-side mode. |
 | `$GOS_CACHE_DIR/go*.tar.gz`, `go*.zip`, `*.partial` | Verified archive cache and resumable partial downloads. |
 | `$GOS_CACHE_DIR/feed-default.json`, `feed-all.json` | Discovery feed cache. |
@@ -167,8 +175,8 @@ Invariant, enforced by `tests/workflows.bash`: every function that writes under
 The suites in `tests/` are hermetic: each builds a directory of fake `curl`,
 `sha256sum`, `tar`, `go`, `mv`, `sudo`, ... on `PATH` and drives `gos.sh`
 through the CLI. `tests/features.bash` also runs cases with a restricted `PATH`
-exposing only `jq`, only `python3`, or neither, so every feed parser branch runs
-on every machine. `tests/install-transaction.bash` injects rename and removal
+exposing only `jq`, only `python3`, or neither. CI requires both parsers; local
+runs report unavailable parser cases explicitly. `tests/install-transaction.bash` injects rename and removal
 failures, and kills gos between the two renames of a rollback, to prove the
 saga above. `tests/workflows.bash` asserts repository invariants (pinned
 actions, job timeouts, generated surfaces, doc fragments). The nightly canary

@@ -110,6 +110,14 @@ case "$url" in
     printf 'fake archive for %s\n' "$url" >"$output"
     ;;
   https://github.com/johnny4young/gos/releases/latest/download/gos.sh)
+    if [ -n "${GOS_TEST_SELFUPDATE_GATE:-}" ]; then
+      : >"${GOS_TEST_SELFUPDATE_GATE}.ready"
+      for ((attempt = 0; attempt < 200; attempt++)); do
+        [ -f "${GOS_TEST_SELFUPDATE_GATE}.release" ] && break
+        sleep 0.05
+      done
+      [ -f "${GOS_TEST_SELFUPDATE_GATE}.release" ] || exit 28
+    fi
     cat "$GOS_TEST_SELFUPDATE_SCRIPT" >"$output"
     ;;
   https://github.com/johnny4young/gos/releases/latest/download/checksums.txt)
@@ -271,6 +279,36 @@ case "$archive" in
   *go1.21.6*) version="1.21.6" ;;
 esac
 
+case "${GOS_TEST_EXTRACT_MODE:-ok}" in
+  interrupt)
+    kill -TERM "$PPID"
+    exit 0
+    ;;
+  fail)
+    echo "fake extraction failure" >&2
+    exit 1
+    ;;
+  invalid)
+    mkdir -p "${stage_dir}/go"
+    exit 0
+    ;;
+  bad-go)
+    mkdir -p "${stage_dir}/go/bin"
+    cat >"${stage_dir}/go/bin/go" <<'FAKE_BAD_GO_BIN'
+#!/usr/bin/env bash
+echo "bad staged go" >&2
+exit 126
+FAKE_BAD_GO_BIN
+    chmod +x "${stage_dir}/go/bin/go"
+    exit 0
+    ;;
+  ok) ;;
+  *)
+    echo "unknown GOS_TEST_EXTRACT_MODE=${GOS_TEST_EXTRACT_MODE:-}" >&2
+    exit 1
+    ;;
+esac
+
 mkdir -p "${stage_dir}/go/bin"
 cat >"${stage_dir}/go/bin/go" <<FAKE_GO_BIN
 #!/usr/bin/env bash
@@ -361,6 +399,7 @@ run_gos() {
       GOS_TEST_URL_LOG="${case_dir}/urls.log" \
       GOS_TEST_CURL_ARGS_LOG="${case_dir}/curl-args.log" \
       GOS_TEST_DOWNLOAD_MODE="${GOS_TEST_DOWNLOAD_MODE:-ok}" \
+      GOS_TEST_EXTRACT_MODE="${GOS_TEST_EXTRACT_MODE:-ok}" \
       GOS_TEST_UNSUPPORTED_PLATFORM="${GOS_TEST_UNSUPPORTED_PLATFORM:-0}" \
       GOS_TEST_GO_VERSION="${GOS_TEST_GO_VERSION:-}" \
       GOS_TEST_GO_BROKEN="${GOS_TEST_GO_BROKEN:-0}" \
@@ -388,7 +427,7 @@ run_with_pty() {
   local runner="$1" out_file="$2"
   pty_ran=0
 
-  if command -v python3 >/dev/null 2>&1; then
+  if [ "${GOS_TEST_PTY_BACKEND:-auto}" != "script" ] && command -v python3 >/dev/null 2>&1; then
     pty_ran=1
     python3 - "$runner" >"$out_file" 2>&1 <<'PYPTY'
 import os
@@ -407,7 +446,13 @@ PYPTY
 
   if command -v script >/dev/null 2>&1; then
     pty_ran=1
-    script -q /dev/null "$runner" >"$out_file" 2>&1
+    if script --version >/dev/null 2>&1; then
+      # util-linux requires -c for the command and -e to propagate its status.
+      script -q -e -c "$runner" /dev/null >"$out_file" 2>&1
+    else
+      # BSD script (including macOS) accepts the command after the transcript.
+      script -q /dev/null "$runner" >"$out_file" 2>&1
+    fi
     return $?
   fi
 
@@ -431,6 +476,28 @@ run_tty_ok() {
   fi
   fail "${name}: TTY runner failed (status ${rc}): $(cat "$out_file")"
 }
+
+# Force the fallback even when python3 is installed so CI covers both the
+# util-linux and BSD script command lines, including child-status propagation.
+if command -v script >/dev/null 2>&1; then
+  runner="${test_root}/script-pty-runner.sh"
+  cat >"$runner" <<'SCRIPT_PTY_RUNNER'
+#!/usr/bin/env bash
+printf 'script-pty-ok\n'
+exit 23
+SCRIPT_PTY_RUNNER
+  chmod +x "$runner"
+  set +e
+  GOS_TEST_PTY_BACKEND=script run_with_pty "$runner" "${test_root}/script-pty.out"
+  script_pty_status=$?
+  set -e
+  [ "$script_pty_status" -eq 23 ] \
+    || fail "script PTY backend did not propagate status 23 (got ${script_pty_status}): $(cat "${test_root}/script-pty.out")"
+  assert_contains "$(cat "${test_root}/script-pty.out")" "script-pty-ok" "script PTY backend output"
+  pass "script PTY fallback runs commands and propagates their status"
+else
+  echo "ok - script PTY fallback skipped: script not installed on this host"
+fi
 
 create_old_install() {
   local install_dir="$1" version="${2:-1.20.0}" marker="${3:-old}"
@@ -563,6 +630,22 @@ FEED_SELECTION_OUTPUT
   || fail "unordered feed selection failed. Output: ${feed_selection_output}"
 pass "latest and bare-minor resolution are independent of feed ordering"
 
+# The helper must honor the same output routing as all install progress,
+# including when it is called from a recovery path.
+case_dir="${test_root}/restore-progress"
+mkdir -p "${case_dir}/backup/bin"
+printf 'preserved\n' >"${case_dir}/backup/bin/go"
+GOS_INSTALL_DIR="${case_dir}/go" bash -c '
+  set -euo pipefail
+  source "$1"
+  GOS_PROGRESS_FD=2
+  _gos_restore_backup "$2"
+' bash "$sourceable_script" "${case_dir}/backup" >"${case_dir}/out" 2>"${case_dir}/err"
+[ ! -s "${case_dir}/out" ] || fail "restore progress leaked to stdout"
+assert_file_contains "${case_dir}/err" "Rolling back Go installation..."
+assert_file_contains "${case_dir}/go/bin/go" "preserved"
+pass "restore progress honors stderr routing"
+
 semver_comparison_output="$(
   PATH="${fake_bin}:${original_path}" \
     GOS_INSTALL_DIR="${test_root}/semver/go" \
@@ -661,11 +744,17 @@ assert_contains "$output" '"platforms":["darwin/arm64","linux/amd64"]' "platform
 # platforms) works with jq, python3, or the grep scrape alone, and install
 # verifies through jq/python3 metadata while the scrape-only host falls back
 # to the companion .sha256 (404 in this harness) and warns instead of dying.
+parser_cases_run=0
+parser_cases_skipped=0
 for parsers in jq python3 none; do
   case "$parsers" in
     jq | python3)
       if [ ! -x "${test_root}/parser-${parsers}/${parsers}" ]; then
+        if [ "${CI:-}" = "true" ]; then
+          fail "feed parser ${parsers} is required in CI so every parser branch runs"
+        fi
         echo "ok - feed parser ${parsers} cases skipped: ${parsers} not installed on this host"
+        parser_cases_skipped=$((parser_cases_skipped + 1))
         continue
       fi
       ;;
@@ -686,8 +775,13 @@ for parsers in jq python3 none; do
     assert_contains "$output" "Checksum verified." "install verifies via feed metadata (parsers=${parsers})"
   fi
   [ -x "${case_dir}/go/bin/go" ] || fail "install with parsers=${parsers} left no go binary"
+  parser_cases_run=$((parser_cases_run + 1))
 done
-pass "feed parsing agrees across jq, python3, and the grep fallback"
+if [ "$parser_cases_skipped" -eq 0 ]; then
+  pass "feed parsing agrees across jq, python3, and the grep fallback"
+else
+  pass "feed parsing agrees across ${parser_cases_run}/3 available parser branches"
+fi
 
 case_dir="${test_root}/status"
 mkdir -p "$case_dir/project" "$case_dir/cache"
@@ -955,6 +1049,25 @@ assert_contains "$output" "Done! go version go1.21.6" "cache promotion impossibl
 [ ! -f "$stuck_cached" ] || fail "no cache entry should exist when promotion failed"
 pass "an unpromotable verified partial is used once and discarded"
 
+# The one-shot completed partial must also be discarded when extraction or
+# staged validation fails; otherwise the next run tries to resume a file that
+# was already complete.
+for extract_mode in fail invalid interrupt; do
+  case_dir="${test_root}/resume-promotion-${extract_mode}"
+  failed_partial="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
+  failed_cached="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+  GOS_TEST_MV_FAIL_DEST="$failed_cached" \
+    GOS_TEST_CP_FAIL_DEST="$failed_cached" \
+    GOS_TEST_EXTRACT_MODE="$extract_mode" \
+    run_gos "$case_dir" bash "$script" install 1.21.6
+  [ "$status" -ne 0 ] || fail "${extract_mode} after an unpromotable partial should fail"
+  if [ "$extract_mode" = "interrupt" ]; then
+    assert_status 143 "$status" "interrupted one-shot extraction" "$output"
+  fi
+  [ ! -f "$failed_partial" ] || fail "${extract_mode} failure must discard the completed .partial"
+done
+pass "completed one-shot partials are discarded on extraction, validation, and interrupt failures"
+
 # A resumed partial that still fails its checksum is discarded, not resumed
 # forever (resume never rewrites earlier bytes).
 case_dir="${test_root}/resume-corrupt"
@@ -985,10 +1098,23 @@ fi
 GOS_TEST_CACHE_DIR="${case_dir}/../cache" run_gos "$case_dir" bash "$script" list
 [ "$status" -ne 0 ] || fail "GOS_CACHE_DIR with .. should be rejected"
 assert_contains "$output" "must not contain . or .. path components" "dot-component cache dir"
+for unsafe_cache_dir in / /tmp /tmp/ /cache; do
+  GOS_TEST_CACHE_DIR="$unsafe_cache_dir" run_gos "$case_dir" bash "$script" prune
+  [ "$status" -ne 0 ] || fail "unsafe GOS_CACHE_DIR=${unsafe_cache_dir} should be rejected"
+done
+assert_contains "$output" "is too shallow" "shallow cache dir"
 GOS_TEST_CACHE_DIR="${case_dir}/bad"$'\t'"cache" run_gos "$case_dir" bash "$script" doctor --json
 [ "$status" -ne 0 ] || fail "doctor should fail on a GOS_CACHE_DIR with control characters"
 assert_json "$output" "doctor invalid cache dir"
 assert_contains "$output" '"name":"cache-dir","status":"problem"' "doctor cache dir check"
+invalid_fix_dir="${case_dir}/doctor-invalid-cache-fix"
+mkdir -p "$invalid_fix_dir"
+pushd "$invalid_fix_dir" >/dev/null
+GOS_TEST_CACHE_DIR="relative/cache" run_gos "$case_dir" bash "$script" doctor --fix --json
+popd >/dev/null
+[ "$status" -ne 0 ] || fail "doctor --fix should report an invalid relative cache dir"
+assert_json "$output" "doctor --fix invalid cache dir"
+[ ! -e "${invalid_fix_dir}/relative" ] || fail "doctor --fix must validate GOS_CACHE_DIR before creating it"
 run_gos "$case_dir" bash "$script" doctor --json
 assert_contains "$output" '"name":"cache-dir","status":"ok"' "doctor cache dir ok"
 pass "GOS_CACHE_DIR is validated like the other user-controlled directories"
@@ -1025,6 +1151,17 @@ fi
 run_gos "$case_dir" bash "$script" --json run 1.21.6 -- go version
 [ "$status" -ne 0 ] || fail "gos --json run should be rejected"
 assert_contains "$output" "gos run does not support --json" "leading --json rejected for run"
+mkdir -p "${case_dir}/project"
+printf '1.21.6\n' >"${case_dir}/project/.go-version"
+run_gos "$case_dir" bash "$script" --json use "${case_dir}/project"
+[ "$status" -ne 0 ] || fail "gos --json use without --print should be rejected"
+assert_contains "$output" "gos use supports --json only together with --print" "leading --json use requires print"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "a rejected leading --json use must fail before network access"
+fi
+run_gos "$case_dir" bash "$script" --json use --print "${case_dir}/project"
+[ "$status" -eq 0 ] || fail "gos --json use --print failed: ${output}"
+assert_json "$output" "leading --json use --print"
 run_gos "$case_dir" bash "$script" --json version
 [ "$status" -eq 0 ] || fail "gos --json version failed: ${output}"
 assert_json "$output" "leading --json version"
@@ -1037,15 +1174,52 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -ne 0 ] || fail "install should fail when another gos lock is held"
 assert_contains "$output" "another gos operation is running" "held lock error"
 assert_contains "$output" "${case_dir}/go.gos-lock" "held lock path"
-run_gos "$case_dir" bash "$script" self-update
+mkdir -p "${case_dir}/app"
+cp "$script" "${case_dir}/app/gos"
+chmod +x "${case_dir}/app/gos"
+self_update_path="$(cd "${case_dir}/app" && pwd -P)/gos"
+mkdir -p "${self_update_path}.gos-lock"
+printf '%s\n' "$$" >"${self_update_path}.gos-lock/pid"
+run_gos "$case_dir" bash "${case_dir}/app/gos" self-update
 [ "$status" -ne 0 ] || fail "self-update should fail when another gos lock is held"
 assert_contains "$output" "another gos operation is running" "self-update held lock error"
+assert_contains "$output" "${self_update_path}.gos-lock" "self-update path-scoped lock"
 if [ -s "${case_dir}/urls.log" ]; then
   fail "self-update must take the lock before downloading"
 fi
 if [ -s "${case_dir}/urls.log" ]; then
   fail "lock acquisition failure must happen before network access"
 fi
+rm -rf "${self_update_path}.gos-lock"
+
+# Hold one real updater in its download after lock acquisition, then invoke
+# another updater of the same file with a completely different Go root.
+case_dir="${test_root}/concurrent-self-update"
+mkdir -p "${case_dir}/app"
+cp "$script" "${case_dir}/app/gos"
+sed 's/^GOS_VERSION=.*/GOS_VERSION="9.9.9"/' "$script" >"${case_dir}/release-gos.sh"
+(
+  GOS_TEST_SELFUPDATE_GATE="${case_dir}/gate" \
+    GOS_TEST_SELFUPDATE_SCRIPT="${case_dir}/release-gos.sh" \
+    run_gos "${case_dir}/first" bash "${case_dir}/app/gos" self-update
+  printf '%s\n' "$output" >"${case_dir}/first.out"
+  exit "$status"
+) &
+first_updater=$!
+for ((attempt = 0; attempt < 200; attempt++)); do
+  [ -f "${case_dir}/gate.ready" ] && break
+  sleep 0.05
+done
+[ -f "${case_dir}/gate.ready" ] || fail "first updater never reached the locked download"
+run_gos "${case_dir}/second" bash "${case_dir}/app/gos" self-update
+[ "$status" -ne 0 ] || fail "concurrent self-update with another Go root must fail"
+assert_contains "$output" "another gos operation is running" "concurrent self-update lock"
+[ ! -s "${case_dir}/second/urls.log" ] || fail "blocked updater accessed the network"
+: >"${case_dir}/gate.release"
+wait "$first_updater" || fail "first updater failed: $(cat "${case_dir}/first.out")"
+[ ! -e "${case_dir}/app/gos.gos-lock" ] || fail "successful updater left its lock"
+grep -q '^GOS_VERSION="9.9.9"$' "${case_dir}/app/gos" || fail "first updater did not replace gos"
+pass "self-update serializes one script across different Go roots"
 
 case_dir="${test_root}/lock-stale"
 mkdir -p "${case_dir}/go.gos-lock"
@@ -2285,7 +2459,7 @@ GOS_TEST_VERSIONS_DIR="${case_dir}/versions" run_gos "$case_dir" bash "$script" 
 pass "__project-version resolves a bare go.mod minor against installed versions"
 
 case_dir="${test_root}/env-auto"
-mkdir -p "${case_dir}/project" "${case_dir}/missing" "${case_dir}/versions/go1.21.6/bin" "${case_dir}/bin"
+mkdir -p "${case_dir}/project" "${case_dir}/missing" "${case_dir}/versions/go1.21.6/bin" "${case_dir}/versions/go1.20.0/bin" "${case_dir}/bin"
 printf '1.21.6\n' >"${case_dir}/project/.go-version"
 printf '1.99.0\n' >"${case_dir}/missing/.go-version"
 cat >"${case_dir}/versions/go1.21.6/bin/go" <<'AUTO_GO'
@@ -2293,6 +2467,11 @@ cat >"${case_dir}/versions/go1.21.6/bin/go" <<'AUTO_GO'
 echo "go version go1.21.6 darwin/arm64"
 AUTO_GO
 chmod +x "${case_dir}/versions/go1.21.6/bin/go"
+cat >"${case_dir}/versions/go1.20.0/bin/go" <<'AUTO_GO_OLD'
+#!/usr/bin/env bash
+echo "go version go1.20.0 darwin/arm64"
+AUTO_GO_OLD
+chmod +x "${case_dir}/versions/go1.20.0/bin/go"
 ln -s "$script" "${case_dir}/bin/gos"
 run_gos "$case_dir" bash "$script" env --auto
 [ "$status" -eq 0 ] || fail "env --auto failed: ${output}"
@@ -2308,6 +2487,57 @@ PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
   >"${case_dir}/auto.out" \
   || fail "env --auto hook did not switch and restore PATH"
 assert_contains "$(<"${case_dir}/auto.out")" "go version go1.21.6" "env auto go version"
+# Editing the selected manifest in place must invalidate the fast path even
+# though PWD did not change (the same happens after gos pin or git checkout).
+manifest_edit_output=$(
+  PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
+    GOS_INSTALL_DIR="${case_dir}/go" \
+    GOS_VERSIONS_DIR="${case_dir}/versions" \
+    bash -c 'set -euo pipefail; source "$1"; cd "$2"; __gos_auto_switch; printf "1.20.0\n" >.go-version; __gos_auto_switch; go version' \
+    bash "${case_dir}/hook.sh" "${case_dir}/project" 2>&1
+) || fail "env --auto did not re-evaluate an in-place manifest edit: ${manifest_edit_output}"
+assert_contains "$manifest_edit_output" "go version go1.20.0" "env auto invalidates on manifest edit"
+# Exercise Bash and Zsh hook execution, not just emitted syntax: new, edited,
+# and removed manifests must be noticed by the next prompt in the same PWD.
+cat >"${case_dir}/edit-check.sh" <<'AUTO_EDIT_CHECK'
+set -eu
+cd "$2"
+printf '1.21.6\n' >.go-version
+source "$1"
+printf '1.20.0\n' >.go-version
+__gos_auto_switch
+case "$GOS_AUTO_BIN" in */go1.20.0/bin) ;; *) exit 11 ;; esac
+rm .go-version
+printf 'module example.com/edit\n\ngo 1.21\n' >go.mod
+__gos_auto_switch
+case "$GOS_AUTO_BIN" in */go1.21.6/bin) ;; *) exit 12 ;; esac
+# Installing a second matching patch makes this bare minor ambiguous.
+mkdir -p "$GOS_VERSIONS_DIR/go1.21.7/bin"
+cat "$GOS_VERSIONS_DIR/go1.21.6/bin/go" >"$GOS_VERSIONS_DIR/go1.21.7/bin/go"
+chmod +x "$GOS_VERSIONS_DIR/go1.21.7/bin/go"
+__gos_auto_switch
+[ "${GOS_AUTO_STATE:-}" = "missing" ]
+rm -rf "$GOS_VERSIONS_DIR/go1.21.7"
+__gos_auto_switch
+case "$GOS_AUTO_BIN" in */go1.21.6/bin) ;; *) exit 15 ;; esac
+printf 'module example.com/edit\n\ngo 1.20\n' >go.mod
+__gos_auto_switch
+case "$GOS_AUTO_BIN" in */go1.20.0/bin) ;; *) exit 13 ;; esac
+rm go.mod
+__gos_auto_switch
+[ -z "${GOS_AUTO_BIN:-}" ]
+if [ -n "${ZSH_VERSION:-}" ]; then
+  case " ${precmd_functions[*]} " in *" __gos_auto_switch "*) ;; *) exit 14 ;; esac
+fi
+AUTO_EDIT_CHECK
+for hook_shell in bash zsh; do
+  command -v "$hook_shell" >/dev/null 2>&1 || continue
+  PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
+    GOS_INSTALL_DIR="${case_dir}/go" GOS_VERSIONS_DIR="${case_dir}/versions" \
+    "$hook_shell" "${case_dir}/edit-check.sh" "${case_dir}/hook.sh" "${case_dir}/project" \
+    || fail "${hook_shell} auto hook failed manifest invalidation"
+done
+printf '1.21.6\n' >"${case_dir}/project/.go-version"
 mkdir -p "${case_dir}/project-minor"
 printf 'module example.com/auto\n\ngo 1.21\n' >"${case_dir}/project-minor/go.mod"
 minor_output=$(

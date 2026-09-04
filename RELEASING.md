@@ -66,7 +66,7 @@ bash tests/detection.bash
 bash tests/windows-extract.bash
 bash tests/workflows.bash
 scripts/sync-command-surfaces.bash --check
-bash -n $(git ls-files '*.sh' '*.bash')
+git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --
 zsh -n completions/gos.zsh
 ./gos.sh version
 ./gos.sh help

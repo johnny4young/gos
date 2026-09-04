@@ -9,6 +9,9 @@ while [ "$GOS_INSTALL_DIR" != "/" ] && [ "$GOS_INSTALL_DIR" != "${GOS_INSTALL_DI
   GOS_INSTALL_DIR="${GOS_INSTALL_DIR%/}"
 done
 GOS_CACHE_DIR="${GOS_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/gos}"
+while [ "$GOS_CACHE_DIR" != "/" ] && [ "$GOS_CACHE_DIR" != "${GOS_CACHE_DIR%/}" ]; do
+  GOS_CACHE_DIR="${GOS_CACHE_DIR%/}"
+done
 # Optional HTTPS mirror for Go archive downloads (e.g. https://golang.google.cn/dl).
 # Version/checksum metadata always comes from go.dev, so mirror bytes are still
 # verified against the official checksums before activation.
@@ -26,6 +29,7 @@ done
 GOS_RELEASE_BASE_URL="https://github.com/johnny4young/gos/releases/latest/download"
 GOS_OUTPUT_JSON=0
 GOS_TMP_DIR=""
+GOS_COMPLETED_PARTIAL=""
 GOS_LOCK_DIR=""
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -34,6 +38,13 @@ GOS_LOCK_DIR=""
 # The EXIT trap restores it if gos dies between the backup mv and the
 # activation mv, so an interrupt cannot leave the machine with no Go at all.
 GOS_ACTIVATION_BACKUP=""
+
+_gos_discard_completed_partial() {
+  if [ -n "$GOS_COMPLETED_PARTIAL" ]; then
+    rm -f "$GOS_COMPLETED_PARTIAL" || _gos_warning "could not remove completed partial at ${GOS_COMPLETED_PARTIAL}."
+    GOS_COMPLETED_PARTIAL=""
+  fi
+}
 
 # Temp staging is cleaned from a trap so interrupted installs (Ctrl-C, kill)
 # do not leak partially extracted archives.
@@ -57,6 +68,7 @@ _gos_cleanup_tmp() {
       fi
     fi
   fi
+  _gos_discard_completed_partial
   if [ -n "$GOS_TMP_DIR" ] && [ -d "$GOS_TMP_DIR" ]; then
     rm -rf "$GOS_TMP_DIR"
   fi
@@ -360,6 +372,7 @@ _gos_validate_versions_dir() {
 # feeds mkdir -p, globbed rm -f, and JSON output, so it gets the same
 # absolute-path and metacharacter checks.
 _gos_validate_cache_dir() {
+  local depth
   case "$GOS_CACHE_DIR" in
     /*) ;;
     *)
@@ -368,6 +381,20 @@ _gos_validate_cache_dir() {
       ;;
   esac
   _gos_reject_unsafe_path "GOS_CACHE_DIR" "$GOS_CACHE_DIR" || return 1
+  # prune removes matching archive names directly under this directory. Do not
+  # let a typo broaden that glob to a filesystem or system root shared with
+  # unrelated software.
+  case "$GOS_CACHE_DIR" in
+    / | /usr | /etc | /home | /var | /bin | /sbin | /lib | /opt | /tmp | /root | /sys | /proc | /dev)
+      _gos_error "GOS_CACHE_DIR='${GOS_CACHE_DIR}' is a system-critical path. Refusing."
+      return 1
+      ;;
+  esac
+  depth=$(_gos_path_depth "$GOS_CACHE_DIR")
+  if [ "$depth" -lt 2 ]; then
+    _gos_error "GOS_CACHE_DIR='${GOS_CACHE_DIR}' is too shallow. Use a path like /tmp/gos-cache."
+    return 1
+  fi
 }
 
 _gos_versions_mode() {
@@ -1018,7 +1045,7 @@ _gos_lock_dir() {
 
 _gos_release_lock() {
   if [ -n "$GOS_LOCK_DIR" ] && [ -d "$GOS_LOCK_DIR" ]; then
-    _gos_sudo rm -rf "$GOS_LOCK_DIR" 2>/dev/null || rm -rf "$GOS_LOCK_DIR" 2>/dev/null || true
+    _gos_sudo_for "$GOS_LOCK_DIR" rm -rf "$GOS_LOCK_DIR" 2>/dev/null || rm -rf "$GOS_LOCK_DIR" 2>/dev/null || true
   fi
   GOS_LOCK_DIR=""
 }
@@ -1041,8 +1068,8 @@ _gos_pid_is_running() {
 # reported as held with an unknown pid: telling the user to rm -rf a live
 # lock is worse than asking them to check.
 _gos_lock_state() {
-  local lock_dir pid=""
-  lock_dir=$(_gos_lock_dir)
+  local lock_dir="${1:-}" pid=""
+  [ -n "$lock_dir" ] || lock_dir=$(_gos_lock_dir)
   if [ ! -d "$lock_dir" ]; then
     printf 'none|\n'
     return 0
@@ -1063,7 +1090,7 @@ _gos_lock_state() {
 
 _gos_report_existing_lock() {
   local lock_dir="$1" state pid
-  state=$(_gos_lock_state)
+  state=$(_gos_lock_state "$lock_dir")
   pid="${state#*|}"
   state="${state%%|*}"
 
@@ -1089,8 +1116,8 @@ _gos_report_existing_lock() {
 }
 
 _gos_acquire_lock() {
-  local lock_dir lock_parent pid_file
-  lock_dir=$(_gos_lock_dir)
+  local lock_dir="${1:-}" lock_parent pid_file
+  [ -n "$lock_dir" ] || lock_dir=$(_gos_lock_dir)
   lock_parent=$(_gos_dirname "$lock_dir")
   pid_file="${lock_dir}/pid"
 
@@ -1099,7 +1126,7 @@ _gos_acquire_lock() {
   fi
 
   if [ ! -d "$lock_parent" ] && ! _gos_ensure_dir "$lock_parent"; then
-    _gos_error "failed to create parent directory for GOS_INSTALL_DIR: ${lock_parent}"
+    _gos_error "failed to create parent directory for gos lock: ${lock_parent}"
     return 1
   fi
 
@@ -1108,7 +1135,7 @@ _gos_acquire_lock() {
   elif [ -d "$lock_dir" ]; then
     _gos_report_existing_lock "$lock_dir"
     return 1
-  elif _gos_sudo mkdir "$lock_dir" 2>/dev/null; then
+  elif _gos_sudo_for "$lock_dir" mkdir "$lock_dir" 2>/dev/null; then
     :
   elif [ -d "$lock_dir" ]; then
     _gos_report_existing_lock "$lock_dir"
@@ -1193,7 +1220,7 @@ _gos_validate_staged_install() {
 _gos_restore_backup() {
   local backup_dir="$1"
 
-  echo "Rolling back Go installation..."
+  _gos_progress "Rolling back Go installation..."
   _gos_sudo rm -rf "$GOS_INSTALL_DIR" || return 1
 
   # -L so a side-by-side symlink backup is restored too; -d alone would silently
@@ -1284,9 +1311,15 @@ _gos_activate_install() {
     if [ ! -L "$GOS_INSTALL_DIR" ]; then
       _gos_progress "Backing up existing Go installation..."
     fi
-    # Moving a symlink moves the link itself, so the previous target survives.
-    _gos_sudo mv "$GOS_INSTALL_DIR" "$backup_dir" || return 1
+    # Arm before the rename. Bash defers a trapped TERM while waiting for a
+    # foreground command, so arming afterwards leaves a signal window where
+    # the rename completed but the EXIT trap still does not know the backup.
     GOS_ACTIVATION_BACKUP="$backup_dir"
+    # Moving a symlink moves the link itself, so the previous target survives.
+    if ! _gos_sudo mv "$GOS_INSTALL_DIR" "$backup_dir"; then
+      GOS_ACTIVATION_BACKUP=""
+      return 1
+    fi
   fi
 
   if [ "$activate_kind" = "link" ]; then
@@ -1375,11 +1408,14 @@ _gos_activate_rollback() {
   # -L also moves a (possibly dangling) side-by-side symlink out of the way;
   # otherwise the restore mv below fails because the slot is still occupied.
   if [ -e "$GOS_INSTALL_DIR" ] || [ -L "$GOS_INSTALL_DIR" ]; then
-    _gos_sudo mv "$GOS_INSTALL_DIR" "$current_backup" || return 1
-    # Arm the EXIT trap exactly as install does: between this mv and the
-    # one below the machine has no Go, and an interrupt there must put the
-    # displaced install back.
+    # Arm before the rename for the same deferred-signal reason as install:
+    # TERM may be handled immediately after mv succeeds but before the next
+    # shell assignment executes.
     GOS_ACTIVATION_BACKUP="$current_backup"
+    if ! _gos_sudo mv "$GOS_INSTALL_DIR" "$current_backup"; then
+      GOS_ACTIVATION_BACKUP=""
+      return 1
+    fi
   fi
 
   if ! _gos_sudo mv "$rollback_dir" "$GOS_INSTALL_DIR"; then
@@ -1527,7 +1563,7 @@ _gos_install_version() {
 
   # archive_file is what gets extracted: the cache file on a hit (no copy), a
   # persistent .partial that can resume across runs, or the ephemeral temp file.
-  local archive_file cache_file partial="" partial_cleanup=""
+  local archive_file cache_file partial=""
   cache_file=$(_gos_cache_path "$pkg")
   if _gos_try_cache "$pkg" "$expected_sha"; then
     cache_hit="true"
@@ -1597,7 +1633,7 @@ _gos_install_version() {
           # from the partial and discard it afterwards, so the next install
           # starts clean instead of "resuming" a complete file forever.
           _gos_warning "could not write Go archive cache at ${cache_file}; this download will not be reused."
-          partial_cleanup="$partial"
+          GOS_COMPLETED_PARTIAL="$partial"
         fi
       else
         _gos_store_cache "$pkg" "$tmp_file" "$expected_sha"
@@ -1614,14 +1650,14 @@ _gos_install_version() {
   fi
 
   _gos_progress "Extracting..."
-  mkdir -p "$stage_dir"
-  if ! _gos_extract_archive "$ext" "$archive_file" "$stage_dir"; then
+  if ! mkdir -p "$stage_dir" || ! _gos_extract_archive "$ext" "$archive_file" "$stage_dir"; then
+    _gos_discard_completed_partial
     _gos_error "extraction failed."
     return 1
   fi
+  _gos_discard_completed_partial
 
   _gos_validate_staged_install "$staged_go_dir" || return 1
-  [ -z "$partial_cleanup" ] || rm -f "$partial_cleanup"
 
   _gos_prepare_install_parent || return 1
 
@@ -3236,19 +3272,51 @@ _gos_env_auto_posix() {
   cat <<'GOS_ENV_AUTO_POSIX'
 __gos_auto_switch() {
   [ -n "${GOS_VERSIONS_DIR:-}" ] || return 0
+  if [ -n "${ZSH_VERSION:-}" ]; then
+    setopt local_options nonomatch
+  fi
 
-  # PROMPT_COMMAND runs this on every prompt, and each evaluation spawns a
-  # gos process. Only the directory can change the answer, so skip the work
-  # while PWD is unchanged. A missing version keeps being re-checked so the
-  # switch happens right after `gos use` installs it, without a cd.
-  if [ "$PWD" = "${GOS_AUTO_PWD:-}" ] && [ "${GOS_AUTO_STATE:-}" != "missing" ]; then
+  # PROMPT_COMMAND runs this on every prompt. Build a cheap, pure-shell
+  # snapshot of the nearest manifest so an unchanged prompt avoids spawning
+  # gos, while `gos pin`, an editor save, or a Git branch switch in the same
+  # directory still invalidates the cached PATH decision.
+  local gos_version gos_bin gos_key gos_manifest="" gos_manifest_line
+  local gos_dir="$PWD" gos_candidate gos_installed="$GOS_VERSIONS_DIR"
+  while :; do
+    for gos_candidate in "${gos_dir%/}/.go-version" "${gos_dir%/}/.tool-versions" "${gos_dir%/}/go.mod"; do
+      if [ -f "$gos_candidate" ]; then
+        gos_manifest="${gos_candidate}"$'\n'
+        while IFS= read -r gos_manifest_line || [ -n "$gos_manifest_line" ]; do
+          gos_manifest="${gos_manifest}${gos_manifest_line}"$'\n'
+        done <"$gos_candidate" 2>/dev/null || gos_manifest="unreadable:${gos_candidate}"
+        break 2
+      fi
+    done
+    [ "$gos_dir" = "/" ] && break
+    gos_dir="${gos_dir%/*}"
+    [ -n "$gos_dir" ] || gos_dir="/"
+  done
+
+  # Bare minors also depend on the installed set, not just manifest bytes.
+  # Globbing and executable checks keep this invalidation subprocess-free.
+  for gos_candidate in "${GOS_VERSIONS_DIR%/}"/go*/bin/go; do
+    if [ -x "$gos_candidate" ]; then
+      gos_installed="${gos_installed}"$'\n'"${gos_candidate}"
+    fi
+  done
+
+  if [ "$PWD" = "${GOS_AUTO_PWD:-}" ] \
+    && [ "$gos_manifest" = "${GOS_AUTO_MANIFEST:-}" ] \
+    && [ "$gos_installed" = "${GOS_AUTO_INSTALLED:-}" ] \
+    && [ "${GOS_AUTO_STATE:-}" != "missing" ]; then
     return 0
   fi
   GOS_AUTO_PWD="$PWD"
+  GOS_AUTO_MANIFEST="$gos_manifest"
+  GOS_AUTO_INSTALLED="$gos_installed"
   GOS_AUTO_STATE="none"
   export GOS_AUTO_PWD GOS_AUTO_STATE
 
-  local gos_version gos_bin gos_key
   gos_version=$(gos __project-version 2>/dev/null || true)
   if [ -n "$gos_version" ]; then
     gos_bin="${GOS_VERSIONS_DIR%/}/go${gos_version}/bin"
@@ -3292,6 +3360,7 @@ if [ -n "${ZSH_VERSION:-}" ]; then
   autoload -Uz add-zsh-hook 2>/dev/null || true
   if command -v add-zsh-hook >/dev/null 2>&1; then
     add-zsh-hook chpwd __gos_auto_switch 2>/dev/null || true
+    add-zsh-hook precmd __gos_auto_switch 2>/dev/null || true
   fi
 fi
 
@@ -3437,6 +3506,11 @@ cmd_self_update() {
     _gos_error "this gos runs from a git checkout. Update it with: git -C '${script_dir}' pull"
     return 1
   fi
+
+  # Serialize replacement by the resolved script path, not GOS_INSTALL_DIR.
+  # Two shells can manage different Go roots while updating the same gos file;
+  # an install-root lock would let their final renames race.
+  _gos_acquire_lock "${script_path}.gos-lock" || return 1
 
   echo "Checking for the latest gos release..."
   tmp_dir=$(mktemp -d) || {
@@ -3722,7 +3796,7 @@ _gos_doctor_path_setup_line() {
 }
 
 _gos_doctor_apply_fixes() {
-  local install_parent path_setup
+  local cache_dir_valid="$1" install_parent path_setup
   install_parent=$(_gos_dirname "$GOS_INSTALL_DIR")
 
   if ! _gos_validate_install_dir "$GOS_INSTALL_DIR" >/dev/null 2>&1; then
@@ -3735,7 +3809,7 @@ _gos_doctor_apply_fixes() {
     fi
   fi
 
-  if [ ! -d "$GOS_CACHE_DIR" ]; then
+  if [ "$cache_dir_valid" = "true" ] && [ ! -d "$GOS_CACHE_DIR" ]; then
     if mkdir -p "$GOS_CACHE_DIR" 2>/dev/null; then
       _gos_doctor_record_fix "created cache dir: ${GOS_CACHE_DIR}"
     else
@@ -3748,7 +3822,7 @@ _gos_doctor_apply_fixes() {
 }
 
 cmd_doctor() {
-  local os arch raw_os raw_arch install_error mirror_error versions_error feed_ttl_error go_path go_version go_bin arg doctor_fix="false"
+  local os arch raw_os raw_arch install_error mirror_error versions_error feed_ttl_error cache_dir_error go_path go_version go_bin arg doctor_fix="false" cache_dir_valid="true"
   GOS_DOCTOR_PROBLEMS=0
   GOS_DOCTOR_WARNINGS=0
   GOS_DOCTOR_JSON_ITEMS=""
@@ -3767,8 +3841,14 @@ cmd_doctor() {
     esac
   done
 
+  # Validate every path before --fix performs filesystem writes. In particular,
+  # an invalid relative cache path must be reported, not created under PWD.
+  if ! cache_dir_error=$(_gos_validate_cache_dir 2>&1); then
+    cache_dir_valid="false"
+  fi
+
   if [ "$doctor_fix" = "true" ]; then
-    _gos_doctor_apply_fixes
+    _gos_doctor_apply_fixes "$cache_dir_valid"
   fi
 
   os=$(_gos_os)
@@ -3854,8 +3934,7 @@ cmd_doctor() {
     _gos_doctor_check "problem" "feed-ttl" "$feed_ttl_error" "Set GOS_FEED_TTL to a non-negative integer number of seconds."
   fi
 
-  local cache_dir_error
-  if cache_dir_error=$(_gos_validate_cache_dir 2>&1); then
+  if [ "$cache_dir_valid" = "true" ]; then
     _gos_doctor_check "ok" "cache-dir" "archives and feed metadata cache under ${GOS_CACHE_DIR}"
   else
     _gos_doctor_check "problem" "cache-dir" "$cache_dir_error" "Set GOS_CACHE_DIR to a safe absolute path or unset it."
@@ -4547,7 +4626,7 @@ _gos_suggest_command() {
 # for the others it used to be swallowed silently (disabling color and
 # progress, then printing human text), and it bypassed run/each's own
 # rejection of the flag.
-GOS_JSON_COMMANDS=" check current list platforms status which env doctor prune version use __commands "
+GOS_JSON_COMMANDS=" check current list platforms status which env doctor prune version __commands "
 
 main() {
   local leading_json="false"
@@ -4561,13 +4640,24 @@ main() {
   shift || true
 
   if [ "$leading_json" = "true" ]; then
-    case "$GOS_JSON_COMMANDS" in
-      *" ${cmd} "*) ;;
-      *)
-        _gos_error "gos ${cmd} does not support --json."
+    if [ "$cmd" = "use" ]; then
+      local use_print="false" arg
+      for arg in "$@"; do
+        [ "$arg" = "--print" ] && use_print="true"
+      done
+      if [ "$use_print" != "true" ]; then
+        _gos_error "gos use supports --json only together with --print."
         return 1
-        ;;
-    esac
+      fi
+    else
+      case "$GOS_JSON_COMMANDS" in
+        *" ${cmd} "*) ;;
+        *)
+          _gos_error "gos ${cmd} does not support --json."
+          return 1
+          ;;
+      esac
+    fi
   fi
 
   case "$cmd" in
@@ -4638,10 +4728,8 @@ main() {
       cmd_check "$@"
       ;;
     self-update | selfupdate)
-      # Replacing the running script races with a concurrent self-update;
-      # the mutation lock serializes them like every other mutating command.
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_acquire_lock || return 1
+      # cmd_self_update resolves the running file and locks that exact path;
+      # GOS_INSTALL_DIR is unrelated to the script being replaced.
       cmd_self_update "$@"
       ;;
     uninstall)

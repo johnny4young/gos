@@ -12,7 +12,7 @@ if not defined GOS_BASH if exist "%LocalAppData%\Programs\Git\bin\bash.exe" set 
 if not defined GOS_BASH (
   for /f "delims=" %%B in ('where bash.exe 2^>NUL') do (
     if not defined GOS_BASH (
-      echo %%~B | findstr /I /C:"\System32\" >NUL || set "GOS_BASH=%%~B"
+      echo "%%~B" | findstr /I /L /C:"\System32\bash.exe" >NUL || set "GOS_BASH=%%~B"
     )
   )
 )

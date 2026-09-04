@@ -80,11 +80,19 @@ function Invoke-Download {
 # first and skips System32. Mirror that here so the post-install warning is
 # accurate on exactly those machines.
 function Find-GitBash {
-  $candidates = @(
-    (Join-Path $env:ProgramFiles 'Git\bin\bash.exe'),
-    (Join-Path ${env:ProgramFiles(x86)} 'Git\bin\bash.exe'),
-    (Join-Path $env:LocalAppData 'Programs\Git\bin\bash.exe')
-  )
+  # Join-Path throws on a null root under ErrorActionPreference=Stop. Some
+  # valid systems omit one of these variables (notably ProgramFiles(x86) on
+  # 32-bit Windows), so only construct candidates for roots that exist.
+  $candidates = @()
+  if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+    $candidates += (Join-Path $env:ProgramFiles 'Git\bin\bash.exe')
+  }
+  if (-not [string]::IsNullOrWhiteSpace(${env:ProgramFiles(x86)})) {
+    $candidates += (Join-Path ${env:ProgramFiles(x86)} 'Git\bin\bash.exe')
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:LocalAppData)) {
+    $candidates += (Join-Path $env:LocalAppData 'Programs\Git\bin\bash.exe')
+  }
   foreach ($candidate in $candidates) {
     if ($candidate -and (Test-Path -LiteralPath $candidate)) {
       return $candidate
