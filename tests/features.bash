@@ -2300,6 +2300,13 @@ fi
 run_gos "$case_dir" bash "$script" platforms 1.21.6 extra
 [ "$status" -ne 0 ] || fail "platforms with trailing argument should fail"
 assert_contains "$output" "unexpected argument for gos platforms" "platforms trailing argument"
+run_gos "$case_dir" bash "$script" platforms --bogus
+[ "$status" -ne 0 ] || fail "platforms with an unknown option should fail"
+assert_contains "$output" "unknown option for gos platforms: --bogus" "platforms unknown option"
+assert_contains "$output" "Usage: gos platforms [version] [--json]" "platforms usage from the manifest"
+run_gos "$case_dir" bash "$script" which --bogus
+[ "$status" -ne 0 ] || fail "which with an unknown option should fail"
+assert_contains "$output" "unknown option for gos which: --bogus" "which unknown option"
 if [ -s "${case_dir}/urls.log" ]; then
   fail "platforms with a trailing argument must not reach the network"
 fi

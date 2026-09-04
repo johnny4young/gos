@@ -2141,7 +2141,7 @@ _gos_go_version_is_newer() {
 cmd_latest() {
   if [ "$#" -gt 0 ]; then
     _gos_error "unexpected argument for gos latest: ${1}"
-    echo "Usage: gos latest" >&2
+    _gos_usage latest
     return 1
   fi
 
@@ -2260,12 +2260,12 @@ cmd_check() {
 cmd_install() {
   local version="${1:-}"
   if [ -z "$version" ]; then
-    echo "Usage: gos install <version>  e.g. gos install 1.26.1" >&2
+    _gos_usage install "e.g. gos install 1.26.1"
     return 1
   fi
   if [ "$#" -gt 1 ]; then
     _gos_error "unexpected argument for gos install: ${2}"
-    echo "Usage: gos install <version>  e.g. gos install 1.26.1" >&2
+    _gos_usage install "e.g. gos install 1.26.1"
     return 1
   fi
 
@@ -2365,7 +2365,7 @@ cmd_run() {
   local version="${1:-}" project_resolved project_source
 
   if [ -z "$version" ]; then
-    echo "Usage: gos run [version] [--] <command> [args...]" >&2
+    _gos_usage run
     return 1
   fi
   shift
@@ -2379,7 +2379,7 @@ cmd_run() {
   if [ "$version" = "--" ]; then
     if ! project_resolved=$(_gos_resolve_project_version "$PWD"); then
       _gos_error "no version given and no .go-version or go.mod found from ${PWD} upward."
-      echo "Usage: gos run [version] [--] <command> [args...]" >&2
+      _gos_usage run
       return 1
     fi
     version="${project_resolved%%|*}"
@@ -2390,7 +2390,7 @@ cmd_run() {
     shift
   fi
   if [ "$#" -eq 0 ]; then
-    echo "Usage: gos run [version] [--] <command> [args...]" >&2
+    _gos_usage run
     return 1
   fi
 
@@ -2423,7 +2423,7 @@ cmd_each() {
           ;;
         --)
           _gos_error "gos each needs a comma-separated version list before --."
-          echo "Usage: gos each <v1,v2,...> [--] <command> [args...]" >&2
+          _gos_usage each
           return 1
           ;;
         *)
@@ -2440,11 +2440,11 @@ cmd_each() {
   done
 
   if [ -z "$versions_arg" ]; then
-    echo "Usage: gos each <v1,v2,...> [--] <command> [args...]" >&2
+    _gos_usage each
     return 1
   fi
   if [ "${#command[@]}" -eq 0 ]; then
-    echo "Usage: gos each <v1,v2,...> [--] <command> [args...]" >&2
+    _gos_usage each
     return 1
   fi
 
@@ -2682,7 +2682,7 @@ cmd_list() {
       --minor) minor_only="true" ;;
       *)
         _gos_error "unknown option for gos list: ${arg}"
-        echo "Usage: gos list [--installed] [--minor] [--json]" >&2
+        _gos_usage list
         return 1
         ;;
     esac
@@ -2751,15 +2751,22 @@ EOF
 cmd_platforms() {
   local version="" arg platforms
   for arg in "$@"; do
-    if [ "$arg" = "--json" ]; then
-      GOS_OUTPUT_JSON=1
-    elif [ -z "$version" ]; then
-      version="${arg#go}"
-    else
-      _gos_error "unexpected argument for gos platforms: ${arg}"
-      echo "Usage: gos platforms [version] [--json]" >&2
-      return 1
-    fi
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      -*)
+        _gos_error "unknown option for gos platforms: ${arg}"
+        _gos_usage platforms
+        return 1
+        ;;
+      *)
+        if [ -n "$version" ]; then
+          _gos_error "unexpected argument for gos platforms: ${arg}"
+          _gos_usage platforms
+          return 1
+        fi
+        version="${arg#go}"
+        ;;
+    esac
   done
 
   _gos_validate_feed_ttl || return 1
@@ -2799,12 +2806,17 @@ cmd_which() {
   for arg in "$@"; do
     case "$arg" in
       --json) GOS_OUTPUT_JSON=1 ;;
+      -*)
+        _gos_error "unknown option for gos which: ${arg}"
+        _gos_usage which
+        return 1
+        ;;
       *)
         if [ -z "$version" ]; then
           version="${arg#go}"
         else
           _gos_error "unexpected argument for gos which: ${arg}"
-          echo "Usage: gos which [version] [--json]" >&2
+          _gos_usage which
           return 1
         fi
         ;;
@@ -3038,13 +3050,13 @@ cmd_use() {
       --json) GOS_OUTPUT_JSON=1 ;;
       -*)
         _gos_error "unknown option for gos use: ${arg}"
-        echo "Usage: gos use [--print] [path]" >&2
+        _gos_usage use
         return 1
         ;;
       *)
         if [ -n "$start_dir" ]; then
           _gos_error "unexpected argument for gos use: ${arg}"
-          echo "Usage: gos use [--print] [path]" >&2
+          _gos_usage use
           return 1
         fi
         start_dir="$arg"
@@ -3057,6 +3069,11 @@ cmd_use() {
   if _gos_json_enabled && [ "$print_only" != "true" ]; then
     _gos_error "gos use supports --json only together with --print."
     return 1
+  fi
+  # --print only resolves; a read-only query must not take (or be blocked
+  # by) the mutation lock, so the lock is taken here, after parsing.
+  if [ "$print_only" != "true" ]; then
+    _gos_acquire_lock || return 1
   fi
 
   if ! resolved=$(_gos_resolve_project_version "$start_dir"); then
@@ -3093,7 +3110,7 @@ cmd_pin() {
   local version="${1:-}"
   if [ "$#" -gt 1 ]; then
     _gos_error "unexpected argument for gos pin: ${2}"
-    echo "Usage: gos pin [version]  e.g. gos pin 1.24.0" >&2
+    _gos_usage pin "e.g. gos pin 1.24.0"
     return 1
   fi
 
@@ -3103,7 +3120,7 @@ cmd_pin() {
     version=$(_gos_current)
     if [ "$version" = "none" ]; then
       _gos_error "no version given and no active Go found to pin."
-      echo "Usage: gos pin [version]  e.g. gos pin 1.24.0" >&2
+      _gos_usage pin "e.g. gos pin 1.24.0"
       return 1
     fi
     echo "Pinning the active Go ${version}."
@@ -3123,13 +3140,14 @@ cmd_rollback() {
       --dry-run) dry_run="true" ;;
       *)
         _gos_error "unexpected argument for gos rollback: ${arg}"
-        echo "Usage: gos rollback [--dry-run]" >&2
+        _gos_usage rollback
         return 1
         ;;
     esac
   done
 
   if [ "$dry_run" != "true" ]; then
+    _gos_acquire_lock || return 1
     _gos_activate_rollback
     return
   fi
@@ -3208,13 +3226,13 @@ cmd_uninstall() {
       --dry-run) dry_run="true" ;;
       -*)
         _gos_error "unknown option for gos uninstall: ${arg}"
-        echo "Usage: gos uninstall <version or --inactive> [--dry-run]" >&2
+        _gos_usage uninstall
         return 1
         ;;
       *)
         if [ -n "$version" ]; then
           _gos_error "unexpected argument for gos uninstall: ${arg}"
-          echo "Usage: gos uninstall <version or --inactive> [--dry-run]" >&2
+          _gos_usage uninstall
           return 1
         fi
         version="$arg"
@@ -3227,12 +3245,16 @@ cmd_uninstall() {
     return 1
   fi
   if [ -z "$version" ] && [ "$inactive" != "true" ]; then
-    echo "Usage: gos uninstall <version or --inactive> [--dry-run]  e.g. gos uninstall 1.24.0" >&2
+    _gos_usage uninstall "e.g. gos uninstall 1.24.0"
     return 1
   fi
 
   _gos_require_versions_mode "gos uninstall" "In the classic layout there is only one install; replace it with gos install/latest." || return 1
   _gos_validate_versions_dir || return 1
+  # A dry run mutates nothing and must not take (or be blocked by) the lock.
+  if [ "$dry_run" != "true" ]; then
+    _gos_acquire_lock || return 1
+  fi
 
   if [ "$inactive" = "true" ]; then
     _gos_uninstall_inactive "$dry_run"
@@ -3455,7 +3477,7 @@ cmd_env() {
       --auto) auto="true" ;;
       *)
         _gos_error "unknown option for gos env: ${arg}"
-        echo "Usage: gos env [--fish] [--auto] [--json]" >&2
+        _gos_usage env
         return 1
         ;;
     esac
@@ -3526,7 +3548,7 @@ cmd_self_update() {
 
   if [ "$#" -gt 0 ]; then
     _gos_error "unexpected argument for gos self-update: ${1}"
-    echo "Usage: gos self-update" >&2
+    _gos_usage self-update
     return 1
   fi
 
@@ -3676,7 +3698,7 @@ cmd_prune() {
       --json) GOS_OUTPUT_JSON=1 ;;
       *)
         _gos_error "unknown option for gos prune: ${arg}"
-        echo "Usage: gos prune [--rollback] [--dry-run] [--json]" >&2
+        _gos_usage prune
         return 1
         ;;
     esac
@@ -4372,13 +4394,13 @@ cmd_completions() {
       --install) do_install="true" ;;
       -*)
         _gos_error "unknown option for gos completions: ${arg}"
-        echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
+        _gos_usage completions
         return 1
         ;;
       *)
         if [ -n "$shell_name" ]; then
           _gos_error "unexpected argument for gos completions: ${arg}"
-          echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
+          _gos_usage completions
           return 1
         fi
         shell_name="$arg"
@@ -4387,7 +4409,7 @@ cmd_completions() {
   done
 
   if [ -z "$shell_name" ]; then
-    echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
+    _gos_usage completions
     return 1
   fi
 
@@ -4398,7 +4420,7 @@ cmd_completions() {
     fish) emitter=_gos_completion_fish ;;
     *)
       _gos_error "unsupported shell for gos completions: ${shell_name}"
-      echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
+      _gos_usage completions
       return 1
       ;;
   esac
@@ -4456,6 +4478,28 @@ help|help [command]|Show this help message, or usage for one command
 GOS_COMMANDS
 }
 
+# Print "Usage: gos <usage>" for a manifest command on stderr, so the usage
+# line in an argument error can never drift from gos help <command>, the
+# README table, and the man page. Commands with a JSON contract get [--json]
+# appended; an optional example is printed after two spaces.
+_gos_usage() {
+  local cmd="$1" example="${2:-}" usage
+  usage=$(_gos_command_manifest | while IFS='|' read -r entry_name entry_usage _entry_description; do
+    if [ "$entry_name" = "$cmd" ]; then
+      printf '%s' "$entry_usage"
+    fi
+  done)
+  [ -n "$usage" ] || usage="$cmd"
+  case "$GOS_JSON_COMMANDS" in
+    *" ${cmd} "*) usage="${usage} [--json]" ;;
+  esac
+  if [ -n "$example" ]; then
+    printf 'Usage: gos %s  %s\n' "$usage" "$example" >&2
+  else
+    printf 'Usage: gos %s\n' "$usage" >&2
+  fi
+}
+
 _gos_command_help() {
   local _command_name command_usage command_description
   _gos_command_manifest | while IFS='|' read -r _command_name command_usage command_description; do
@@ -4464,11 +4508,11 @@ _gos_command_help() {
 }
 
 cmd_help() {
-  local topic="${1:-}" entry entry_usage entry_description suggestion suggestions
+  local topic="${1:-}" entry entry_usage entry_description
 
   if [ "$#" -gt 1 ]; then
     _gos_error "unexpected argument for gos help: ${2}"
-    echo "Usage: gos help [command]" >&2
+    _gos_usage help
     return 1
   fi
 
@@ -4481,16 +4525,7 @@ cmd_help() {
       fi
     done)
     if [ -z "$entry" ]; then
-      _gos_error "unknown command: ${topic}"
-      suggestions=$(_gos_suggest_command "$topic")
-      if [ -n "$suggestions" ]; then
-        echo "Did you mean?" >&2
-        while IFS= read -r suggestion; do
-          echo "  ${suggestion}" >&2
-        done <<EOF
-$suggestions
-EOF
-      fi
+      _gos_report_unknown_command "$topic"
       return 1
     fi
     entry_usage="${entry%%|*}"
@@ -4589,6 +4624,22 @@ cmd___commands() {
   fi
 }
 
+# "unknown command" plus the did-you-mean list, shared by the dispatcher and
+# gos help <topic>.
+_gos_report_unknown_command() {
+  local input="$1" suggestion suggestions
+  _gos_error "unknown command: ${input}"
+  suggestions=$(_gos_suggest_command "$input")
+  if [ -n "$suggestions" ]; then
+    echo "Did you mean?" >&2
+    while IFS= read -r suggestion; do
+      echo "  ${suggestion}" >&2
+    done <<EOF
+$suggestions
+EOF
+  fi
+}
+
 _gos_suggest_command() {
   local input="$1"
 
@@ -4666,6 +4717,27 @@ _gos_suggest_command() {
 # rejection of the flag.
 GOS_JSON_COMMANDS=" check current list platforms status which env doctor prune version __commands "
 
+# Preconditions a command needs before it runs, named so every dispatcher
+# line reads as a list. The mutation lock is not among them for commands
+# whose flags decide whether they mutate (use --print, rollback/uninstall
+# --dry-run): those take it themselves once their arguments are parsed.
+_gos_preflight() {
+  local check
+  for check in "$@"; do
+    case "$check" in
+      checksum-policy) _gos_validate_checksum_policy || return 1 ;;
+      install-dir) _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1 ;;
+      cache-dir) _gos_validate_cache_dir || return 1 ;;
+      versions-dir) _gos_validate_versions_dir || return 1 ;;
+      lock) _gos_acquire_lock || return 1 ;;
+      *)
+        _gos_error "internal: unknown preflight check '${check}'."
+        return 1
+        ;;
+    esac
+  done
+}
+
 main() {
   local leading_json="false"
   if [ "${1:-}" = "--json" ]; then
@@ -4700,69 +4772,39 @@ main() {
 
   case "$cmd" in
     latest)
-      _gos_validate_checksum_policy || return 1
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
-      _gos_validate_versions_dir || return 1
-      _gos_acquire_lock || return 1
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir lock || return 1
       cmd_latest "$@"
       ;;
     install)
-      _gos_validate_checksum_policy || return 1
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
-      _gos_validate_versions_dir || return 1
-      _gos_acquire_lock || return 1
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir lock || return 1
       cmd_install "$@"
       ;;
     run)
       GOS_PROGRESS_FD=2
-      _gos_validate_checksum_policy || return 1
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
-      _gos_validate_versions_dir || return 1
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir || return 1
       cmd_run "$@"
       ;;
     each)
       GOS_PROGRESS_FD=2
-      _gos_validate_checksum_policy || return 1
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
-      _gos_validate_versions_dir || return 1
       # Each version installs under its own lock; no command-level lock here.
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir || return 1
       cmd_each "$@"
       ;;
     use)
-      _gos_validate_checksum_policy || return 1
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
-      _gos_validate_versions_dir || return 1
-      # --print only resolves; a read-only query must not take (or be
-      # blocked by) the mutation lock.
-      case " $* " in
-        *" --print "*) ;;
-        *) _gos_acquire_lock || return 1 ;;
-      esac
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir || return 1
       cmd_use "$@"
       ;;
     pin) cmd_pin "$@" ;;
     rollback)
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      # A dry run mutates nothing and must not take (or be blocked by) the
-      # mutation lock.
-      case " $* " in
-        *" --dry-run "*) ;;
-        *) _gos_acquire_lock || return 1 ;;
-      esac
+      _gos_preflight install-dir || return 1
       cmd_rollback "$@"
       ;;
     prune)
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
+      _gos_preflight install-dir cache-dir || return 1
       cmd_prune "$@"
       ;;
     check)
-      _gos_validate_cache_dir || return 1
+      _gos_preflight cache-dir || return 1
       cmd_check "$@"
       ;;
     self-update | selfupdate)
@@ -4771,18 +4813,11 @@ main() {
       cmd_self_update "$@"
       ;;
     uninstall)
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_versions_dir || return 1
-      # A dry run mutates nothing and must not take (or be blocked by) the
-      # mutation lock.
-      case " $* " in
-        *" --dry-run "*) ;;
-        *) _gos_acquire_lock || return 1 ;;
-      esac
+      _gos_preflight install-dir versions-dir || return 1
       cmd_uninstall "$@"
       ;;
     env)
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_preflight install-dir || return 1
       cmd_env "$@"
       ;;
     __commands) cmd___commands "$@" ;;
@@ -4790,11 +4825,11 @@ main() {
     completions) cmd_completions "$@" ;;
     current) cmd_current "$@" ;;
     list)
-      _gos_validate_cache_dir || return 1
+      _gos_preflight cache-dir || return 1
       cmd_list "$@"
       ;;
     platforms)
-      _gos_validate_cache_dir || return 1
+      _gos_preflight cache-dir || return 1
       cmd_platforms "$@"
       ;;
     status) cmd_status "$@" ;;
@@ -4804,17 +4839,7 @@ main() {
     version | --version | -V) cmd_version "$@" ;;
     help | --help | -h) cmd_help "$@" ;;
     *)
-      local suggestion suggestions
-      _gos_error "unknown command: $cmd"
-      suggestions=$(_gos_suggest_command "$cmd")
-      if [ -n "$suggestions" ]; then
-        echo "Did you mean?" >&2
-        while IFS= read -r suggestion; do
-          echo "  ${suggestion}" >&2
-        done <<EOF
-$suggestions
-EOF
-      fi
+      _gos_report_unknown_command "$cmd"
       cmd_help
       return 1
       ;;
