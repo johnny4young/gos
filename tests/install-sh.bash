@@ -32,7 +32,7 @@ while [ "$#" -gt 0 ]; do
       output="$2"
       shift 2
       ;;
-    --proto|--proto-redir|--connect-timeout|--retry)
+    --proto|--proto-redir|--connect-timeout|--max-time|--retry)
       shift 2
       ;;
     --tlsv1.2|-fsSL)
@@ -51,8 +51,24 @@ if [ -z "$output" ]; then
 fi
 
 printf '%s\n' "$url" >>"$GOS_TEST_URL_LOG"
+case "${GOS_TEST_DOWNLOAD_MODE:-ok}" in
+  fail)
+    echo "curl: (6) Could not resolve host: github.com" >&2
+    exit 6
+    ;;
+  html)
+    # A captive portal or proxy answering 200 with a page instead of the script.
+    printf '<!DOCTYPE html>\n<html><body>Sign in to the network</body></html>\n' >"$output"
+    exit 0
+    ;;
+  empty)
+    : >"$output"
+    exit 0
+    ;;
+esac
 cat >"$output" <<'FAKE_GOS'
 #!/usr/bin/env bash
+GOS_VERSION="0.0.0-test"
 echo "fake gos"
 FAKE_GOS
 FAKE_CURL
@@ -202,6 +218,10 @@ run_installer() {
     dot-component)
       bin_dir="${case_dir}/nested/../bin"
       ;;
+    trailing-slash)
+      bin_dir="${case_dir}/bin/"
+      mkdir -p "${case_dir}/bin"
+      ;;
     *)
       fail "unknown install kind: ${install_kind}"
       ;;
@@ -210,7 +230,7 @@ run_installer() {
   set +e
   output="$(
     cd "$case_dir"
-    PATH="${fake_bin}:${original_path}" \
+    PATH="${GOS_TEST_EXTRA_PATH:+${GOS_TEST_EXTRA_PATH}:}${fake_bin}:${original_path}" \
       GOS_BIN_DIR="$bin_dir" \
       GOS_TEST_URL_LOG="$url_log" \
       GOS_TEST_CURL_ARGS_LOG="$curl_args_log" \
@@ -220,6 +240,7 @@ run_installer() {
       GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
       GOS_TEST_MKDIR_MODE="$mkdir_mode" \
       GOS_TEST_CHMOD_FAIL="${GOS_TEST_CHMOD_FAIL:-0}" \
+      GOS_TEST_DOWNLOAD_MODE="${GOS_TEST_DOWNLOAD_MODE:-ok}" \
       GOS_REQUIRE_CHECKSUM="$require_checksum" \
       bash "${script_under_test:-$script}" "$@" 2>&1
   )"
@@ -256,6 +277,32 @@ assert_contains "$output" "must not contain . or .. path components" "dot-compon
 assert_not_installed "$bin_dir" "dot-component GOS_BIN_DIR"
 [ ! -s "$url_log" ] || fail "dot-component GOS_BIN_DIR should fail before downloading"
 pass "installer rejects ambiguous GOS_BIN_DIR components before download"
+
+GOS_TEST_DOWNLOAD_MODE=fail run_installer "download_failure" "existing"
+assert_nonzero_status "$status" "download failure" "$output"
+assert_contains "$output" "Error: could not download gos from" "download failure message"
+assert_contains "$output" "try again in a moment" "download failure hint"
+assert_not_installed "$bin_dir" "download failure"
+pass "installer reports a failed download with a next step"
+
+GOS_TEST_DOWNLOAD_MODE=html run_installer "download_html" "existing"
+assert_nonzero_status "$status" "html download" "$output"
+assert_contains "$output" "is not a gos script" "html download rejected"
+assert_not_installed "$bin_dir" "html download"
+pass "installer refuses a captive-portal page in place of the script"
+
+GOS_TEST_DOWNLOAD_MODE=empty run_installer "download_empty" "existing"
+assert_nonzero_status "$status" "empty download" "$output"
+assert_contains "$output" "downloaded gos script is empty" "empty download rejected"
+assert_not_installed "$bin_dir" "empty download"
+pass "installer refuses an empty download"
+
+GOS_TEST_EXTRA_PATH="${test_root}/trailing_slash/bin" run_installer "trailing_slash" "trailing-slash"
+assert_status 0 "$status" "trailing slash" "$output"
+assert_installed "${case_dir}/bin" "trailing slash"
+assert_contains "$output" "gos installed to ${case_dir}/bin/gos" "trailing slash normalized in output"
+assert_not_contains "$output" "Add gos to your PATH" "trailing slash must not defeat the PATH check"
+pass "a trailing slash in GOS_BIN_DIR is normalized"
 
 run_installer "missing_custom_bin" "missing"
 assert_status 0 "$status" "missing custom bin" "$output"
@@ -331,7 +378,14 @@ assert_contains "$download_args" "--proto =https" "installer HTTPS protocol"
 assert_contains "$download_args" "--proto-redir =https" "installer redirect protocol"
 assert_contains "$download_args" "--tlsv1.2" "installer TLS floor"
 assert_contains "$download_args" "--connect-timeout 15" "installer connect timeout"
+assert_contains "$download_args" "--max-time 60" "installer total transfer timeout"
 assert_contains "$download_args" "--retry 2" "installer retry policy"
+# install.sh cannot share code with gos.sh (it runs before gos.sh exists), so
+# keep the hardening flags identical by assertion instead.
+shared_curl_flags="--proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15"
+grep -Fq -- "$shared_curl_flags" "$script" || fail "install.sh must keep the shared curl hardening flags: ${shared_curl_flags}"
+grep -Fq -- "$shared_curl_flags" "${repo_root}/gos.sh" || fail "gos.sh must keep the shared curl hardening flags: ${shared_curl_flags}"
+grep -Fq -- "--secure-protocol=TLSv1_2" "$script" || fail "install.sh wget path must enforce the TLS 1.2 floor"
 pass "release-pinned installer downloads the release asset and verifies its checksum"
 
 pinned_bad_script="${test_root}/install-pinned-bad.sh"
