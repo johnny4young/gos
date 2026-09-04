@@ -155,12 +155,18 @@ _gos_json_string() {
   printf '"%s"' "$(_gos_json_escape "$1")"
 }
 
-_gos_color_enabled() {
+# Color is interactive-only: never under --json, NO_COLOR, GOS_NO_COLOR=1,
+# TERM=dumb, or when the given file descriptor is not a terminal.
+_gos_fd_color_enabled() {
   [ "${GOS_OUTPUT_JSON:-0}" != "1" ] || return 1
-  [ -t 1 ] || return 1
+  [ -t "$1" ] || return 1
   [ -z "${NO_COLOR:-}" ] || return 1
   [ "${GOS_NO_COLOR:-0}" != "1" ] || return 1
   [ "${TERM:-}" != "dumb" ] || return 1
+}
+
+_gos_color_enabled() {
+  _gos_fd_color_enabled 1
 }
 
 _gos_color_text() {
@@ -182,11 +188,7 @@ _gos_print_styled_value() {
 }
 
 _gos_stderr_color_enabled() {
-  [ "${GOS_OUTPUT_JSON:-0}" != "1" ] || return 1
-  [ -t 2 ] || return 1
-  [ -z "${NO_COLOR:-}" ] || return 1
-  [ "${GOS_NO_COLOR:-0}" != "1" ] || return 1
-  [ "${TERM:-}" != "dumb" ] || return 1
+  _gos_fd_color_enabled 2
 }
 
 _gos_error() {
@@ -399,6 +401,27 @@ _gos_validate_cache_dir() {
 
 _gos_versions_mode() {
   [ -n "$GOS_VERSIONS_DIR" ]
+}
+
+# Fail with the standard message when a side-by-side-only feature is used in
+# the flat layout. Usage: _gos_require_versions_mode <what> [<hint line>]
+_gos_require_versions_mode() {
+  local what="$1" hint="${2:-}"
+  _gos_versions_mode && return 0
+  _gos_error "${what} requires side-by-side mode (set GOS_VERSIONS_DIR)."
+  [ -z "$hint" ] || echo "$hint" >&2
+  return 1
+}
+# shellcheck disable=SC2016 # The hint shows the user the literal line to run.
+GOS_VERSIONS_MODE_EXAMPLE='Example: export GOS_INSTALL_DIR="$HOME/.gos/go"; export GOS_VERSIONS_DIR="$HOME/.gos/versions"'
+
+# True for a bare X.Y (no patch, no pre-release suffix), the form that names a
+# minor rather than one release and has to be resolved before use.
+_gos_version_is_bare_minor() {
+  case "$1" in
+    *rc* | *beta* | *.*.*) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 # Warn when a mutating command would silently convert a side-by-side layout back
@@ -784,12 +807,10 @@ _gos_fetch_latest() {
 _gos_resolve_bare_minor() {
   local version="$1" json resolved escaped
 
-  case "$version" in
-    *rc* | *beta* | *.*.*)
-      printf '%s\n' "$version"
-      return 0
-      ;;
-  esac
+  if ! _gos_version_is_bare_minor "$version"; then
+    printf '%s\n' "$version"
+    return 0
+  fi
 
   # Discovery only: the TTL disk cache is fine here (the checksum lookup that
   # follows always fetches fresh metadata), and it is what keeps
@@ -1305,6 +1326,24 @@ _gos_restore_backup() {
   fi
 }
 
+# Crash residue: interrupted activations can strand *.gos-backup.<pid> /
+# *.gos-current.<pid> siblings of the install slot. Prints each existing one
+# (directories and symlinks, dangling included), one per line.
+_gos_orphaned_backups() {
+  local orphan
+  for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
+    [ -d "$orphan" ] || [ -L "$orphan" ] || continue
+    printf '%s\n' "$orphan"
+  done
+}
+
+# Size of a regular file in bytes (0 on failure), portable across stat flavors.
+_gos_file_size_bytes() {
+  local size
+  size=$(wc -c <"$1" | tr -d '[:space:]') || size=0
+  printf '%s\n' "${size:-0}"
+}
+
 _gos_rollback_dir() {
   printf '%s.gos-rollback' "$GOS_INSTALL_DIR"
 }
@@ -1548,9 +1587,8 @@ _gos_install_version() {
     fi
   fi
 
-  if [ "$activate" != "true" ] && ! _gos_versions_mode; then
-    _gos_error "installing without activation requires side-by-side mode (set GOS_VERSIONS_DIR)."
-    return 1
+  if [ "$activate" != "true" ]; then
+    _gos_require_versions_mode "installing without activation" || return 1
   fi
 
   os=$(_gos_os)
@@ -1963,7 +2001,7 @@ _gos_cache_archive_stats() {
     for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip; do
       [ -f "$file" ] || continue
       count=$((count + 1))
-      size=$(wc -c <"$file" | tr -d '[:space:]') || size=0
+      size=$(_gos_file_size_bytes "$file")
       bytes=$((bytes + size))
     done
   fi
@@ -2050,46 +2088,29 @@ _gos_semver_is_newer() {
 # Compare validated Go versions, including beta/rc ordering. The components use
 # the same decimal-string comparator as SemVer so unusually long versions do not
 # inherit the shell's integer limit.
-_gos_go_version_is_newer() {
-  local candidate="$1" current="$2"
-  local candidate_core candidate_major candidate_minor candidate_patch
-  local current_core current_major current_minor current_patch
-  local candidate_rank candidate_pre current_rank current_pre
+# Split a validated Go version into "core|rank|pre": beta < rc < release
+# (ranks 0, 1, 2) and the pre-release number, so ordering is one comparison
+# chain instead of the same case block written twice.
+_gos_split_go_version() {
+  case "$1" in
+    *beta*) printf '%s|0|%s\n' "${1%%beta*}" "${1##*beta}" ;;
+    *rc*) printf '%s|1|%s\n' "${1%%rc*}" "${1##*rc}" ;;
+    *) printf '%s|2|0\n' "$1" ;;
+  esac
+}
 
-  case "$candidate" in
-    *beta*)
-      candidate_core="${candidate%%beta*}"
-      candidate_rank=0
-      candidate_pre="${candidate##*beta}"
-      ;;
-    *rc*)
-      candidate_core="${candidate%%rc*}"
-      candidate_rank=1
-      candidate_pre="${candidate##*rc}"
-      ;;
-    *)
-      candidate_core="$candidate"
-      candidate_rank=2
-      candidate_pre=0
-      ;;
-  esac
-  case "$current" in
-    *beta*)
-      current_core="${current%%beta*}"
-      current_rank=0
-      current_pre="${current##*beta}"
-      ;;
-    *rc*)
-      current_core="${current%%rc*}"
-      current_rank=1
-      current_pre="${current##*rc}"
-      ;;
-    *)
-      current_core="$current"
-      current_rank=2
-      current_pre=0
-      ;;
-  esac
+_gos_go_version_is_newer() {
+  local candidate current
+  candidate=$(_gos_split_go_version "$1")
+  current=$(_gos_split_go_version "$2")
+  local candidate_core="${candidate%%|*}" current_core="${current%%|*}"
+  local candidate_rank current_rank candidate_pre="${candidate##*|}" current_pre="${current##*|}"
+  candidate_rank="${candidate#*|}"
+  candidate_rank="${candidate_rank%%|*}"
+  current_rank="${current#*|}"
+  current_rank="${current_rank%%|*}"
+  local candidate_major candidate_minor candidate_patch
+  local current_major current_minor current_patch
 
   IFS=. read -r candidate_major candidate_minor candidate_patch <<<"$candidate_core"
   IFS=. read -r current_major current_minor current_patch <<<"$current_core"
@@ -2260,18 +2281,15 @@ cmd_install() {
   # shell — not the resolver's command-substitution subshell — is what lets the
   # resolver and the install below share a single feed request.
   local resolved
-  case "$version" in
-    *rc* | *beta* | *.*.*) ;;
-    *)
-      _gos_validate_feed_ttl || return 1
-      _gos_feed_json true true >/dev/null 2>&1 || true
-      resolved=$(_gos_resolve_bare_minor "$version")
-      if [ "$resolved" != "$version" ]; then
-        _gos_progress "Resolved Go ${version} to go${resolved}."
-        version="$resolved"
-      fi
-      ;;
-  esac
+  if _gos_version_is_bare_minor "$version"; then
+    _gos_validate_feed_ttl || return 1
+    _gos_feed_json true true >/dev/null 2>&1 || true
+    resolved=$(_gos_resolve_bare_minor "$version")
+    if [ "$resolved" != "$version" ]; then
+      _gos_progress "Resolved Go ${version} to go${resolved}."
+      version="$resolved"
+    fi
+  fi
 
   local current
   current=$(_gos_current)
@@ -2300,33 +2318,30 @@ _gos_ensure_version_dir() {
 
   _gos_validate_version "$version" || return 1
 
-  case "$version" in
-    *rc* | *beta* | *.*.*) ;;
-    *)
-      set +e
-      resolved=$(_gos_resolve_installed_bare_minor "$version")
-      case "$?" in
-        0)
-          set -e
+  if _gos_version_is_bare_minor "$version"; then
+    set +e
+    resolved=$(_gos_resolve_installed_bare_minor "$version")
+    case "$?" in
+      0)
+        set -e
+        version="$resolved"
+        ;;
+      1)
+        set -e
+        _gos_validate_feed_ttl || return 1
+        _gos_feed_json true true >/dev/null 2>&1 || true
+        resolved=$(_gos_resolve_bare_minor "$version")
+        if [ "$resolved" != "$version" ]; then
+          _gos_progress "Resolved Go ${version} to go${resolved}."
           version="$resolved"
-          ;;
-        1)
-          set -e
-          _gos_validate_feed_ttl || return 1
-          _gos_feed_json true true >/dev/null 2>&1 || true
-          resolved=$(_gos_resolve_bare_minor "$version")
-          if [ "$resolved" != "$version" ]; then
-            _gos_progress "Resolved Go ${version} to go${resolved}."
-            version="$resolved"
-          fi
-          ;;
-        *)
-          set -e
-          return 1
-          ;;
-      esac
-      ;;
-  esac
+        fi
+        ;;
+      *)
+        set -e
+        return 1
+        ;;
+    esac
+  fi
 
   version_dir=$(_gos_version_dir_for "$version")
   if [ ! -x "${version_dir}/bin/go" ]; then
@@ -2381,11 +2396,7 @@ cmd_run() {
 
   version="${version#go}"
 
-  if ! _gos_versions_mode; then
-    _gos_error "gos run requires side-by-side mode (set GOS_VERSIONS_DIR)."
-    echo "Example: export GOS_INSTALL_DIR=\"\$HOME/.gos/go\"; export GOS_VERSIONS_DIR=\"\$HOME/.gos/versions\"" >&2
-    return 1
-  fi
+  _gos_require_versions_mode "gos run" "$GOS_VERSIONS_MODE_EXAMPLE" || return 1
   _gos_validate_versions_dir || return 1
 
   _gos_ensure_version_dir "$version" || return 1
@@ -2437,11 +2448,7 @@ cmd_each() {
     return 1
   fi
 
-  if ! _gos_versions_mode; then
-    _gos_error "gos each requires side-by-side mode (set GOS_VERSIONS_DIR)."
-    echo "Example: export GOS_INSTALL_DIR=\"\$HOME/.gos/go\"; export GOS_VERSIONS_DIR=\"\$HOME/.gos/versions\"" >&2
-    return 1
-  fi
+  _gos_require_versions_mode "gos each" "$GOS_VERSIONS_MODE_EXAMPLE" || return 1
   _gos_validate_versions_dir || return 1
 
   # Split the comma list, preserving order. IFS split is fine: versions never
@@ -2578,12 +2585,10 @@ _gos_installed_versions() {
 # _gos_resolve_installed_bare_minor directly.
 _gos_resolve_installed_version() {
   local version="$1" resolved
-  case "$version" in
-    *rc* | *beta* | *.*.*)
-      printf '%s\n' "$version"
-      return 0
-      ;;
-  esac
+  if ! _gos_version_is_bare_minor "$version"; then
+    printf '%s\n' "$version"
+    return 0
+  fi
   if resolved=$(_gos_resolve_installed_bare_minor "$version" 2>/dev/null) && [ -n "$resolved" ]; then
     printf '%s\n' "$resolved"
   else
@@ -2808,10 +2813,7 @@ cmd_which() {
 
   if [ -n "$version" ]; then
     _gos_validate_version "$version" || return 1
-    if ! _gos_versions_mode; then
-      _gos_error "gos which <version> requires side-by-side mode (set GOS_VERSIONS_DIR)."
-      return 1
-    fi
+    _gos_require_versions_mode "gos which <version>" || return 1
     _gos_validate_versions_dir || return 1
     version_dir=$(_gos_version_dir_for "$version")
     go_path="${version_dir}/bin/go"
@@ -2907,8 +2909,7 @@ cmd_status() {
   [ "$rollback_state" = "ok" ] && rollback_available="true"
   # Crash residue and the mutation lock are exactly the state a user needs
   # visible when something feels off; both checks stay offline.
-  for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
-    [ -d "$orphan" ] || [ -L "$orphan" ] || continue
+  for orphan in $(_gos_orphaned_backups); do
     orphaned_backups=$((orphaned_backups + 1))
   done
   lock_dir=$(_gos_lock_dir)
@@ -3159,10 +3160,16 @@ cmd_rollback() {
 # Remove every installed side-by-side version except the active one. The
 # rollback target is kept too: deleting it would silently disarm gos rollback,
 # so it is skipped with a hint pointing at the explicit single-version path.
+# Past-tense verb for a real run, "Would ..." for a dry run, so previews and
+# real runs describe the same actions. Usage: _gos_action_verb <dry_run> <done> <would>
+_gos_action_verb() {
+  if [ "$1" = "true" ]; then printf '%s\n' "$3"; else printf '%s\n' "$2"; fi
+}
+
 _gos_uninstall_inactive() {
   local dry_run="$1" installed version_dir rollback_dir removed=0 size removed_kib=0
-  local removal_verb="Uninstalled"
-  [ "$dry_run" = "true" ] && removal_verb="Would uninstall"
+  local removal_verb
+  removal_verb=$(_gos_action_verb "$dry_run" "Uninstalled" "Would uninstall")
 
   rollback_dir=$(_gos_rollback_dir)
   for installed in $(_gos_installed_versions); do
@@ -3224,11 +3231,7 @@ cmd_uninstall() {
     return 1
   fi
 
-  if ! _gos_versions_mode; then
-    _gos_error "gos uninstall requires side-by-side mode (set GOS_VERSIONS_DIR)."
-    echo "In the classic layout there is only one install; replace it with gos install/latest." >&2
-    return 1
-  fi
+  _gos_require_versions_mode "gos uninstall" "In the classic layout there is only one install; replace it with gos install/latest." || return 1
   _gos_validate_versions_dir || return 1
 
   if [ "$inactive" = "true" ]; then
@@ -3242,29 +3245,23 @@ cmd_uninstall() {
   # A bare X.Y resolves to the matching installed patch release, mirroring
   # `gos install 1.21` (which installs the newest 1.21.x): resolve against
   # what is actually installed so uninstall stays network-free.
-  case "$version" in
-    *rc* | *beta* | *.*.*) ;;
-    *)
-      local installed match_count=0 resolved=""
-      for installed in $(_gos_installed_versions); do
-        case "$installed" in
-          "$version" | "$version".*)
-            resolved="$installed"
-            match_count=$((match_count + 1))
-            ;;
-        esac
-      done
-      if [ "$match_count" -eq 1 ]; then
+  if _gos_version_is_bare_minor "$version"; then
+    local resolved
+    set +e
+    resolved=$(_gos_resolve_installed_bare_minor "$version")
+    case "$?" in
+      0)
+        set -e
         version="$resolved"
-      elif [ "$match_count" -gt 1 ]; then
-        _gos_error "'${version}' matches multiple installed Go versions; re-run with an exact version:"
-        for installed in $(_gos_installed_versions); do
-          case "$installed" in "$version" | "$version".*) echo "  go${installed}" >&2 ;; esac
-        done
+        ;;
+      1) set -e ;;
+      *)
+        # Ambiguous: the helper already listed the candidates on stderr.
+        set -e
         return 1
-      fi
-      ;;
-  esac
+        ;;
+    esac
+  fi
 
   version_dir=$(_gos_version_dir_for "$version")
   if [ ! -d "$version_dir" ]; then
@@ -3670,7 +3667,7 @@ cmd_self_update() {
 cmd_prune() {
   local prune_rollback="false" dry_run="false" arg rollback_dir removed=0 removed_bytes=0 size file rollback_state
   local removed_feed=0 removed_feed_bytes=0
-  local removal_verb="Removed"
+  local removal_verb
 
   for arg in "$@"; do
     case "$arg" in
@@ -3690,7 +3687,7 @@ cmd_prune() {
   if [ "$prune_rollback" = "true" ] && [ "$dry_run" != "true" ]; then
     _gos_acquire_lock || return 1
   fi
-  [ "$dry_run" = "true" ] && removal_verb="Would remove"
+  removal_verb=$(_gos_action_verb "$dry_run" "Removed" "Would remove")
 
   # Delete only files that look like cached Go archives, including .partial
   # files left by an interrupted (resumable) download. GOS_CACHE_DIR is
@@ -3698,7 +3695,7 @@ cmd_prune() {
   if [ -d "$GOS_CACHE_DIR" ]; then
     for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip "$GOS_CACHE_DIR"/go*.partial; do
       [ -f "$file" ] || continue
-      size=$(wc -c <"$file" | tr -d '[:space:]') || size=0
+      size=$(_gos_file_size_bytes "$file")
       [ "$dry_run" = "true" ] || rm -f "$file"
       removed=$((removed + 1))
       removed_bytes=$((removed_bytes + size))
@@ -3719,7 +3716,7 @@ cmd_prune() {
   local feed_file
   for feed_file in "$(_gos_feed_cache_path false)" "$(_gos_feed_cache_path true)"; do
     [ -f "$feed_file" ] || continue
-    size=$(wc -c <"$feed_file" | tr -d '[:space:]') || size=0
+    size=$(_gos_file_size_bytes "$feed_file")
     [ "$dry_run" = "true" ] || rm -f "$feed_file"
     removed_feed=$((removed_feed + 1))
     removed_feed_bytes=$((removed_feed_bytes + size))
@@ -3750,9 +3747,7 @@ cmd_prune() {
   # healthy (they may be the sole surviving copy otherwise), and only with
   # --rollback, which already means "discard my safety copies".
   local orphan orphans_removed=0 orphans_found=0
-  for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
-    # -L so a stranded side-by-side symlink backup is reported/removed too.
-    [ -d "$orphan" ] || [ -L "$orphan" ] || continue
+  for orphan in $(_gos_orphaned_backups); do
     orphans_found=$((orphans_found + 1))
     if [ "$prune_rollback" = "true" ] && [ -x "${GOS_INSTALL_DIR}/bin/go" ]; then
       if [ "$dry_run" != "true" ]; then
@@ -3988,8 +3983,7 @@ cmd_doctor() {
   # like status does. Neither is a "problem": an interrupted install left the
   # backup on purpose, and a held lock means another gos is simply running.
   local orphan doctor_orphans=0
-  for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
-    [ -d "$orphan" ] || [ -L "$orphan" ] || continue
+  for orphan in $(_gos_orphaned_backups); do
     doctor_orphans=$((doctor_orphans + 1))
   done
   if [ "$doctor_orphans" -eq 0 ]; then
