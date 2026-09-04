@@ -204,6 +204,32 @@ if [ -n "${GOS_TEST_MV_FAIL_TARGET:-}" ] && [ "$target_path" = "$GOS_TEST_MV_FAI
   exit 1
 fi
 
+# Fail the first mv whose source matches the glob, then behave normally, so a
+# test can make one restore attempt fail and verify the EXIT trap retries it.
+if [ -n "${GOS_TEST_MV_FAIL_ONCE_SOURCE_GLOB:-}" ]; then
+  # shellcheck disable=SC2254 # The glob is the whole point of this variable.
+  case "$source_path" in
+    $GOS_TEST_MV_FAIL_ONCE_SOURCE_GLOB)
+      if [ ! -e "$GOS_TEST_MV_FAIL_ONCE_MARKER" ]; then
+        : >"$GOS_TEST_MV_FAIL_ONCE_MARKER"
+        echo "fake mv transient failure: $source_path" >&2
+        exit 1
+      fi
+      ;;
+  esac
+fi
+
+# Simulate gos being killed between two renames: terminate the gos process
+# (its pid is in the mutation lock) instead of performing this mv, once, so
+# the EXIT trap's own retry of the rename goes through.
+if [ -n "${GOS_TEST_MV_KILL_ON_TARGET:-}" ] && [ "$target_path" = "$GOS_TEST_MV_KILL_ON_TARGET" ] \
+  && [ ! -e "$GOS_TEST_MV_KILL_ONCE_MARKER" ]; then
+  : >"$GOS_TEST_MV_KILL_ONCE_MARKER"
+  kill -TERM "$(cat "${GOS_INSTALL_DIR}.gos-lock/pid")"
+  echo "fake mv: gos terminated before rename" >&2
+  exit 1
+fi
+
 if is_protected_parent_op "$source_path" || is_protected_parent_op "$target_path"; then
   if [ "${GOS_TEST_UNDER_SUDO:-}" != "1" ]; then
     echo "fake mv permission denied: $source_path -> $target_path" >&2
@@ -294,6 +320,7 @@ run_install() {
   protected_parent=""
   mv_fail_target=""
   rm_fail_target=""
+  mv_fail_once_glob=""
   output=""
   status=0
 
@@ -328,6 +355,10 @@ run_install() {
       install_dir="${case_dir}/usr/local/go"
       rm_fail_target="${install_dir}.gos-rollback"
       ;;
+    restore-mv-fail-once)
+      install_dir="${case_dir}/usr/local/go"
+      mv_fail_once_glob="*.gos-backup.*"
+      ;;
     *)
       fail "unknown install kind: ${install_kind}"
       ;;
@@ -348,6 +379,8 @@ run_install() {
       GOS_TEST_PROTECTED_PARENT="$protected_parent" \
       GOS_TEST_MV_FAIL_TARGET="$mv_fail_target" \
       GOS_TEST_RM_FAIL_TARGET="$rm_fail_target" \
+      GOS_TEST_MV_FAIL_ONCE_SOURCE_GLOB="$mv_fail_once_glob" \
+      GOS_TEST_MV_FAIL_ONCE_MARKER="${case_dir}/mv-failed-once" \
       bash "$script" install 1.21.6 2>&1
   )"
   status=$?
@@ -456,6 +489,60 @@ assert_not_contains "$output" "Rollback available: gos rollback" "rollback rm fa
 assert_contains "$output" "Warning: failed to remove existing rollback installation" "rollback rm failure warning"
 assert_contains "$output" "previous Go installation remains at:" "rollback rm failure backup"
 pass "rollback save rm failure keeps backup and avoids false availability"
+
+# A validation failure after activation restores the backup; if that restore
+# mv itself fails, the slot is empty and the backup intact, and only the EXIT
+# trap can put it back. It used to be disarmed right after the failed restore.
+create_old_install "${test_root}/restore_mv_failure/usr/local/go"
+run_install "restore_mv_failure" "bad-go" "restore-mv-fail-once"
+assert_nonzero_status "$status" "restore mv failure" "$output"
+assert_contains "$output" "fake mv transient failure" "restore mv failure simulated"
+assert_contains "$output" "restoring the previous one" "restore mv failure trap retry"
+assert_old_install_intact "$install_dir" "restore mv failure"
+assert_no_backup_left "$install_dir" "restore mv failure"
+pass "EXIT trap retries a failed backup restore instead of being disarmed"
+
+# gos rollback moves the active install aside and then the rollback into
+# place; killed in between, the machine has no Go unless the EXIT trap
+# restores the displaced install. Rollback never armed that trap.
+run_rollback() {
+  local name="$1"
+  case_dir="${test_root}/${name}"
+  install_dir="${case_dir}/usr/local/go"
+  output=""
+  status=0
+  mkdir -p "$(dirname "$install_dir")"
+  create_old_install "$install_dir"
+  mkdir -p "${install_dir}.gos-rollback/bin"
+  printf '#!/usr/bin/env bash\necho "go version go1.19.0 darwin/arm64"\n' >"${install_dir}.gos-rollback/bin/go"
+  chmod +x "${install_dir}.gos-rollback/bin/go"
+
+  set +e
+  output="$(
+    PATH="${fake_bin}:${original_path}" \
+      GOS_INSTALL_DIR="$install_dir" \
+      GOS_CACHE_DIR="${case_dir}/cache" \
+      GOS_TEST_REAL_MKDIR="$real_mkdir" \
+      GOS_TEST_REAL_MV="$real_mv" \
+      GOS_TEST_REAL_RM="$real_rm" \
+      GOS_TEST_REAL_CHMOD="$real_chmod" \
+      GOS_TEST_MV_KILL_ON_TARGET="$install_dir" \
+      GOS_TEST_MV_KILL_ONCE_MARKER="${case_dir}/mv-killed-once" \
+      bash "$script" rollback 2>&1
+  )"
+  status=$?
+  set -e
+}
+
+run_rollback "rollback_interrupted"
+assert_status 143 "$status" "rollback interrupted" "$output"
+assert_contains "$output" "restoring the previous one" "rollback interrupted trap"
+assert_old_install_intact "$install_dir" "rollback interrupted"
+[ -x "${install_dir}.gos-rollback/bin/go" ] || fail "rollback interrupted: rollback slot should be untouched"
+current_backups=$(find "$(dirname "$install_dir")" -maxdepth 1 -name "go.gos-current.*" -print)
+[ -z "$current_backups" ] || fail "rollback interrupted: displaced install left behind: ${current_backups}"
+[ ! -d "${install_dir}.gos-lock" ] || fail "rollback interrupted: lock left behind"
+pass "EXIT trap restores the active install when rollback is killed mid-swap"
 
 run_install "success_empty" "ok" "default"
 assert_status 0 "$status" "success empty" "$output"

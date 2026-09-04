@@ -44,7 +44,7 @@ _gos_cleanup_tmp() {
   if [ -n "$GOS_ACTIVATION_BACKUP" ] \
     && { [ -e "$GOS_ACTIVATION_BACKUP" ] || [ -L "$GOS_ACTIVATION_BACKUP" ]; } \
     && [ ! -e "$GOS_INSTALL_DIR" ] && [ ! -L "$GOS_INSTALL_DIR" ]; then
-    echo "Interrupted during activation; restoring the previous Go installation..." >&2
+    echo "Interrupted while switching Go installations; restoring the previous one..." >&2
     # The backup was created with sudo for root-owned installs (default
     # /usr/local/go), so a plain mv cannot restore it; escalate on failure or the
     # trap would leave the machine with no Go at all.
@@ -1117,16 +1117,20 @@ _gos_activate_install() {
     echo "Activating go from ${source}..."
     if ! _gos_sudo ln -s "$source" "$GOS_INSTALL_DIR"; then
       _gos_error "failed to link new Go installation into place."
-      _gos_restore_backup "$backup_dir" || true
-      GOS_ACTIVATION_BACKUP=""
+      # Disarm the trap only if the restore succeeded: a failed restore leaves
+      # the slot empty with the backup intact, exactly the state the EXIT trap
+      # exists to repair.
+      _gos_restore_backup "$backup_dir" && GOS_ACTIVATION_BACKUP=""
       return 1
     fi
   else
     echo "Activating new Go installation..."
     if ! _gos_sudo mv "$source" "$GOS_INSTALL_DIR"; then
       _gos_error "failed to move new Go installation into place."
-      _gos_restore_backup "$backup_dir" || true
-      GOS_ACTIVATION_BACKUP=""
+      # Disarm the trap only if the restore succeeded: a failed restore leaves
+      # the slot empty with the backup intact, exactly the state the EXIT trap
+      # exists to repair.
+      _gos_restore_backup "$backup_dir" && GOS_ACTIVATION_BACKUP=""
       return 1
     fi
   fi
@@ -1137,15 +1141,19 @@ _gos_activate_install() {
   go_bin="${GOS_INSTALL_DIR}/bin/go"
   if [ ! -x "$go_bin" ]; then
     _gos_error "activated Go installation is missing bin/go."
-    _gos_restore_backup "$backup_dir" || true
-    GOS_ACTIVATION_BACKUP=""
+    # Disarm the trap only if the restore succeeded: a failed restore leaves
+    # the slot empty with the backup intact, exactly the state the EXIT trap
+    # exists to repair.
+    _gos_restore_backup "$backup_dir" && GOS_ACTIVATION_BACKUP=""
     return 1
   fi
 
   if ! version_output=$("$go_bin" version 2>&1); then
     _gos_error "activated Go failed validation: ${version_output}"
-    _gos_restore_backup "$backup_dir" || true
-    GOS_ACTIVATION_BACKUP=""
+    # Disarm the trap only if the restore succeeded: a failed restore leaves
+    # the slot empty with the backup intact, exactly the state the EXIT trap
+    # exists to repair.
+    _gos_restore_backup "$backup_dir" && GOS_ACTIVATION_BACKUP=""
     return 1
   fi
 
@@ -1174,12 +1182,16 @@ _gos_activate_rollback() {
   # otherwise the restore mv below fails because the slot is still occupied.
   if [ -e "$GOS_INSTALL_DIR" ] || [ -L "$GOS_INSTALL_DIR" ]; then
     _gos_sudo mv "$GOS_INSTALL_DIR" "$current_backup" || return 1
+    # Arm the EXIT trap exactly as install does: between this mv and the
+    # one below the machine has no Go, and an interrupt there must put the
+    # displaced install back.
+    GOS_ACTIVATION_BACKUP="$current_backup"
   fi
 
   if ! _gos_sudo mv "$rollback_dir" "$GOS_INSTALL_DIR"; then
     _gos_error "failed to restore rollback installation."
-    if [ -e "$current_backup" ]; then
-      _gos_sudo mv "$current_backup" "$GOS_INSTALL_DIR" || true
+    if [ -e "$current_backup" ] || [ -L "$current_backup" ]; then
+      _gos_sudo mv "$current_backup" "$GOS_INSTALL_DIR" && GOS_ACTIVATION_BACKUP=""
     fi
     return 1
   fi
@@ -1187,20 +1199,23 @@ _gos_activate_rollback() {
   go_bin="${GOS_INSTALL_DIR}/bin/go"
   if [ ! -x "$go_bin" ]; then
     _gos_error "rollback installation is missing bin/go."
-    _gos_restore_backup "$current_backup" || true
+    _gos_restore_backup "$current_backup" && GOS_ACTIVATION_BACKUP=""
     return 1
   fi
 
   if ! version_output=$("$go_bin" version 2>&1); then
     _gos_error "rollback Go failed validation: ${version_output}"
-    _gos_restore_backup "$current_backup" || true
+    _gos_restore_backup "$current_backup" && GOS_ACTIVATION_BACKUP=""
     return 1
   fi
 
-  if [ -e "$current_backup" ]; then
+  if [ -e "$current_backup" ] || [ -L "$current_backup" ]; then
     _gos_sudo rm -rf "$rollback_dir"
     _gos_sudo mv "$current_backup" "$rollback_dir"
   fi
+  # The rollback is validated and in place; the displaced install is either
+  # the new rollback or gone, so the trap has nothing left to repair.
+  GOS_ACTIVATION_BACKUP=""
 
   echo "Rolled back! ${version_output}"
 }
