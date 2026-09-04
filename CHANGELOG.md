@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Fixed
 
 - `gos rollback` is now crash-safe like `gos install`: an interrupt between moving the active Go aside and moving the rollback into place used to leave the machine with no Go at all, because rollback never armed the EXIT trap that restores the displaced installation. The trap also stays armed when a post-activation restore fails midway, instead of being disarmed right after the failed attempt.
+- Side-by-side installs no longer escalate to `sudo` for the versions tree just because `GOS_INSTALL_DIR` needs it (and vice versa): the escalation decision now follows the path being written, so a root-owned `/usr/local/go` next to a user-owned `GOS_VERSIONS_DIR` no longer leaves root-owned version directories under `$HOME` or prompts for a password it does not need.
 - `gos platforms` works again on hosts that have `python3` but no `jq`: the python3 feed parser contained a syntax error, so every such host reported "no supported platforms found".
 
 ### Changed

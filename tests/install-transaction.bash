@@ -10,6 +10,7 @@ fake_bin="${test_root}/bin"
 original_path="$PATH"
 real_mkdir="$(command -v mkdir)"
 real_mv="$(command -v mv)"
+real_ln="$(command -v ln)"
 real_rm="$(command -v rm)"
 real_chmod="$(command -v chmod)"
 
@@ -248,6 +249,39 @@ fi
 exec "$GOS_TEST_REAL_MV" "$@"
 FAKE_MV
 
+cat >"${fake_bin}/ln" <<'FAKE_LN'
+#!/usr/bin/env bash
+set -euo pipefail
+
+target_path=""
+for arg in "$@"; do
+  case "$arg" in
+    -*) ;;
+    *) target_path="$arg" ;;
+  esac
+done
+
+if [ -n "${GOS_TEST_PROTECTED_PARENT:-}" ]; then
+  case "$target_path" in
+    "${GOS_TEST_PROTECTED_PARENT}"/*)
+      if [ "${GOS_TEST_UNDER_SUDO:-}" != "1" ]; then
+        echo "fake ln permission denied: $target_path" >&2
+        exit 1
+      fi
+      "$GOS_TEST_REAL_CHMOD" u+w "$GOS_TEST_PROTECTED_PARENT"
+      set +e
+      "$GOS_TEST_REAL_LN" "$@"
+      status=$?
+      set -e
+      "$GOS_TEST_REAL_CHMOD" u-w "$GOS_TEST_PROTECTED_PARENT"
+      exit "$status"
+      ;;
+  esac
+fi
+
+exec "$GOS_TEST_REAL_LN" "$@"
+FAKE_LN
+
 cat >"${fake_bin}/rm" <<'FAKE_RM'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -299,7 +333,7 @@ FAKE_SUDO
 chmod +x "${fake_bin}/uname" "${fake_bin}/curl" "${fake_bin}/jq" \
   "${fake_bin}/sha256sum" "${fake_bin}/tar" "${fake_bin}/unzip" \
   "${fake_bin}/go" "${fake_bin}/mkdir" "${fake_bin}/mv" \
-  "${fake_bin}/rm" "${fake_bin}/sudo"
+  "${fake_bin}/rm" "${fake_bin}/ln" "${fake_bin}/sudo"
 
 create_old_install() {
   local install_dir="$1"
@@ -313,7 +347,7 @@ OLD_GO
 }
 
 run_install() {
-  local name="$1" extract_mode="$2" install_kind="$3"
+  local name="$1" extract_mode="$2" install_kind="$3" versions_dir="${4:-}"
   case_dir="${test_root}/${name}"
   tar_log="${case_dir}/tar.log"
   mkdir_fail_path=""
@@ -368,12 +402,14 @@ run_install() {
   output="$(
     PATH="${fake_bin}:${original_path}" \
       GOS_INSTALL_DIR="$install_dir" \
+      GOS_VERSIONS_DIR="$versions_dir" \
       GOS_CACHE_DIR="${case_dir}/cache" \
       GOS_TEST_TAR_LOG="$tar_log" \
       GOS_TEST_EXTRACT_MODE="$extract_mode" \
       GOS_TEST_REAL_MKDIR="$real_mkdir" \
       GOS_TEST_REAL_MV="$real_mv" \
       GOS_TEST_REAL_RM="$real_rm" \
+      GOS_TEST_REAL_LN="$real_ln" \
       GOS_TEST_REAL_CHMOD="$real_chmod" \
       GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
       GOS_TEST_PROTECTED_PARENT="$protected_parent" \
@@ -468,6 +504,26 @@ assert_contains "$output" "sudo mv ${install_dir}.gos-backup" "protected parent 
 assert_contains "$output" "Rollback available: gos rollback" "protected parent rollback output"
 pass "install uses sudo for sibling renames when parent is not writable"
 
+# Mixed layout: a root-owned install slot next to a user-owned versions tree.
+# Escalation must follow the path being written, not the install slot: the
+# staged tree moves into the versions dir without sudo (a sudo mv there would
+# leave root-owned directories under $HOME), while the symlink swap in the
+# protected parent still escalates.
+create_old_install "${test_root}/protected_parent_sbs/usr/local/go"
+mkdir -p "${test_root}/protected_parent_sbs/home/.gos"
+chmod u-w "${test_root}/protected_parent_sbs/usr/local"
+run_install "protected_parent_sbs" "ok" "protected-parent" "${test_root}/protected_parent_sbs/home/.gos/versions"
+chmod u+w "${test_root}/protected_parent_sbs/usr/local"
+assert_status 0 "$status" "protected parent side-by-side" "$output"
+sbs_versions_dir="${test_root}/protected_parent_sbs/home/.gos/versions"
+[ -L "$install_dir" ] || fail "protected parent side-by-side: install dir is not a symlink"
+[ "$(readlink "$install_dir")" = "${sbs_versions_dir}/go1.21.6" ] || fail "protected parent side-by-side: symlink target is $(readlink "$install_dir")"
+assert_new_install_active "$install_dir" "protected parent side-by-side"
+assert_contains "$output" "sudo ln -s ${sbs_versions_dir}/go1.21.6 ${install_dir}" "protected parent side-by-side link sudo"
+sudo_in_versions_dir=$(printf '%s\n' "$output" | grep -E "^sudo (mkdir|mv|rm) .*${sbs_versions_dir}" || true)
+[ -z "$sudo_in_versions_dir" ] || fail "protected parent side-by-side: sudo was used inside the user-owned versions dir: ${sudo_in_versions_dir}"
+pass "sudo follows the path being written, not the install slot"
+
 create_old_install "${test_root}/rollback_mv_failure/usr/local/go"
 run_install "rollback_mv_failure" "ok" "rollback-mv-fail"
 assert_status 0 "$status" "rollback mv failure" "$output"
@@ -525,6 +581,7 @@ run_rollback() {
       GOS_TEST_REAL_MKDIR="$real_mkdir" \
       GOS_TEST_REAL_MV="$real_mv" \
       GOS_TEST_REAL_RM="$real_rm" \
+      GOS_TEST_REAL_LN="$real_ln" \
       GOS_TEST_REAL_CHMOD="$real_chmod" \
       GOS_TEST_MV_KILL_ON_TARGET="$install_dir" \
       GOS_TEST_MV_KILL_ONCE_MARKER="${case_dir}/mv-killed-once" \

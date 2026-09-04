@@ -811,15 +811,21 @@ _gos_existing_parent_for() {
   printf '%s\n' "$parent"
 }
 
-# Determine if sudo is needed for operations under GOS_INSTALL_DIR's parent.
+# Determine if sudo is needed to write inside the given path's nearest
+# existing parent (default: GOS_INSTALL_DIR's). Callers that touch the
+# side-by-side versions tree pass that path, since it can be user-owned while
+# the install slot is root-owned (or the reverse): deciding from the install
+# slot alone would run user-space renames as root and leave root-owned
+# directories under $HOME.
 _gos_needs_sudo() {
+  local target="${1:-$GOS_INSTALL_DIR}"
   # Never use sudo on Windows
   if [ "$(_gos_os)" = "windows" ]; then
     return 1
   fi
 
   local parent
-  parent=$(_gos_existing_parent_for "$GOS_INSTALL_DIR")
+  parent=$(_gos_existing_parent_for "$target")
   if [ -w "$parent" ]; then
     return 1
   fi
@@ -827,12 +833,25 @@ _gos_needs_sudo() {
   return 0
 }
 
-# Run a command with sudo only if needed. The command's stdout and stderr are
-# kept separate so tool warnings never leak into data output.
+# Run a command with sudo only if needed for GOS_INSTALL_DIR's parent. The
+# command's stdout and stderr are kept separate so tool warnings never leak
+# into data output.
 _gos_sudo() {
+  GOS_SUDO_TARGET="$GOS_INSTALL_DIR" _gos_sudo_for_target "$@"
+}
+
+# Same, deciding from an explicit target path instead of the install slot.
+# Usage: _gos_sudo_for <path> <command...>
+_gos_sudo_for() {
+  local target="$1"
+  shift
+  GOS_SUDO_TARGET="$target" _gos_sudo_for_target "$@"
+}
+
+_gos_sudo_for_target() {
   local output status err err_file sudo_output sudo_status sudo_err
 
-  if _gos_needs_sudo; then
+  if _gos_needs_sudo "$GOS_SUDO_TARGET"; then
     sudo "$@"
     return
   fi
@@ -979,7 +998,7 @@ _gos_ensure_dir() {
   local dir="$1"
   [ -d "$dir" ] && return 0
   mkdir -p "$dir" 2>/dev/null && return 0
-  _gos_sudo mkdir -p "$dir" && return 0
+  _gos_sudo_for "$dir" mkdir -p "$dir" && return 0
   return 1
 }
 
@@ -1430,11 +1449,11 @@ _gos_install_version() {
       return 1
     fi
     # A partial or broken previous copy (no executable bin/go) is replaced.
-    if [ -e "$version_dir" ] && ! _gos_sudo rm -rf "$version_dir"; then
+    if [ -e "$version_dir" ] && ! _gos_sudo_for "$version_dir" rm -rf "$version_dir"; then
       _gos_error "failed to replace existing ${version_dir}."
       return 1
     fi
-    if ! _gos_sudo mv "$staged_go_dir" "$version_dir"; then
+    if ! _gos_sudo_for "$version_dir" mv "$staged_go_dir" "$version_dir"; then
       _gos_error "failed to move new Go installation into ${GOS_VERSIONS_DIR}."
       return 1
     fi
@@ -2879,7 +2898,7 @@ _gos_uninstall_inactive() {
     size=$(du -sk "$version_dir" 2>/dev/null | cut -f1) || size=0
     [ -n "$size" ] || size=0
     if [ "$dry_run" != "true" ]; then
-      _gos_sudo rm -rf "$version_dir" || return 1
+      _gos_sudo_for "$version_dir" rm -rf "$version_dir" || return 1
     fi
     removed=$((removed + 1))
     removed_kib=$((removed_kib + size))
@@ -2991,7 +3010,7 @@ cmd_uninstall() {
     return 0
   fi
 
-  _gos_sudo rm -rf "$version_dir" || return 1
+  _gos_sudo_for "$version_dir" rm -rf "$version_dir" || return 1
   echo "Uninstalled go${version} from ${version_dir}."
 }
 
