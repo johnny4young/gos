@@ -456,36 +456,48 @@ _gos_download_progress_enabled() {
   [ -t 2 ] || return 1
 }
 
-# Download a URL to a file. Supports curl and wget.
-# Security: HTTPS integrity relies on the system CA certificate store.
-# For hardened environments, set SSL_CERT_FILE or --cacert as needed.
+# One place builds the curl/wget argument list for every download, so the
+# hardening flags cannot drift between the archive and the metadata paths.
+# Security: HTTPS integrity relies on the system CA certificate store. For
+# hardened environments, set SSL_CERT_FILE or --cacert as needed.
 # --proto-redir '=https' / --https-only disallow HTTP fallback via redirects.
-# Archives are large, so instead of a total --max-time the transfer aborts
-# when it stalls below 1 KB/s for 30 s (--connect-timeout only bounds the
-# handshake; a server that accepts and then trickles would otherwise hang
-# gos forever). wget's --timeout is already a per-read timeout.
-_gos_download() {
-  local url="$1" output="$2" resume="${3:-}"
-  # A third "resume" argument continues a partially downloaded file instead of
-  # restarting it. Only curl opts in (-C -): wget's -c does not compose cleanly
-  # with -O, and the checksum validates the assembled file regardless.
-  local -a resume_curl=()
-  [ "$resume" = "resume" ] && resume_curl=(-C -)
-  # --compressed lets go.dev serve the JSON feed gzip-encoded (~4x smaller);
-  # for the already-compressed archives it is a no-op, and if a mirror ever
-  # sends Content-Encoding: gzip on one, curl transparently restores the exact
-  # bytes the checksum is computed against.
+# Metadata bodies are small and get a total --max-time; archives are large,
+# so they abort when the transfer stalls below 1 KB/s for 30 s instead
+# (--connect-timeout only bounds the handshake). wget's --timeout is already
+# a per-read timeout. --compressed lets go.dev serve the JSON feed
+# gzip-encoded (~4x smaller); for archives it is a no-op, and if a mirror
+# ever sends Content-Encoding: gzip on one, curl restores the exact bytes the
+# checksum is computed against. wget cannot resume with -O and cannot ask for
+# compression portably, so it just fetches.
+#
+# Usage: _gos_http_get <url> [<output-file> [resume]]
+# Without an output file the body goes to stdout.
+_gos_http_get() {
+  local url="$1" output="${2:-}" resume="${3:-}"
   if command -v curl &>/dev/null; then
-    if _gos_download_progress_enabled; then
-      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --speed-limit 1024 --speed-time 30 --retry 2 --compressed ${resume_curl[@]:+"${resume_curl[@]}"} --progress-bar -fSL -o "$output" "$url"
+    local -a args
+    args=(--proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15)
+    if [ -n "$output" ]; then
+      args=("${args[@]}" --speed-limit 1024 --speed-time 30 --retry 2 --compressed)
+      [ "$resume" = "resume" ] && args=("${args[@]}" -C -)
+      if _gos_download_progress_enabled; then
+        args=("${args[@]}" --progress-bar -fSL)
+      else
+        args=("${args[@]}" -fsSL)
+      fi
+      curl "${args[@]}" -o "$output" "$url"
     else
-      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --speed-limit 1024 --speed-time 30 --retry 2 --compressed ${resume_curl[@]:+"${resume_curl[@]}"} -fsSL -o "$output" "$url"
+      curl "${args[@]}" --max-time 60 --retry 2 --compressed -fsSL "$url"
     fi
   elif command -v wget &>/dev/null; then
-    if _gos_download_progress_enabled; then
-      wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -q --show-progress -O "$output" "$url"
+    if [ -n "$output" ]; then
+      if _gos_download_progress_enabled; then
+        wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -q --show-progress -O "$output" "$url"
+      else
+        wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -qO "$output" "$url"
+      fi
     else
-      wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -qO "$output" "$url"
+      wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -qO- "$url"
     fi
   else
     _gos_error "neither curl nor wget found. Install one and try again."
@@ -493,21 +505,14 @@ _gos_download() {
   fi
 }
 
-# Download a URL to stdout. Supports curl and wget. Only small feed and
-# metadata bodies come through here, so a total --max-time is appropriate.
+# Download a URL to a file; a third "resume" argument continues a partial file.
+_gos_download() {
+  _gos_http_get "$1" "$2" "${3:-}"
+}
+
+# Download a URL to stdout.
 _gos_download_stdout() {
-  local url="$1"
-  # --compressed: the downloads feed is JSON and gzip-encodes to roughly a
-  # quarter of its size; wget's -qO- has no portable equivalent, so only curl
-  # opts in (wget still works, just uncompressed).
-  if command -v curl &>/dev/null; then
-    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 60 --retry 2 --compressed -fsSL "$url"
-  elif command -v wget &>/dev/null; then
-    wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -qO- "$url"
-  else
-    _gos_error "neither curl nor wget found. Install one and try again."
-    return 1
-  fi
+  _gos_http_get "$1"
 }
 
 # ─── Go downloads feed ────────────────────────────────────────────────────────
@@ -647,28 +652,116 @@ _gos_feed_json() {
   fi
 }
 
-# Print bare version numbers (no "go" prefix) from feed JSON in feed order,
-# using the most robust parser available.
-_gos_feed_versions() {
-  local json="$1"
+# The downloads feed is parsed with jq, then python3, then a grep scrape.
+# The choice is made once per run and every query goes through the same
+# cascade, so the three parsers can no longer drift apart one query at a
+# time (the python3 platforms branch shipped with a syntax error for months
+# because nothing shared code with the jq branch that everyone ran).
+GOS_FEED_PARSER=""
+_gos_feed_parser() {
+  if [ -z "$GOS_FEED_PARSER" ]; then
+    if command -v jq &>/dev/null; then
+      GOS_FEED_PARSER="jq"
+    elif command -v python3 &>/dev/null; then
+      GOS_FEED_PARSER="python3"
+    else
+      GOS_FEED_PARSER="grep"
+    fi
+  fi
+  printf '%s\n' "$GOS_FEED_PARSER"
+}
 
-  if command -v jq &>/dev/null; then
-    printf '%s\n' "$json" | jq -r '.[].version' | sed 's/^go//'
-  elif command -v python3 &>/dev/null; then
-    printf '%s\n' "$json" | python3 -c '
+# Query feed JSON read from stdin. Usage:
+#   _gos_feed_query versions             bare versions (no "go" prefix), feed order
+#   _gos_feed_query checksum <pkg>       sha256 of one archive filename (jq/python3 only)
+#   _gos_feed_query platforms <goX.Y.Z>  sorted os/arch pairs with an archive
+_gos_feed_query() {
+  local kind="$1" arg="${2:-}" parser
+  parser=$(_gos_feed_parser)
+  case "${kind}:${parser}" in
+    versions:jq)
+      jq -r '.[].version' | sed 's/^go//'
+      ;;
+    versions:python3)
+      python3 -c '
 import json, sys
 
 for item in json.load(sys.stdin):
     version = item.get("version", "")
     print(version[2:] if version.startswith("go") else version)
 '
-  else
-    # Last-resort text scraping; the character class keeps rc/beta suffixes.
-    printf '%s\n' "$json" \
-      | grep -o '"version": *"go[0-9][0-9A-Za-z.]*"' \
-      | grep -o 'go[0-9][0-9A-Za-z.]*' \
-      | sed 's/^go//'
-  fi
+      ;;
+    versions:grep)
+      # Last-resort text scraping; the character class keeps rc/beta suffixes.
+      grep -o '"version": *"go[0-9][0-9A-Za-z.]*"' \
+        | grep -o 'go[0-9][0-9A-Za-z.]*' \
+        | sed 's/^go//'
+      ;;
+    checksum:jq)
+      # (.files // []) tolerates entries without a files array (the feed has
+      # published such entries); a bare .files[] aborts jq on the first one
+      # and silently turns a present checksum into "not found".
+      jq -r --arg pkg "$arg" '.[] | (.files // [])[] | select(.filename == $pkg) | .sha256'
+      ;;
+    checksum:python3)
+      python3 -c "
+import json, sys
+pkg = sys.argv[1]
+data = json.load(sys.stdin)
+for v in data:
+    for f in v.get('files', []):
+        if f.get('filename') == pkg:
+            print(f.get('sha256', ''))
+            sys.exit(0)
+" "$arg"
+      ;;
+    checksum:grep)
+      # The scrape does not read checksums; callers fall back to the .sha256
+      # companion file (or fail closed under GOS_REQUIRE_CHECKSUM=feed).
+      cat >/dev/null
+      ;;
+    platforms:jq)
+      jq -r --arg version "$arg" \
+        '.[] | select(.version == $version) | (.files // [])[] | select(.kind == "archive") | "\(.os)/\(.arch)"' \
+        | sort -u
+      ;;
+    platforms:python3)
+      python3 -c '
+import json
+import sys
+
+version = sys.argv[1]
+data = json.load(sys.stdin)
+platforms = set()
+for item in data:
+    if item.get("version") != version:
+        continue
+    for file in item.get("files", []):
+        if file.get("kind") == "archive":
+            platforms.add("%s/%s" % (file.get("os"), file.get("arch")))
+for platform in sorted(platforms):
+    print(platform)
+' "$arg"
+      ;;
+    platforms:grep)
+      # Filter the scraped filenames to plain os/arch pairs: non-archive
+      # entries (go1.x.src.tar.gz) pass through the sed unchanged and must not
+      # leak into the output as bogus platforms.
+      grep -o "${arg}\\.[^\"]*" \
+        | sed -E "s/^${arg//./\\.}\\.([^-]+)-([^.]*)\\..*/\\1\\/\\2/" \
+        | grep -E '^[a-z0-9]+/[a-z0-9]+$' \
+        | sort -u
+      ;;
+    *)
+      _gos_error "internal: unknown feed query '${kind}' for parser '${parser}'."
+      return 1
+      ;;
+  esac
+}
+
+# Print bare version numbers (no "go" prefix) from feed JSON in feed order.
+_gos_feed_versions() {
+  printf '%s\n' "$1" | _gos_feed_query versions
 }
 
 _gos_fetch_latest() {
@@ -786,7 +879,7 @@ _gos_try_cache() {
 # Fetch expected SHA256 for a package filename from the Go API.
 # Uses jq if available, falls back to python3 (always present on macOS).
 _gos_has_checksum_parser() {
-  command -v jq &>/dev/null || command -v python3 &>/dev/null
+  [ "$(_gos_feed_parser)" != "grep" ]
 }
 
 _gos_validate_checksum_policy() {
@@ -837,25 +930,7 @@ _gos_fetch_checksum() {
     return 0
   }
 
-  if command -v jq &>/dev/null; then
-    # (.files // []) tolerates entries without a files array (the feed has
-    # published such entries); a bare .files[] aborts jq on the first one and
-    # silently turns a present checksum into "not found".
-    printf '%s\n' "$json" | jq -r --arg pkg "$pkg" '.[] | (.files // [])[] | select(.filename == $pkg) | .sha256'
-  elif command -v python3 &>/dev/null; then
-    printf '%s\n' "$json" | python3 -c "
-import json, sys
-pkg = sys.argv[1]
-data = json.load(sys.stdin)
-for v in data:
-    for f in v.get('files', []):
-        if f.get('filename') == pkg:
-            print(f.get('sha256', ''))
-            sys.exit(0)
-" "$pkg"
-  else
-    echo ""
-  fi
+  printf '%s\n' "$json" | _gos_feed_query checksum "$pkg"
 }
 
 # Fallback checksum source: the companion .sha256 file published next to each
@@ -1849,38 +1924,7 @@ _gos_platforms_for_version() {
     return 1
   }
 
-  if command -v jq &>/dev/null; then
-    echo "$json" \
-      | jq -r --arg version "$go_version" \
-        '.[] | select(.version == $version) | (.files // [])[] | select(.kind == "archive") | "\(.os)/\(.arch)"' \
-      | sort -u
-  elif command -v python3 &>/dev/null; then
-    echo "$json" | python3 -c '
-import json
-import sys
-
-version = sys.argv[1]
-data = json.load(sys.stdin)
-platforms = set()
-for item in data:
-    if item.get("version") != version:
-        continue
-    for file in item.get("files", []):
-        if file.get("kind") == "archive":
-            platforms.add("%s/%s" % (file.get("os"), file.get("arch")))
-for platform in sorted(platforms):
-    print(platform)
-' "$go_version"
-  else
-    # Filter the scraped filenames to plain os/arch pairs: non-archive entries
-    # (go1.x.src.tar.gz) pass through the sed unchanged and must not leak into
-    # the output as bogus platforms.
-    echo "$json" \
-      | grep -o "${go_version}\\.[^\"]*" \
-      | sed -E "s/^${go_version//./\\.}\\.([^-]+)-([^.]*)\\..*/\\1\\/\\2/" \
-      | grep -E '^[a-z0-9]+/[a-z0-9]+$' \
-      | sort -u
-  fi
+  printf '%s\n' "$json" | _gos_feed_query platforms "$go_version"
 }
 
 _gos_json_array_from_lines() {
