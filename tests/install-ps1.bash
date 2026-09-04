@@ -33,8 +33,17 @@ assert_file_not_contains install.ps1 "SetEnvironmentVariable('Path'"
 assert_file_contains install.ps1 "Git Bash was not found on PATH"
 assert_file_not_contains install.ps1 "Invoke-Expression"
 
-assert_file_contains packaging/windows/gos.cmd 'where bash.exe'
-assert_file_contains packaging/windows/gos.cmd 'bash.exe "%~dp0gos.sh" %*'
+# The shim must prefer Git for Windows' bash and never the WSL launcher in
+# System32, which "where bash.exe" alone returns first on WSL-enabled machines.
+assert_file_contains packaging/windows/gos.cmd '%ProgramFiles%\Git\bin\bash.exe'
+assert_file_contains packaging/windows/gos.cmd 'echo "%%~B" | findstr /I /L /C:"\System32\bash.exe"'
+assert_file_contains packaging/windows/gos.cmd '"%GOS_BASH%" "%~dp0gos.sh" %*'
+assert_file_contains packaging/windows/gos.cmd '1>&2'
+assert_file_contains install.ps1 'function Find-GitBash'
+assert_file_contains install.ps1 "IsNullOrWhiteSpace(\$env:ProgramFiles)"
+assert_file_contains install.ps1 "IsNullOrWhiteSpace(\${env:ProgramFiles(x86)})"
+assert_file_contains install.ps1 "IsNullOrWhiteSpace(\$env:LocalAppData)"
+assert_file_contains install.ps1 '-TimeoutSec 60'
 # shellcheck disable=SC2016
 assert_file_contains packaging/windows/uninstall.ps1 'Remove-Item -LiteralPath $resolvedInstallDir -Recurse -Force'
 # shellcheck disable=SC2016

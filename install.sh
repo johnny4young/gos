@@ -69,6 +69,11 @@ _validate_inputs() {
       return 1
       ;;
   esac
+  # Strip trailing slashes so the PATH hint below compares like with like:
+  # /usr/local/bin/ is on PATH as /usr/local/bin.
+  while [ "$GOS_BIN_DIR" != "${GOS_BIN_DIR%/}" ]; do
+    GOS_BIN_DIR="${GOS_BIN_DIR%/}"
+  done
 }
 
 # Cross-platform SHA256 helper
@@ -87,9 +92,11 @@ _sha256() {
 _download() {
   local url="$1" output="$2"
   if command -v curl &>/dev/null; then
-    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 -fsSL -o "$output" "$url"
+    # --max-time bounds the whole transfer: --connect-timeout only covers the
+    # handshake, so a server that accepts and then stalls would hang forever.
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 60 --retry 2 -fsSL -o "$output" "$url"
   elif command -v wget &>/dev/null; then
-    wget --https-only --timeout=15 --tries=3 -qO "$output" "$url"
+    wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -qO "$output" "$url"
   else
     echo "Error: neither curl nor wget found. Install one and try again." >&2
     return 1
@@ -177,6 +184,22 @@ _prepare_bin_dir() {
 
 GOS_TMP_DIR=""
 
+# Refuse anything that is not a parseable gos script. The unpinned (main)
+# install path has no checksum at all, so a captive portal or proxy answering
+# 200 with HTML would otherwise be chmod +x'd into GOS_BIN_DIR. gos self-update
+# applies the same syntax check before activating a download.
+_verify_script() {
+  local file="$1"
+  if [ ! -s "$file" ]; then
+    echo "Error: the downloaded gos script is empty. Aborting." >&2
+    return 1
+  fi
+  if ! grep -q '^GOS_VERSION=' "$file" || ! bash -n "$file" 2>/dev/null; then
+    echo "Error: the download from ${GOS_SCRIPT_URL} is not a gos script (a proxy or captive portal may have answered instead). Aborting." >&2
+    return 1
+  fi
+}
+
 _cleanup_tmp() {
   if [ -n "$GOS_TMP_DIR" ] && [ -d "$GOS_TMP_DIR" ]; then
     rm -rf "$GOS_TMP_DIR"
@@ -201,9 +224,14 @@ main() {
   trap 'exit 143' TERM
 
   echo "Downloading gos..."
-  _download "$GOS_SCRIPT_URL" "$tmp_file"
+  if ! _download "$GOS_SCRIPT_URL" "$tmp_file"; then
+    echo "Error: could not download gos from ${GOS_SCRIPT_URL}." >&2
+    echo "The network may be down or GitHub may be temporarily unavailable; try again in a moment." >&2
+    return 1
+  fi
 
   _verify_checksum "$tmp_file"
+  _verify_script "$tmp_file"
   if ! chmod +x "$tmp_file"; then
     echo "Error: failed to make the downloaded gos executable before installation." >&2
     return 1

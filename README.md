@@ -467,9 +467,11 @@ gos env --auto --fish | source  # fish
 ```
 
 The hook is offline and only changes the current shell's `PATH` when the
-project version is already installed under `GOS_VERSIONS_DIR`. If it is missing,
-it prints a one-line hint to run `gos use`; it never edits shell startup files
-or repoints the global `GOS_INSTALL_DIR` symlink.
+project version is already installed under `GOS_VERSIONS_DIR`. A bare minor
+such as `go 1.24` in `go.mod` is satisfied by the installed `go1.24.x` (when
+exactly one is installed). If the version is missing, it prints a one-line
+hint to run `gos use`; it never edits shell startup files or repoints the
+global `GOS_INSTALL_DIR` symlink.
 
 > **Note:** For safety, `GOS_INSTALL_DIR` must have at least 2 path components and the basename must contain "go" (e.g. `mygo`, `golang`, `.go` all work). System-critical paths like `/usr` or `/etc` are rejected.
 
@@ -558,6 +560,9 @@ issues for sensitive vulnerability details.
 ---
 
 ## Contributing
+
+Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a map of the
+script, the install transaction, and the bash 3.2 rules.
 
 Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for
 setup, issue reporting, validation commands, and pull request expectations.

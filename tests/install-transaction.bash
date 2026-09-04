@@ -10,6 +10,7 @@ fake_bin="${test_root}/bin"
 original_path="$PATH"
 real_mkdir="$(command -v mkdir)"
 real_mv="$(command -v mv)"
+real_ln="$(command -v ln)"
 real_rm="$(command -v rm)"
 real_chmod="$(command -v chmod)"
 
@@ -43,7 +44,7 @@ while [ "$#" -gt 0 ]; do
       output="$2"
       shift 2
       ;;
-    --proto|--connect-timeout|--retry)
+    --proto|--proto-redir|--connect-timeout|--max-time|--speed-limit|--speed-time|--retry)
       shift 2
       ;;
     --tlsv1.2|-fsSL)
@@ -204,6 +205,48 @@ if [ -n "${GOS_TEST_MV_FAIL_TARGET:-}" ] && [ "$target_path" = "$GOS_TEST_MV_FAI
   exit 1
 fi
 
+# Fail the first mv whose source matches the glob, then behave normally, so a
+# test can make one restore attempt fail and verify the EXIT trap retries it.
+if [ -n "${GOS_TEST_MV_FAIL_ONCE_SOURCE_GLOB:-}" ]; then
+  # shellcheck disable=SC2254 # The glob is the whole point of this variable.
+  case "$source_path" in
+    $GOS_TEST_MV_FAIL_ONCE_SOURCE_GLOB)
+      if [ ! -e "$GOS_TEST_MV_FAIL_ONCE_MARKER" ]; then
+        : >"$GOS_TEST_MV_FAIL_ONCE_MARKER"
+        echo "fake mv transient failure: $source_path" >&2
+        exit 1
+      fi
+      ;;
+  esac
+fi
+
+# Simulate gos being killed between two renames: terminate the gos process
+# (its pid is in the mutation lock) instead of performing this mv, once, so
+# the EXIT trap's own retry of the rename goes through.
+if [ -n "${GOS_TEST_MV_KILL_ON_TARGET:-}" ] && [ "$target_path" = "$GOS_TEST_MV_KILL_ON_TARGET" ] \
+  && [ ! -e "$GOS_TEST_MV_KILL_ONCE_MARKER" ]; then
+  : >"$GOS_TEST_MV_KILL_ONCE_MARKER"
+  kill -TERM "$(cat "${GOS_INSTALL_DIR}.gos-lock/pid")"
+  echo "fake mv: gos terminated before rename" >&2
+  exit 1
+fi
+
+# Deliver TERM while the parent shell is waiting for the first rename. Bash
+# handles the deferred trap after this child exits but before the parent's next
+# assignment, which proves the recovery variable was armed before mv started.
+if [ -n "${GOS_TEST_MV_KILL_AFTER_TARGET_GLOB:-}" ] \
+  && [ ! -e "$GOS_TEST_MV_KILL_AFTER_ONCE_MARKER" ]; then
+  # shellcheck disable=SC2254 # The injected target glob is intentional.
+  case "$target_path" in
+    $GOS_TEST_MV_KILL_AFTER_TARGET_GLOB)
+      "$GOS_TEST_REAL_MV" "$@"
+      : >"$GOS_TEST_MV_KILL_AFTER_ONCE_MARKER"
+      kill -TERM "$(cat "${GOS_INSTALL_DIR}.gos-lock/pid")"
+      exit 0
+      ;;
+  esac
+fi
+
 if is_protected_parent_op "$source_path" || is_protected_parent_op "$target_path"; then
   if [ "${GOS_TEST_UNDER_SUDO:-}" != "1" ]; then
     echo "fake mv permission denied: $source_path -> $target_path" >&2
@@ -221,6 +264,39 @@ fi
 
 exec "$GOS_TEST_REAL_MV" "$@"
 FAKE_MV
+
+cat >"${fake_bin}/ln" <<'FAKE_LN'
+#!/usr/bin/env bash
+set -euo pipefail
+
+target_path=""
+for arg in "$@"; do
+  case "$arg" in
+    -*) ;;
+    *) target_path="$arg" ;;
+  esac
+done
+
+if [ -n "${GOS_TEST_PROTECTED_PARENT:-}" ]; then
+  case "$target_path" in
+    "${GOS_TEST_PROTECTED_PARENT}"/*)
+      if [ "${GOS_TEST_UNDER_SUDO:-}" != "1" ]; then
+        echo "fake ln permission denied: $target_path" >&2
+        exit 1
+      fi
+      "$GOS_TEST_REAL_CHMOD" u+w "$GOS_TEST_PROTECTED_PARENT"
+      set +e
+      "$GOS_TEST_REAL_LN" "$@"
+      status=$?
+      set -e
+      "$GOS_TEST_REAL_CHMOD" u-w "$GOS_TEST_PROTECTED_PARENT"
+      exit "$status"
+      ;;
+  esac
+fi
+
+exec "$GOS_TEST_REAL_LN" "$@"
+FAKE_LN
 
 cat >"${fake_bin}/rm" <<'FAKE_RM'
 #!/usr/bin/env bash
@@ -273,7 +349,7 @@ FAKE_SUDO
 chmod +x "${fake_bin}/uname" "${fake_bin}/curl" "${fake_bin}/jq" \
   "${fake_bin}/sha256sum" "${fake_bin}/tar" "${fake_bin}/unzip" \
   "${fake_bin}/go" "${fake_bin}/mkdir" "${fake_bin}/mv" \
-  "${fake_bin}/rm" "${fake_bin}/sudo"
+  "${fake_bin}/rm" "${fake_bin}/ln" "${fake_bin}/sudo"
 
 create_old_install() {
   local install_dir="$1"
@@ -287,13 +363,15 @@ OLD_GO
 }
 
 run_install() {
-  local name="$1" extract_mode="$2" install_kind="$3"
+  local name="$1" extract_mode="$2" install_kind="$3" versions_dir="${4:-}"
   case_dir="${test_root}/${name}"
   tar_log="${case_dir}/tar.log"
   mkdir_fail_path=""
   protected_parent=""
   mv_fail_target=""
   rm_fail_target=""
+  mv_fail_once_glob=""
+  mv_kill_after_glob=""
   output=""
   status=0
 
@@ -328,6 +406,14 @@ run_install() {
       install_dir="${case_dir}/usr/local/go"
       rm_fail_target="${install_dir}.gos-rollback"
       ;;
+    restore-mv-fail-once)
+      install_dir="${case_dir}/usr/local/go"
+      mv_fail_once_glob="*.gos-backup.*"
+      ;;
+    interrupt-after-backup)
+      install_dir="${case_dir}/usr/local/go"
+      mv_kill_after_glob="*.gos-backup.*"
+      ;;
     *)
       fail "unknown install kind: ${install_kind}"
       ;;
@@ -337,17 +423,23 @@ run_install() {
   output="$(
     PATH="${fake_bin}:${original_path}" \
       GOS_INSTALL_DIR="$install_dir" \
+      GOS_VERSIONS_DIR="$versions_dir" \
       GOS_CACHE_DIR="${case_dir}/cache" \
       GOS_TEST_TAR_LOG="$tar_log" \
       GOS_TEST_EXTRACT_MODE="$extract_mode" \
       GOS_TEST_REAL_MKDIR="$real_mkdir" \
       GOS_TEST_REAL_MV="$real_mv" \
       GOS_TEST_REAL_RM="$real_rm" \
+      GOS_TEST_REAL_LN="$real_ln" \
       GOS_TEST_REAL_CHMOD="$real_chmod" \
       GOS_TEST_MKDIR_FAIL_PATH="$mkdir_fail_path" \
       GOS_TEST_PROTECTED_PARENT="$protected_parent" \
       GOS_TEST_MV_FAIL_TARGET="$mv_fail_target" \
       GOS_TEST_RM_FAIL_TARGET="$rm_fail_target" \
+      GOS_TEST_MV_FAIL_ONCE_SOURCE_GLOB="$mv_fail_once_glob" \
+      GOS_TEST_MV_FAIL_ONCE_MARKER="${case_dir}/mv-failed-once" \
+      GOS_TEST_MV_KILL_AFTER_TARGET_GLOB="$mv_kill_after_glob" \
+      GOS_TEST_MV_KILL_AFTER_ONCE_MARKER="${case_dir}/mv-killed-after-once" \
       bash "$script" install 1.21.6 2>&1
   )"
   status=$?
@@ -435,6 +527,35 @@ assert_contains "$output" "sudo mv ${install_dir}.gos-backup" "protected parent 
 assert_contains "$output" "Rollback available: gos rollback" "protected parent rollback output"
 pass "install uses sudo for sibling renames when parent is not writable"
 
+# Mixed layout: a root-owned install slot next to a user-owned versions tree.
+# Escalation must follow the path being written, not the install slot: the
+# staged tree moves into the versions dir without sudo (a sudo mv there would
+# leave root-owned directories under $HOME), while the symlink swap in the
+# protected parent still escalates.
+# Side-by-side mode needs real symlinks; Git Bash's ln -s copies (and the fake
+# uname above reports Darwin, so gos would not refuse), so probe the filesystem
+# like tests/features.bash does and skip the case where links are not links.
+symlink_probe="${test_root}/symlink-probe"
+if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
+  rm -f "$symlink_probe"
+  create_old_install "${test_root}/protected_parent_sbs/usr/local/go"
+  mkdir -p "${test_root}/protected_parent_sbs/home/.gos"
+  chmod u-w "${test_root}/protected_parent_sbs/usr/local"
+  run_install "protected_parent_sbs" "ok" "protected-parent" "${test_root}/protected_parent_sbs/home/.gos/versions"
+  chmod u+w "${test_root}/protected_parent_sbs/usr/local"
+  assert_status 0 "$status" "protected parent side-by-side" "$output"
+  sbs_versions_dir="${test_root}/protected_parent_sbs/home/.gos/versions"
+  [ -L "$install_dir" ] || fail "protected parent side-by-side: install dir is not a symlink"
+  [ "$(readlink "$install_dir")" = "${sbs_versions_dir}/go1.21.6" ] || fail "protected parent side-by-side: symlink target is $(readlink "$install_dir")"
+  assert_new_install_active "$install_dir" "protected parent side-by-side"
+  assert_contains "$output" "sudo ln -s ${sbs_versions_dir}/go1.21.6 ${install_dir}" "protected parent side-by-side link sudo"
+  sudo_in_versions_dir=$(printf '%s\n' "$output" | grep -E "^sudo (mkdir|mv|rm) .*${sbs_versions_dir}" || true)
+  [ -z "$sudo_in_versions_dir" ] || fail "protected parent side-by-side: sudo was used inside the user-owned versions dir: ${sudo_in_versions_dir}"
+  pass "sudo follows the path being written, not the install slot"
+else
+  echo "ok - mixed-layout sudo case skipped: this filesystem has no real symlinks"
+fi
+
 create_old_install "${test_root}/rollback_mv_failure/usr/local/go"
 run_install "rollback_mv_failure" "ok" "rollback-mv-fail"
 assert_status 0 "$status" "rollback mv failure" "$output"
@@ -456,6 +577,91 @@ assert_not_contains "$output" "Rollback available: gos rollback" "rollback rm fa
 assert_contains "$output" "Warning: failed to remove existing rollback installation" "rollback rm failure warning"
 assert_contains "$output" "previous Go installation remains at:" "rollback rm failure backup"
 pass "rollback save rm failure keeps backup and avoids false availability"
+
+# A validation failure after activation restores the backup; if that restore
+# mv itself fails, the slot is empty and the backup intact, and only the EXIT
+# trap can put it back. It used to be disarmed right after the failed restore.
+create_old_install "${test_root}/restore_mv_failure/usr/local/go"
+run_install "restore_mv_failure" "bad-go" "restore-mv-fail-once"
+assert_nonzero_status "$status" "restore mv failure" "$output"
+assert_contains "$output" "fake mv transient failure" "restore mv failure simulated"
+assert_contains "$output" "restoring the previous one" "restore mv failure trap retry"
+assert_old_install_intact "$install_dir" "restore mv failure"
+assert_no_backup_left "$install_dir" "restore mv failure"
+pass "EXIT trap retries a failed backup restore instead of being disarmed"
+
+# TERM delivered while gos waits for the first backup mv is handled before the
+# next shell statement. The trap must already know the backup path then.
+create_old_install "${test_root}/install_interrupted_after_backup/usr/local/go"
+run_install "install_interrupted_after_backup" "ok" "interrupt-after-backup"
+assert_status 143 "$status" "install interrupted after backup" "$output"
+assert_contains "$output" "restoring the previous one" "install interrupted after backup trap"
+assert_old_install_intact "$install_dir" "install interrupted after backup"
+assert_no_backup_left "$install_dir" "install interrupted after backup"
+[ ! -d "${install_dir}.gos-lock" ] || fail "install interrupted after backup: lock left behind"
+pass "install arms crash recovery before the backup rename starts"
+
+# gos rollback moves the active install aside and then the rollback into
+# place; killed in between, the machine has no Go unless the EXIT trap
+# restores the displaced install. Rollback never armed that trap.
+run_rollback() {
+  local name="$1" interrupt_point="${2:-before-restore}"
+  case_dir="${test_root}/${name}"
+  install_dir="${case_dir}/usr/local/go"
+  output=""
+  status=0
+  mkdir -p "$(dirname "$install_dir")"
+  create_old_install "$install_dir"
+  mkdir -p "${install_dir}.gos-rollback/bin"
+  printf '#!/usr/bin/env bash\necho "go version go1.19.0 darwin/arm64"\n' >"${install_dir}.gos-rollback/bin/go"
+  chmod +x "${install_dir}.gos-rollback/bin/go"
+
+  local kill_on_target="" kill_after_glob=""
+  case "$interrupt_point" in
+    before-restore) kill_on_target="$install_dir" ;;
+    after-backup) kill_after_glob="*.gos-current.*" ;;
+    *) fail "unknown rollback interrupt point: ${interrupt_point}" ;;
+  esac
+
+  set +e
+  output="$(
+    PATH="${fake_bin}:${original_path}" \
+      GOS_INSTALL_DIR="$install_dir" \
+      GOS_CACHE_DIR="${case_dir}/cache" \
+      GOS_TEST_REAL_MKDIR="$real_mkdir" \
+      GOS_TEST_REAL_MV="$real_mv" \
+      GOS_TEST_REAL_RM="$real_rm" \
+      GOS_TEST_REAL_LN="$real_ln" \
+      GOS_TEST_REAL_CHMOD="$real_chmod" \
+      GOS_TEST_MV_KILL_ON_TARGET="$kill_on_target" \
+      GOS_TEST_MV_KILL_ONCE_MARKER="${case_dir}/mv-killed-once" \
+      GOS_TEST_MV_KILL_AFTER_TARGET_GLOB="$kill_after_glob" \
+      GOS_TEST_MV_KILL_AFTER_ONCE_MARKER="${case_dir}/mv-killed-after-once" \
+      bash "$script" rollback 2>&1
+  )"
+  status=$?
+  set -e
+}
+
+run_rollback "rollback_interrupted"
+assert_status 143 "$status" "rollback interrupted" "$output"
+assert_contains "$output" "restoring the previous one" "rollback interrupted trap"
+assert_old_install_intact "$install_dir" "rollback interrupted"
+[ -x "${install_dir}.gos-rollback/bin/go" ] || fail "rollback interrupted: rollback slot should be untouched"
+current_backups=$(find "$(dirname "$install_dir")" -maxdepth 1 -name "go.gos-current.*" -print)
+[ -z "$current_backups" ] || fail "rollback interrupted: displaced install left behind: ${current_backups}"
+[ ! -d "${install_dir}.gos-lock" ] || fail "rollback interrupted: lock left behind"
+pass "EXIT trap restores the active install when rollback is killed mid-swap"
+
+run_rollback "rollback_interrupted_after_backup" "after-backup"
+assert_status 143 "$status" "rollback interrupted after backup" "$output"
+assert_contains "$output" "restoring the previous one" "rollback interrupted after backup trap"
+assert_old_install_intact "$install_dir" "rollback interrupted after backup"
+[ -x "${install_dir}.gos-rollback/bin/go" ] || fail "rollback interrupted after backup: rollback slot should be untouched"
+current_backups=$(find "$(dirname "$install_dir")" -maxdepth 1 -name "go.gos-current.*" -print)
+[ -z "$current_backups" ] || fail "rollback interrupted after backup: displaced install left behind: ${current_backups}"
+[ ! -d "${install_dir}.gos-lock" ] || fail "rollback interrupted after backup: lock left behind"
+pass "rollback arms crash recovery before the active-install rename starts"
 
 run_install "success_empty" "ok" "default"
 assert_status 0 "$status" "success empty" "$output"

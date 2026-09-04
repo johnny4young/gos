@@ -6,12 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- `gos --version` and `gos -V` print the gos version like `gos version`.
+- `docs/ARCHITECTURE.md` maps `gos.sh`, the command manifest and its generated surfaces, the install transaction and its crash-recovery trap, the trust boundaries, the on-disk state, and the bash 3.2 rules; CONTRIBUTING and the README point to it.
+
 ### Fixed
 
+- `gos rollback` is now crash-safe like `gos install`: an interrupt between moving the active Go aside and moving the rollback into place used to leave the machine with no Go at all, because rollback never armed the EXIT trap that restores the displaced installation. The trap also stays armed when a post-activation restore fails midway, instead of being disarmed right after the failed attempt.
+- The `gos env --auto` hook and `gos status` now resolve a bare minor from `go.mod` (`go 1.24`) against the installed versions, offline: with `go1.24.3` installed the hook switches to it instead of printing `go1.24 is not installed` on every directory change, and `status` reports `satisfied by active go1.24.3` instead of `differs from active`. `gos status --json` gains a `project.resolved` field.
+- `gos.cmd` (the Windows shim) and `install.ps1` now look for Git for Windows' `bash.exe` in its install locations first and never accept the WSL launcher in `System32`, which `where bash.exe` returned first on machines with WSL enabled and which cannot run a Windows path. Missing Windows environment roots are tolerated, custom Git paths are quoted, and the shim's error goes to stderr so it cannot corrupt `--json` output.
+- `install.sh` now refuses a download that is not a parseable gos script (empty, or a captive-portal/proxy page answered with HTTP 200), bounds the whole transfer with `--max-time`, reports a failed download with a next step instead of raw curl output, and normalizes a trailing slash in `GOS_BIN_DIR` so the "add gos to your PATH" hint is not printed for a directory already on `PATH`. `install.ps1` bounds and retries its download the same way.
+- Side-by-side installs no longer escalate to `sudo` for the versions tree just because `GOS_INSTALL_DIR` needs it (and vice versa): the escalation decision now follows the path being written, so a root-owned `/usr/local/go` next to a user-owned `GOS_VERSIONS_DIR` no longer leaves root-owned version directories under `$HOME` or prompts for a password it does not need.
+- A present-but-broken SHA256 tool (for example a `shasum` missing a Perl module) is now reported through the normal "no SHA256 tool output" path instead of aborting `gos install`/`gos self-update` silently under `set -e`.
+- The `jq` checksum and platform lookups tolerate feed entries without a `files` array instead of aborting on the first one, which turned a present checksum into "not found" and forced a needless `include=all` download.
+- `gos install` no longer promises "Resuming download" on wget-only hosts, where `wget -O` restarts the file; and `gos doctor`'s hash probe uses an explicit `mktemp` template so strict BSD `mktemp` implementations no longer produce a false "no working SHA256 tool".
+- A rollback slot left as a dangling symlink (its side-by-side version was uninstalled) is reported consistently: `gos status` shows `Rollback: broken link -> …` with a `gos prune --rollback` hint (and `rollback_available:false` plus a new `rollback_state` field in `--json`), and `gos rollback`/`rollback --dry-run` explain the stale link instead of claiming no rollback exists.
+- `gos self-update` now takes a lock keyed to the resolved gos script path, so two concurrent updates cannot race on the final rename even when their shells use different `GOS_INSTALL_DIR` values.
+- A verified `.partial` download that can be neither renamed nor copied into the cache (disk full) is now extracted once and discarded with a warning, instead of being left behind to be "resumed" on every later install.
+- JSON output escapes every control character (`\u00XX`), not only newline, carriage return, and tab, so a symlink target or PATH entry containing one can no longer produce an invalid document.
+- `GOS_CACHE_DIR` is normalized and validated like `GOS_INSTALL_DIR` and `GOS_VERSIONS_DIR` (safe absolute path, no system roots, `.`/`..` components, or control characters) before any command that touches the cache, and `gos doctor` gains a `cache-dir` check.
+- Fish completion offers `--json` for `gos use` like the Bash and Zsh completions already did.
+- `gos run` and `gos each` keep the command's stdout clean when they install a missing version on demand: every install progress line now goes to stderr there, so `gos run 1.24 go env GOPATH > out` no longer mixes "Downloading…" into the file.
+- A lock directory whose pid file is missing (the escalated write can fail) is reported as held with an unknown pid instead of "stale", so nobody is told to `rm -rf` a live lock; a lock held by another user's process (where `kill -0` fails with EPERM) is recognized as held too.
+- A leading `--json` is accepted only by the commands with a JSON contract; `gos --json install` and `gos --json run …` now fail with "does not support --json" instead of silently disabling color and progress and printing human text.
 - `gos platforms` works again on hosts that have `python3` but no `jq`: the python3 feed parser contained a syntax error, so every such host reported "no supported platforms found".
+
+### Performance
+
+- `gos install 1.24` (a bare minor) and the `gos run`/`gos each` fast paths now resolve the minor from the on-disk discovery feed cache instead of downloading the multi-megabyte `include=all` feed on every run. Checksums still come from a fresh feed fetch: a memoized feed that came from disk is re-downloaded before any checksum lookup, so the cache can only ever influence discovery.
+- Version validation, path-depth checks, the project-manifest directory walk, and the feed TTL parse no longer fork `grep`, `tr`/`wc`, `dirname`, or `sed`; `gos status` and the auto-switch hook's `gos __project-version` each drop roughly 10-20 ms of process spawning per run.
+- The `gos env --auto` hook no longer spawns a `gos` process on every prompt: a pure-shell manifest snapshot re-evaluates only when the directory, nearest manifest, or installed versions change (or while the project's version is still missing, so the switch happens right after `gos use`).
+
+### Security
+
+- Downloads can no longer hang forever on a server that accepts the connection and then stalls: feed and metadata fetches carry a total `--max-time`, archive downloads abort when the transfer drops below 1 KB/s for 30 s, and the wget path enforces the same TLS 1.2 floor curl already had.
 
 ### Changed
 
+- The AUR package tracks the release again (it shipped 1.9.0 still pointing at 1.8.0): `scripts/update-aur.bash <version>` rewrites `PKGBUILD` and `.SRCINFO` from the release tarball digest, `tests/packaging.bash` fails when `pkgver` and `GOS_VERSION` disagree, and RELEASING.md gains the post-release step.
 - The test harness now runs discovery and install cases against jq only, python3 only, and no feed parser at all; CI requires both optional parsers so every parser branch is exercised there, while local runs clearly report unavailable parser cases. A TTY test whose runner breaks now fails the suite instead of reporting a skipped branch (two TTY blocks had never actually run).
 - Every GitHub Actions job now sets `timeout-minutes`, the release smoke matrix no longer cancels the other platforms when one fails, ShellCheck is installed from a pinned release like shfmt, CI checks every tracked file for whitespace errors and conflict markers, and the Bash syntax gate derives its file list from `git ls-files`.
 - The nightly canary opens (or updates) a `canary`-labelled tracking issue when it fails instead of relying on the default workflow e-mail.

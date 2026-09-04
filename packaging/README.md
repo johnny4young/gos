@@ -30,15 +30,13 @@ standard vendor directories, the `gos.1` man page, and the MIT license.
 Publishing and bumping are manual maintainer steps (the AUR accepts a package
 the moment it is pushed — there is no review queue):
 
-1. Recompute the source digest for the new tag (the trailing `cut` drops the
-   `  -` filename field so you paste exactly the 64-hex digest):
-   `curl -sL https://github.com/johnny4young/gos/archive/refs/tags/vX.Y.Z.tar.gz | sha256sum | cut -d' ' -f1`
-2. Update `pkgver`, reset `pkgrel=1`, and replace `sha256sums` in `PKGBUILD`, then
-   mirror the same `pkgver`/`pkgrel`/`sha256sums` into `.SRCINFO`
-   (`makepkg --printsrcinfo > .SRCINFO` on an Arch box regenerates it exactly).
-3. `tests/packaging.bash` guards that the two files agree and that every packaged
-   path exists before you push.
-4. Push to the AUR remote from a checkout of `ssh://aur@aur.archlinux.org/gos.git`
+1. Run `scripts/update-aur.bash X.Y.Z` after the GitHub release exists. It
+   downloads the tag's source tarball, computes its sha256, and rewrites
+   `pkgver`, `pkgrel=1`, `source`, and `sha256sums` in both `PKGBUILD` and
+   `.SRCINFO` (pass the digest as a second argument to skip the download).
+2. `tests/packaging.bash` guards that the two files agree, that `pkgver`
+   matches `GOS_VERSION`, and that every packaged path exists before you push.
+3. Push to the AUR remote from a checkout of `ssh://aur@aur.archlinux.org/gos.git`
    (requires an AUR account with an SSH key on file).
 
 ## Maintenance Rules

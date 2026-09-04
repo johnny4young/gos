@@ -6,3 +6,6 @@
 *.bash text eol=lf
 *.fish text eol=lf
 *.zsh  text eol=lf
+# cmd.exe parses batch files by byte offset and mishandles parenthesized blocks
+# in LF-only files, so the Windows shim always checks out with CRLF.
+*.cmd  text eol=crlf

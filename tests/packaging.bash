@@ -182,4 +182,97 @@ while IFS= read -r packaged; do
   [ -f "$packaged" ] || fail "AUR PKGBUILD installs a missing file: ${packaged}"
 done <<<"$aur_sources"
 
+# The AUR package must track the released gos version: 1.9.0 shipped with
+# the PKGBUILD still at 1.8.0 because nothing compared them.
+gos_version="$(sed -n 's/^GOS_VERSION="\([^"]*\)"$/\1/p' gos.sh)"
+[ -n "$gos_version" ] || fail "could not read GOS_VERSION from gos.sh"
+[ "$pkgbuild_ver" = "$gos_version" ] \
+  || fail "AUR PKGBUILD pkgver (${pkgbuild_ver}) must match GOS_VERSION (${gos_version}); run scripts/update-aur.bash ${gos_version}"
+
+# scripts/update-aur.bash rewrites both files transactionally from a version
+# and the release tarball digest.
+aur_tmp="${tmp_dir}/aur"
+mkdir -p "$aur_tmp"
+cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO "$aur_tmp/"
+aur_sha="fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+bash scripts/update-aur.bash 9.8.7 "$aur_sha" --dir "$aur_tmp" >/dev/null
+assert_file_contains "$aur_tmp/PKGBUILD" "pkgver=9.8.7"
+assert_file_contains "$aur_tmp/PKGBUILD" "pkgrel=1"
+assert_file_contains "$aur_tmp/PKGBUILD" "sha256sums=('${aur_sha}')"
+assert_file_contains "$aur_tmp/.SRCINFO" "pkgver = 9.8.7"
+assert_file_contains "$aur_tmp/.SRCINFO" "source = gos-9.8.7.tar.gz::https://github.com/johnny4young/gos/archive/refs/tags/v9.8.7.tar.gz"
+assert_file_contains "$aur_tmp/.SRCINFO" "sha256sums = ${aur_sha}"
+
+# Inject a failure while replacing the second file. The first replacement must
+# be rolled back so callers never get mismatched AUR metadata.
+real_ruby="$(command -v ruby)"
+fake_ruby_bin="${tmp_dir}/fake-ruby-bin"
+mkdir -p "$fake_ruby_bin"
+cat >"${fake_ruby_bin}/ruby" <<'FAKE_RUBY'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${GOS_TEST_AUR_FAILURE:-}" = "" ]; then
+  exec "$GOS_TEST_REAL_RUBY" "$@"
+fi
+
+{
+  cat <<'RUBY_PRELUDE'
+class << File
+  alias gos_original_rename rename
+  def rename(source, target)
+    if ENV['GOS_TEST_AUR_FAILURE'] == 'replace' &&
+       File.basename(target) == '.SRCINFO' && source.include?('.gos-new.')
+      raise IOError, 'simulated second AUR metadata replacement failure'
+    end
+    gos_original_rename(source, target)
+  end
+end
+class File
+  alias gos_original_fsync fsync
+  def fsync
+    if ENV['GOS_TEST_AUR_FAILURE'] == 'stage' && path.include?('.SRCINFO.gos-new.')
+      raise IOError, 'simulated staged metadata flush failure'
+    end
+    gos_original_fsync
+  end
+end
+RUBY_PRELUDE
+  cat
+} | "$GOS_TEST_REAL_RUBY" "$@"
+FAKE_RUBY
+chmod +x "${fake_ruby_bin}/ruby"
+aur_pkgbuild_before="$(sha256_file "$aur_tmp/PKGBUILD")"
+aur_srcinfo_before="$(sha256_file "$aur_tmp/.SRCINFO")"
+for aur_failure in stage replace; do
+  set +e
+  aur_output="$(
+    PATH="${fake_ruby_bin}:$PATH" \
+      GOS_TEST_REAL_RUBY="$real_ruby" \
+      GOS_TEST_AUR_FAILURE="$aur_failure" \
+      bash scripts/update-aur.bash 9.8.8 "$aur_sha" --dir "$aur_tmp" 2>&1
+  )"
+  aur_status=$?
+  set -e
+  [ "$aur_status" -ne 0 ] || fail "update-aur should fail when the second replacement fails"
+  assert_contains "$aur_output" "could not update AUR metadata transactionally" "update-aur transactional failure"
+  [ "$(sha256_file "$aur_tmp/PKGBUILD")" = "$aur_pkgbuild_before" ] || fail "update-aur did not restore PKGBUILD after a late failure"
+  [ "$(sha256_file "$aur_tmp/.SRCINFO")" = "$aur_srcinfo_before" ] || fail "update-aur changed .SRCINFO after a late failure"
+  aur_residue="$(find "$aur_tmp" -maxdepth 1 \( -name '*.gos-new.*' -o -name '*.gos-old.*' \) -print)"
+  [ -z "$aur_residue" ] || fail "update-aur left transaction files behind: ${aur_residue}"
+done
+
+set +e
+aur_output="$(bash scripts/update-aur.bash 9.8.7 0000000000000000000000000000000000000000000000000000000000000000 --dir "$aur_tmp" 2>&1)"
+aur_status=$?
+set -e
+[ "$aur_status" -ne 0 ] || fail "update-aur must reject the placeholder digest"
+assert_contains "$aur_output" "placeholder SHA256 is not allowed" "update-aur placeholder"
+set +e
+aur_output="$(bash scripts/update-aur.bash 9.8.7-rc1 "$aur_sha" --dir "$aur_tmp" 2>&1)"
+aur_status=$?
+set -e
+[ "$aur_status" -ne 0 ] || fail "update-aur must reject pre-release versions"
+assert_contains "$aur_output" "stable X.Y.Z only" "update-aur pre-release"
+
 pass "AUR PKGBUILD and .SRCINFO stay consistent and buildable"

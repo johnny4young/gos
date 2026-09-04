@@ -568,6 +568,12 @@ assert(contributing.include?("scripts/validate-local.bash"), "CONTRIBUTING valid
 assert(contributing.include?("workflow YAML parse"), "CONTRIBUTING must document workflow YAML validation")
 assert(contributing.include?("Ruby is required for the workflow YAML parse checks"), "CONTRIBUTING must document required Ruby dependency")
 assert(contributing.include?("scripts/validate-local.bash --required-only"), "CONTRIBUTING must document required-only validation mode")
+assert(contributing.include?("docs/ARCHITECTURE.md"), "CONTRIBUTING must point contributors at docs/ARCHITECTURE.md")
+architecture = file_text("docs/ARCHITECTURE.md")
+assert(!architecture.empty?, "repository must include docs/ARCHITECTURE.md")
+["_gos_command_manifest", "GOS_ACTIVATION_BACKUP", ".gos-rollback", "bash 3.2", "sync-command-surfaces.bash"].each do |fragment|
+  assert(architecture.include?(fragment), "docs/ARCHITECTURE.md must mention #{fragment}")
+end
 assert(contributing.include?("`./gos.sh version`") && contributing.include?("`./gos.sh help`") && contributing.include?("CLI smoke checks"), "CONTRIBUTING must document local CLI smoke checks")
 assert(contributing.include?("optional") && contributing.include?("ShellCheck/shfmt/zsh/Fish/PowerShell checks"), "CONTRIBUTING must explain optional local validation tools")
 
@@ -631,6 +637,7 @@ end
   "git diff --check",
   "scripts/update-changelog.bash",
   "scripts/update-packaging.bash",
+  "scripts/update-aur.bash",
   "Dir[\".github/workflows/*.{yml,yaml}\"]"
 ].each do |fragment|
   assert(releasing.include?(fragment), "RELEASING.md must mention #{fragment}")
