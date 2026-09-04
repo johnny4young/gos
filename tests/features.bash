@@ -22,6 +22,27 @@ trap cleanup EXIT
 
 mkdir -p "$fake_bin"
 
+# Parser matrix. gos parses the downloads feed with jq, then python3, then a
+# grep scrape, but the host machine decides which branch a test exercises, so
+# a bug in a fallback (the python3 platforms parser was a SyntaxError for
+# months) stays green wherever jq is installed. GOS_TEST_PARSERS=jq|python3|none
+# runs a case with a restricted PATH exposing exactly that parser; the default
+# (host) keeps the machine's own PATH.
+tools_bin="${test_root}/tools-bin"
+parser_jq_bin="${test_root}/parser-jq"
+parser_python3_bin="${test_root}/parser-python3"
+mkdir -p "$tools_bin" "$parser_jq_bin" "$parser_python3_bin"
+for tool in bash sh env uname grep sed awk sort cut tr head tail wc mktemp tar mkdir rm mv cp ln readlink dirname basename date stat cat du uniq realpath chmod touch id; do
+  tool_path="$(command -v "$tool" 2>/dev/null)" || continue
+  case "$tool_path" in /*) ln -s "$tool_path" "${tools_bin}/${tool}" ;; esac
+done
+if tool_path="$(command -v jq 2>/dev/null)"; then
+  ln -s "$tool_path" "${parser_jq_bin}/jq"
+fi
+if tool_path="$(command -v python3 2>/dev/null)"; then
+  ln -s "$tool_path" "${parser_python3_bin}/python3"
+fi
+
 cat >"${fake_bin}/uname" <<'FAKE_UNAME'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -292,9 +313,18 @@ run_gos() {
   : >"${case_dir}/urls.log"
   : >"${case_dir}/curl-args.log"
 
+  local gos_path
+  case "${GOS_TEST_PARSERS:-host}" in
+    host) gos_path="${fake_bin}:${original_path}" ;;
+    jq) gos_path="${fake_bin}:${parser_jq_bin}:${tools_bin}" ;;
+    python3) gos_path="${fake_bin}:${parser_python3_bin}:${tools_bin}" ;;
+    none) gos_path="${fake_bin}:${tools_bin}" ;;
+    *) fail "unknown GOS_TEST_PARSERS value: ${GOS_TEST_PARSERS}" ;;
+  esac
+
   set +e
   output="$(
-    PATH="${fake_bin}:${original_path}" \
+    PATH="$gos_path" \
       GOS_INSTALL_DIR="${GOS_TEST_INSTALL_DIR:-${case_dir}/go}" \
       GOS_CACHE_DIR="${case_dir}/cache" \
       GOS_DOWNLOAD_MIRROR="${GOS_TEST_MIRROR:-}" \
@@ -318,10 +348,16 @@ run_gos() {
   set -e
 }
 
+# Run a script under a pseudo-terminal and return its exit status. pty_ran
+# records whether a harness was available at all, so callers can tell "no PTY
+# on this machine" (skip) apart from "the command under test failed" (fail).
+pty_ran=0
 run_with_pty() {
   local runner="$1" out_file="$2"
+  pty_ran=0
 
-  if command -v python3 >/dev/null 2>&1; then
+  if [ "${GOS_TEST_PTY_BACKEND:-auto}" != "script" ] && command -v python3 >/dev/null 2>&1; then
+    pty_ran=1
     python3 - "$runner" >"$out_file" 2>&1 <<'PYPTY'
 import os
 import pty
@@ -338,12 +374,59 @@ PYPTY
   fi
 
   if command -v script >/dev/null 2>&1; then
-    script -q /dev/null "$runner" >"$out_file" 2>&1
+    pty_ran=1
+    if script --version >/dev/null 2>&1; then
+      # util-linux requires -c for the command and -e to propagate its status.
+      script -q -e -c "$runner" /dev/null >"$out_file" 2>&1
+    else
+      # BSD script (including macOS) accepts the command after the transcript.
+      script -q /dev/null "$runner" >"$out_file" 2>&1
+    fi
     return $?
   fi
 
   return 127
 }
+
+# Run a TTY case that must succeed. Returns 0 when it ran and exited 0 (the
+# caller then asserts on the captured output) and 1 when no PTY harness
+# exists (printing a skip line). Any other exit status fails the suite, so a
+# broken runner can never masquerade as a skipped branch: two of these blocks
+# silently "skipped" for months because the runner lacked an env var.
+run_tty_ok() {
+  local runner="$1" out_file="$2" name="$3" rc=0
+  run_with_pty "$runner" "$out_file" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$pty_ran" -eq 0 ]; then
+    echo "ok - ${name} TTY branch skipped: no usable pseudo-terminal harness"
+    return 1
+  fi
+  fail "${name}: TTY runner failed (status ${rc}): $(cat "$out_file")"
+}
+
+# Force the fallback even when python3 is installed so CI covers both the
+# util-linux and BSD script command lines, including child-status propagation.
+if command -v script >/dev/null 2>&1; then
+  runner="${test_root}/script-pty-runner.sh"
+  cat >"$runner" <<'SCRIPT_PTY_RUNNER'
+#!/usr/bin/env bash
+printf 'script-pty-ok\n'
+exit 23
+SCRIPT_PTY_RUNNER
+  chmod +x "$runner"
+  set +e
+  GOS_TEST_PTY_BACKEND=script run_with_pty "$runner" "${test_root}/script-pty.out"
+  script_pty_status=$?
+  set -e
+  [ "$script_pty_status" -eq 23 ] \
+    || fail "script PTY backend did not propagate status 23 (got ${script_pty_status}): $(cat "${test_root}/script-pty.out")"
+  assert_contains "$(cat "${test_root}/script-pty.out")" "script-pty-ok" "script PTY backend output"
+  pass "script PTY fallback runs commands and propagates their status"
+else
+  echo "ok - script PTY fallback skipped: script not installed on this host"
+fi
 
 create_old_install() {
   local install_dir="$1" version="${2:-1.20.0}" marker="${3:-old}"
@@ -569,6 +652,49 @@ run_gos "$case_dir" bash "$script" platforms 1.21.6 --json
 [ "$status" -eq 0 ] || fail "platforms --json failed: ${output}"
 assert_json "$output" "platforms --json"
 assert_contains "$output" '"platforms":["darwin/arm64","linux/amd64"]' "platforms json"
+
+# Every feed parser branch must produce the same answers: discovery (list,
+# platforms) works with jq, python3, or the grep scrape alone, and install
+# verifies through jq/python3 metadata while the scrape-only host falls back
+# to the companion .sha256 (404 in this harness) and warns instead of dying.
+parser_cases_run=0
+parser_cases_skipped=0
+for parsers in jq python3 none; do
+  case "$parsers" in
+    jq | python3)
+      if [ ! -x "${test_root}/parser-${parsers}/${parsers}" ]; then
+        if [ "${CI:-}" = "true" ]; then
+          fail "feed parser ${parsers} is required in CI so every parser branch runs"
+        fi
+        echo "ok - feed parser ${parsers} cases skipped: ${parsers} not installed on this host"
+        parser_cases_skipped=$((parser_cases_skipped + 1))
+        continue
+      fi
+      ;;
+  esac
+  case_dir="${test_root}/parsers-${parsers}"
+  GOS_TEST_PARSERS="$parsers" run_gos "$case_dir" bash "$script" platforms 1.21.6 --json
+  [ "$status" -eq 0 ] || fail "platforms --json with parsers=${parsers} failed: ${output}"
+  assert_contains "$output" '"platforms":["darwin/arm64","linux/amd64"]' "platforms json (parsers=${parsers})"
+  GOS_TEST_PARSERS="$parsers" run_gos "$case_dir" bash "$script" list --json
+  [ "$status" -eq 0 ] || fail "list --json with parsers=${parsers} failed: ${output}"
+  assert_contains "$output" '"versions":["go1.20.0","go1.21rc1","go1.21.6","go1.22rc1"]' "list json (parsers=${parsers})"
+  GOS_TEST_PARSERS="$parsers" run_gos "$case_dir" bash "$script" install 1.21.6
+  [ "$status" -eq 0 ] || fail "install with parsers=${parsers} failed: ${output}"
+  if [ "$parsers" = "none" ]; then
+    assert_contains "$output" "skipping integrity verification" "install without a feed parser warns (parsers=none)"
+    assert_not_contains "$output" "Checksum verified." "install without a feed parser cannot verify (parsers=none)"
+  else
+    assert_contains "$output" "Checksum verified." "install verifies via feed metadata (parsers=${parsers})"
+  fi
+  [ -x "${case_dir}/go/bin/go" ] || fail "install with parsers=${parsers} left no go binary"
+  parser_cases_run=$((parser_cases_run + 1))
+done
+if [ "$parser_cases_skipped" -eq 0 ]; then
+  pass "feed parsing agrees across jq, python3, and the grep fallback"
+else
+  pass "feed parsing agrees across ${parser_cases_run}/3 available parser branches"
+fi
 
 case_dir="${test_root}/status"
 mkdir -p "$case_dir/project" "$case_dir/cache"
@@ -916,12 +1042,10 @@ GOS_CACHE_DIR="${case_dir}/cache" \
   bash "$script" doctor
 TTY_DOCTOR
 chmod +x "$runner"
-if run_with_pty "$runner" "${case_dir}/doctor-tty.out"; then
+if run_tty_ok "$runner" "${case_dir}/doctor-tty.out" "doctor color"; then
   doctor_tty=$(<"${case_dir}/doctor-tty.out")
   assert_contains "$doctor_tty" $'\033[32m✓\033[0m' "doctor tty ok symbol"
   assert_contains "$doctor_tty" $'\033[32mok\033[0m' "doctor tty ok label"
-else
-  echo "ok - doctor color TTY branch skipped: no usable pseudo-terminal harness"
 fi
 runner="${case_dir}/doctor-no-color.sh"
 cat >"$runner" <<TTY_DOCTOR_NO_COLOR
@@ -935,7 +1059,7 @@ GOS_CACHE_DIR="${case_dir}/plain-cache" \
   bash "$script" doctor
 TTY_DOCTOR_NO_COLOR
 chmod +x "$runner"
-if run_with_pty "$runner" "${case_dir}/doctor-no-color.out"; then
+if run_tty_ok "$runner" "${case_dir}/doctor-no-color.out" "doctor NO_COLOR"; then
   doctor_plain=$(<"${case_dir}/doctor-no-color.out")
   case "$doctor_plain" in
     *$'\033['*) fail "NO_COLOR doctor output must not contain ANSI: ${doctor_plain}" ;;
@@ -943,8 +1067,6 @@ if run_with_pty "$runner" "${case_dir}/doctor-no-color.out"; then
   case "$doctor_plain" in
     *"✓"*) fail "NO_COLOR doctor output must not contain symbols: ${doctor_plain}" ;;
   esac
-else
-  echo "ok - doctor NO_COLOR TTY branch skipped: no usable pseudo-terminal harness"
 fi
 pass "doctor color is limited to interactive output and honors NO_COLOR"
 
@@ -962,11 +1084,9 @@ GOS_CACHE_DIR="${case_dir}/cache" \
   bash "$script" status
 TTY_STATUS
 chmod +x "$runner"
-if run_with_pty "$runner" "${case_dir}/status-tty.out"; then
+if run_tty_ok "$runner" "${case_dir}/status-tty.out" "status color"; then
   status_tty=$(<"${case_dir}/status-tty.out")
   assert_contains "$status_tty" $'\033[32mgo' "status tty active version is green"
-else
-  echo "ok - status color TTY branch skipped: no usable pseudo-terminal harness"
 fi
 pass "status color is limited to interactive output"
 
@@ -990,12 +1110,10 @@ GOS_CACHE_DIR="${case_dir}/cache" \
   bash "$script" list --installed
 TTY_LIST
 chmod +x "$runner"
-if run_with_pty "$runner" "${case_dir}/list-tty.out"; then
+if run_tty_ok "$runner" "${case_dir}/list-tty.out" "list installed color"; then
   list_tty=$(<"${case_dir}/list-tty.out")
   assert_contains "$list_tty" $'\033[32mgo1.20rc1\033[0m (active)' "list installed tty marks active in green"
   assert_not_contains "$list_tty" "go1.19.9 (active)" "list installed tty leaves inactive unmarked"
-else
-  echo "ok - list installed color TTY branch skipped: no usable pseudo-terminal harness"
 fi
 pass "list --installed marks the active version only interactively"
 
@@ -1021,6 +1139,8 @@ TTY_ERROR
 chmod +x "$runner"
 if run_with_pty "$runner" "${case_dir}/error-tty.out"; then
   fail "bad install version under TTY should fail"
+elif [ "$pty_ran" -eq 0 ]; then
+  echo "ok - stderr style error TTY branch skipped: no usable pseudo-terminal harness"
 else
   error_tty=$(<"${case_dir}/error-tty.out")
   assert_contains "$error_tty" $'\033[31m✗\033[0m' "tty error symbol"
@@ -1044,6 +1164,7 @@ PATH="${fake_bin}:${original_path}" \
 TERM="xterm-256color" \
 GOS_INSTALL_DIR="${case_dir}/active-go" \
 GOS_CACHE_DIR="${case_dir}/cache" \
+GOS_TEST_REAL_MV="${real_mv}" \
 GOS_TEST_URL_LOG="${case_dir}/warning-urls.log" \
 GOS_TEST_CURL_ARGS_LOG="${case_dir}/warning-curl-args.log" \
 GOS_TEST_DOWNLOAD_MODE="ok" \
@@ -1058,12 +1179,10 @@ TTY_WARNING
 chmod +x "$runner"
 : >"${case_dir}/warning-urls.log"
 : >"${case_dir}/warning-curl-args.log"
-if run_with_pty "$runner" "${case_dir}/warning-tty.out"; then
+if run_tty_ok "$runner" "${case_dir}/warning-tty.out" "stderr style warning"; then
   warning_tty=$(<"${case_dir}/warning-tty.out")
   assert_contains "$warning_tty" $'\033[33m!\033[0m' "tty warning symbol"
   assert_contains "$warning_tty" $'\033[33mWarning:' "tty warning label"
-else
-  echo "ok - stderr style warning TTY branch skipped: no usable pseudo-terminal harness"
 fi
 runner="${case_dir}/error-no-color.sh"
 cat >"$runner" <<TTY_ERROR_NO_COLOR
@@ -1079,6 +1198,8 @@ TTY_ERROR_NO_COLOR
 chmod +x "$runner"
 if run_with_pty "$runner" "${case_dir}/error-no-color.out"; then
   fail "bad install version with NO_COLOR should fail"
+elif [ "$pty_ran" -eq 0 ]; then
+  echo "ok - NO_COLOR error TTY branch skipped: no usable pseudo-terminal harness"
 else
   error_plain=$(<"${case_dir}/error-no-color.out")
   case "$error_plain" in
@@ -1615,6 +1736,7 @@ GOS_INSTALL_DIR="${case_dir}/go" \
 GOS_CACHE_DIR="${case_dir}/cache" \
 GOS_DOWNLOAD_MIRROR="" \
 GOS_VERSIONS_DIR="" \
+GOS_TEST_REAL_MV="${real_mv}" \
 GOS_TEST_URL_LOG="${case_dir}/urls.log" \
 GOS_TEST_CURL_ARGS_LOG="${case_dir}/curl-args.log" \
 GOS_TEST_DOWNLOAD_MODE="ok" \
@@ -1627,12 +1749,10 @@ GOS_FEED_TTL="" \
   bash "$script" install 1.21.6
 TTY_RUNNER
 chmod +x "$runner"
-if run_with_pty "$runner" "${case_dir}/pty.out"; then
+if run_tty_ok "$runner" "${case_dir}/pty.out" "download progress"; then
   archive_args=$(grep 'go1.21.6.darwin-arm64.tar.gz' "${case_dir}/curl-args.log" | tail -n 1 || true)
   assert_contains "$archive_args" "--progress-bar" "tty archive download enables curl progress"
   assert_contains "$archive_args" "-fSL" "tty archive download keeps curl fail/location flags"
-else
-  echo "ok - download progress TTY branch skipped: no usable pseudo-terminal harness"
 fi
 pass "download progress is limited to interactive archive downloads"
 

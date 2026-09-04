@@ -17,13 +17,20 @@ jobs:
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SHELLCHECK_VERSION: v0.11.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Pinned like shfmt: the apt package moves with the runner image, so an
+      # image refresh could turn CI red with no change in the repository.
       - name: Install ShellCheck
         run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
+          curl -fsSL -o /tmp/shellcheck.tar.xz "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          tar -xJf /tmp/shellcheck.tar.xz -C /tmp
+          sudo install -m 0755 "/tmp/shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
 
       - name: Run ShellCheck
         run: |
@@ -32,6 +39,7 @@ jobs:
   shfmt:
     name: shfmt
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       SHFMT_VERSION: v3.13.1
     steps:
@@ -51,6 +59,7 @@ jobs:
   smoke:
     name: Smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -67,13 +76,42 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zsh fish
 
+      # Every tracked shell file, derived from git so a new script can never be
+      # left out of the syntax gate (validate-local keeps the explicit list and an
+      # invariant asserts the two agree).
       - name: Bash syntax
         run: |
-          bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-bash-command-completions.bash scripts/sync-command-surfaces.bash scripts/sync-embedded-completions.bash scripts/sync-fish-command-completions.bash scripts/sync-man-page.bash scripts/sync-readme-usage.bash scripts/sync-zsh-command-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash scripts/validate-local.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
+          git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --
 
       - name: Command surface sync
         run: |
           bash scripts/sync-command-surfaces.bash --check
+
+      # The feature suite has isolated jq-only and python3-only branches. Make
+      # both parsers hard CI dependencies instead of silently shrinking the
+      # matrix if a hosted-runner image changes.
+      - name: Require feed parser matrix dependencies
+        if: runner.os != 'Windows'
+        run: |
+          command -v jq
+          jq --version
+          command -v python3
+          python3 --version
+
+      # `shell: bash` resolves to Homebrew's bash 5 on the macOS image, so the
+      # bash 3.2 floor gos promises (stock macOS) would otherwise only ever be
+      # exercised on contributors' Macs. Put the system bash first on PATH so
+      # the suites, and the gos.sh they spawn, run under 3.2.
+      - name: Bash 3.2 compatibility
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bash32"
+          ln -s /bin/bash "${RUNNER_TEMP}/bash32/bash"
+          export PATH="${RUNNER_TEMP}/bash32:${PATH}"
+          bash --version | head -n 1 | grep -F 'version 3.2'
+          bash tests/features.bash
+          bash tests/install-transaction.bash
+          bash tests/checksum.bash
 
       - name: PowerShell syntax
         if: runner.os == 'Windows'
@@ -154,9 +192,16 @@ jobs:
   workflow-validation:
     name: Workflow Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Validate workflow YAML and invariants
         run: |
           bash tests/workflows.bash
+
+      # validate-local runs this against the working tree; a clean checkout has
+      # no diff, so compare every tracked file against the empty tree instead.
+      - name: Whitespace and conflict markers
+        run: |
+          git diff --check "$(git hash-object -t tree /dev/null)" HEAD

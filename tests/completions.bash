@@ -34,6 +34,7 @@ sync_helpers=(
   scripts/sync-fish-command-completions.bash
   scripts/sync-zsh-command-completions.bash
   scripts/sync-readme-usage.bash
+  scripts/sync-man-page.bash
   scripts/sync-embedded-completions.bash
 )
 for sync_helper in "${sync_helpers[@]}"; do

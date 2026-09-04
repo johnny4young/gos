@@ -96,6 +96,15 @@ ShellCheck/shfmt/zsh/Fish/PowerShell checks when those tools are installed.
 Ruby is required for the workflow YAML parse checks. Use
 `scripts/validate-local.bash --required-only` when you need only the required
 gates without optional local tooling.
+Use `scripts/validate-local.bash --strict` before opening a pull request when
+you want CI parity: it fails instead of skipping when one of those optional
+tools is missing locally, because CI treats every one of them as required.
+
+gos targets bash 3.2 (the stock `/bin/bash` on macOS), so avoid bash 4+
+constructs such as `mapfile`, `declare -A`, `${var^^}`, and unguarded
+`"${array[@]}"` on possibly-empty arrays under `set -u` (use
+`${array[@]:+"${array[@]}"}`). CI runs the suites under `/bin/bash` on macOS
+to enforce that floor.
 
 ## Pull Request Guidelines
 
