@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - A present-but-broken SHA256 tool (for example a `shasum` missing a Perl module) is now reported through the normal "no SHA256 tool output" path instead of aborting `gos install`/`gos self-update` silently under `set -e`.
 - The `jq` checksum and platform lookups tolerate feed entries without a `files` array instead of aborting on the first one, which turned a present checksum into "not found" and forced a needless `include=all` download.
 - `gos install` no longer promises "Resuming download" on wget-only hosts, where `wget -O` restarts the file; and `gos doctor`'s hash probe uses an explicit `mktemp` template so strict BSD `mktemp` implementations no longer produce a false "no working SHA256 tool".
+- A rollback slot left as a dangling symlink (its side-by-side version was uninstalled) is reported consistently: `gos status` shows `Rollback: broken link -> …` with a `gos prune --rollback` hint (and `rollback_available:false` plus a new `rollback_state` field in `--json`), and `gos rollback`/`rollback --dry-run` explain the stale link instead of claiming no rollback exists.
 - `gos platforms` works again on hosts that have `python3` but no `jq`: the python3 feed parser contained a syntax error, so every such host reported "no supported platforms found".
 
 ### Performance

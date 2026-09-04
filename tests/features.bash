@@ -676,7 +676,7 @@ assert_contains "$output" '"active":"go1.20rc1"' "status json active"
 assert_contains "$output" '"source":"path"' "status json source"
 assert_contains "$output" '"project":{"version":"go1.20rc1"' "status json project"
 assert_contains "$output" '"matches_active":true' "status json project match"
-assert_contains "$output" '"rollback_available":false,"rollback_version":null' "status json without rollback"
+assert_contains "$output" '"rollback_available":false,"rollback_version":null,"rollback_state":"none"' "status json without rollback"
 assert_contains "$output" '"orphaned_backups":0,"lock":null' "status json without residue or lock"
 assert_contains "$output" '"archives":1' "status json cache count"
 if [ -s "${case_dir}/urls.log" ]; then
@@ -2079,6 +2079,32 @@ run_gos "$case_dir" bash "$script" rollback
 [ "$status" -ne 0 ] || fail "rollback without a snapshot should fail"
 assert_contains "$output" "no rollback installation found" "rollback missing"
 pass "rollback fails with a clear error when no snapshot exists"
+
+# A rollback slot that is a dangling side-by-side link (its version was
+# uninstalled) must read the same everywhere: status shows it as broken, not
+# available, and rollback (and its dry run) explain it instead of "not found".
+case_dir="${test_root}/rollback-dangling"
+mkdir -p "$case_dir"
+create_old_install "${case_dir}/go"
+ln -s "${case_dir}/versions/go1.19.0" "${case_dir}/go.gos-rollback"
+run_gos "$case_dir" bash "$script" status
+[ "$status" -eq 0 ] || fail "status with a dangling rollback link failed: ${output}"
+assert_contains "$output" "Rollback:     broken link -> ${case_dir}/versions/go1.19.0 (its version was uninstalled; clear with: gos prune --rollback)" "status human dangling rollback"
+run_gos "$case_dir" bash "$script" status --json
+assert_json "$output" "status --json dangling rollback"
+assert_contains "$output" '"rollback_available":false,"rollback_version":null,"rollback_state":"broken"' "status json dangling rollback"
+run_gos "$case_dir" bash "$script" rollback --dry-run
+[ "$status" -ne 0 ] || fail "rollback --dry-run with a dangling link should fail"
+assert_contains "$output" "points at ${case_dir}/versions/go1.19.0, which no longer exists" "rollback dry-run dangling link"
+assert_contains "$output" "gos prune --rollback" "rollback dry-run dangling link hint"
+run_gos "$case_dir" bash "$script" rollback
+[ "$status" -ne 0 ] || fail "rollback with a dangling link should fail"
+assert_contains "$output" "which no longer exists" "rollback dangling link"
+[ "$(<"${case_dir}/go/VERSION_MARKER")" = "old" ] || fail "rollback with a dangling link must leave the active install alone"
+[ -L "${case_dir}/go.gos-rollback" ] || fail "rollback with a dangling link must not remove the link itself"
+run_gos "$case_dir" bash "$script" status --json
+assert_contains "$output" '"rollback_state":"broken"' "status json dangling rollback after refusal"
+pass "a dangling rollback link is reported consistently by status and rollback"
 
 case_dir="${test_root}/roll-forward"
 mkdir -p "$case_dir"

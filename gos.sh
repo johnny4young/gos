@@ -1097,6 +1097,29 @@ _gos_rollback_dir() {
   printf '%s.gos-rollback' "$GOS_INSTALL_DIR"
 }
 
+# Describe the rollback slot in one place so status, rollback, and its dry
+# run can never disagree: prints "<state>|<version>|<target>" where state is
+# none (nothing there), ok (a runnable install, version filled when its go
+# reports one), or broken (a dangling symlink: the side-by-side version it
+# pointed at was uninstalled; target is the missing path).
+_gos_rollback_state() {
+  local rollback_dir version="" target=""
+  rollback_dir=$(_gos_rollback_dir)
+  if [ -L "$rollback_dir" ] && [ ! -e "$rollback_dir" ]; then
+    target=$(readlink "$rollback_dir" 2>/dev/null) || target=""
+    printf 'broken||%s\n' "$target"
+    return 0
+  fi
+  if [ ! -d "$rollback_dir" ]; then
+    printf 'none||\n'
+    return 0
+  fi
+  if [ -x "${rollback_dir}/bin/go" ]; then
+    version=$(_gos_go_version_of "${rollback_dir}/bin/go") || version=""
+  fi
+  printf 'ok|%s|\n' "$version"
+}
+
 _gos_warn_rollback_unavailable() {
   local backup_dir="$1" rollback_dir="$2"
 
@@ -1210,16 +1233,34 @@ _gos_activate_install() {
   echo "Done! ${version_output}"
 }
 
+# Fail with the right message when the rollback slot is empty or a dangling
+# side-by-side link (its version was uninstalled): the latter is not "no
+# rollback" but a stale pointer that gos prune --rollback clears.
+_gos_require_rollback_slot() {
+  local state rollback_dir
+  rollback_dir=$(_gos_rollback_dir)
+  state=$(_gos_rollback_state)
+  case "${state%%|*}" in
+    ok) return 0 ;;
+    broken)
+      _gos_error "the rollback link at ${rollback_dir} points at ${state##*|}, which no longer exists."
+      echo "Its version was uninstalled; the next install creates a new rollback. Clear the stale link with: gos prune --rollback" >&2
+      return 1
+      ;;
+    *)
+      _gos_error "no rollback installation found at ${rollback_dir}."
+      return 1
+      ;;
+  esac
+}
+
 _gos_activate_rollback() {
   local rollback_dir current_backup version_output go_bin
 
   rollback_dir=$(_gos_rollback_dir)
   current_backup="${GOS_INSTALL_DIR}.gos-current.$$"
 
-  if [ ! -d "$rollback_dir" ]; then
-    _gos_error "no rollback installation found at ${rollback_dir}."
-    return 1
-  fi
+  _gos_require_rollback_slot || return 1
 
   # -L also moves a (possibly dangling) side-by-side symlink out of the way;
   # otherwise the restore mv below fails because the slot is still occupied.
@@ -2627,7 +2668,7 @@ cmd_which() {
 
 cmd_status() {
   local active go_path source layout layout_target resolved project_version project_source project_resolved
-  local project_matches="null" rollback_available="false" rollback_version="" stats cache_count cache_bytes
+  local project_matches="null" rollback_available="false" rollback_version="" rollback_state rollback_target stats cache_count cache_bytes
   local orphan orphaned_backups=0 lock_dir lock_pid="" lock_state="none"
 
   _gos_set_json_from_args "$@" || return 1
@@ -2676,14 +2717,14 @@ cmd_status() {
     fi
   fi
 
-  if [ -d "$(_gos_rollback_dir)" ] || [ -L "$(_gos_rollback_dir)" ]; then
-    rollback_available="true"
-    # Best effort: a rollback slot without a runnable go still reports as
-    # available, just without a version.
-    if [ -x "$(_gos_rollback_dir)/bin/go" ]; then
-      rollback_version=$(_gos_go_version_of "$(_gos_rollback_dir)/bin/go") || rollback_version=""
-    fi
-  fi
+  rollback_state=$(_gos_rollback_state)
+  rollback_target="${rollback_state##*|}"
+  rollback_version="${rollback_state#*|}"
+  rollback_version="${rollback_version%%|*}"
+  rollback_state="${rollback_state%%|*}"
+  # A slot without a runnable go still reports as available, just without a
+  # version; a dangling link is not available (gos rollback would refuse it).
+  [ "$rollback_state" = "ok" ] && rollback_available="true"
   # Crash residue and the mutation lock are exactly the state a user needs
   # visible when something feels off; both checks stay offline.
   for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
@@ -2739,6 +2780,8 @@ cmd_status() {
     else
       printf 'null'
     fi
+    printf ',"rollback_state":'
+    _gos_json_string "$rollback_state"
     printf ',"cache":{"dir":'
     _gos_json_string "$GOS_CACHE_DIR"
     printf ',"archives":%s,"bytes":%s},"orphaned_backups":%s,"lock":' "$cache_count" "$cache_bytes" "$orphaned_backups"
@@ -2793,6 +2836,8 @@ cmd_status() {
     printf 'Rollback:     available (go%s)\n' "$rollback_version"
   elif [ "$rollback_available" = "true" ]; then
     printf 'Rollback:     available\n'
+  elif [ "$rollback_state" = "broken" ]; then
+    _gos_print_styled_value 33 'Rollback:     ' 'broken link' " -> ${rollback_target} (its version was uninstalled; clear with: gos prune --rollback)"
   else
     printf 'Rollback:     unavailable\n'
   fi
@@ -2916,15 +2961,11 @@ cmd_rollback() {
   # Preview the same swap the real run performs: the rollback becomes active
   # and the active install takes its place, so both directions are reported.
   rollback_dir=$(_gos_rollback_dir)
-  if [ ! -d "$rollback_dir" ]; then
-    _gos_error "no rollback installation found at ${rollback_dir}."
-    return 1
-  fi
+  _gos_require_rollback_slot || return 1
 
-  rollback_version=""
-  if [ -x "${rollback_dir}/bin/go" ]; then
-    rollback_version=$(_gos_go_version_of "${rollback_dir}/bin/go") || rollback_version=""
-  fi
+  rollback_version=$(_gos_rollback_state)
+  rollback_version="${rollback_version#*|}"
+  rollback_version="${rollback_version%%|*}"
   if [ -n "$rollback_version" ]; then
     echo "Would roll back to go${rollback_version} from ${rollback_dir}."
   else
