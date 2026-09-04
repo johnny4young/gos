@@ -2268,6 +2268,11 @@ cmd___project_version() {
   version="${resolved%%|*}"
   version="${version#go}"
   _gos_validate_version "$version" >/dev/null 2>&1 || return 0
+  # A bare X.Y (the common go.mod form) names a minor, not a directory: the
+  # shell hook builds go<version>/bin from this output, so resolve it against
+  # what is installed, offline, exactly like gos use and gos run do. With no
+  # or several matches the minor is printed unchanged and the hook hints.
+  version=$(_gos_resolve_installed_version "$version")
   printf '%s\n' "$version"
 }
 
@@ -2316,6 +2321,26 @@ _gos_installed_versions() {
     [ -n "$version" ] && printf '%s\n' "$version"
   fi
   return 0
+}
+
+# Print the installed version a requested version names: the version itself
+# when it is fully qualified, or the single installed X.Y.Z matching a bare
+# X.Y. Prints the input unchanged when nothing (or more than one thing)
+# matches, so callers that need the ambiguity error keep using
+# _gos_resolve_installed_bare_minor directly.
+_gos_resolve_installed_version() {
+  local version="$1" resolved
+  case "$version" in
+    *rc* | *beta* | *.*.*)
+      printf '%s\n' "$version"
+      return 0
+      ;;
+  esac
+  if resolved=$(_gos_resolve_installed_bare_minor "$version" 2>/dev/null) && [ -n "$resolved" ]; then
+    printf '%s\n' "$resolved"
+  else
+    printf '%s\n' "$version"
+  fi
 }
 
 _gos_resolve_installed_bare_minor() {
@@ -2574,7 +2599,7 @@ cmd_which() {
 }
 
 cmd_status() {
-  local active go_path source layout layout_target resolved project_version project_source
+  local active go_path source layout layout_target resolved project_version project_source project_resolved
   local project_matches="null" rollback_available="false" rollback_version="" stats cache_count cache_bytes
   local orphan orphaned_backups=0 lock_dir lock_pid="" lock_state="none"
 
@@ -2607,11 +2632,17 @@ cmd_status() {
   resolved=$(_gos_resolve_project_version "$PWD" 2>/dev/null) || resolved=""
   project_version=""
   project_source=""
+  project_resolved=""
   if [ -n "$resolved" ]; then
     project_version="${resolved%%|*}"
     project_source="${resolved#*|}"
     project_version="${project_version#go}"
-    if [ "$active" = "$project_version" ]; then
+    # A bare X.Y in go.mod is satisfied by any installed X.Y.Z; resolve it the
+    # way the shell hook does so "go 1.24" with go1.24.3 active reads as a
+    # match instead of a difference.
+    project_resolved=$(_gos_resolve_installed_version "$project_version")
+    [ "$project_resolved" != "$project_version" ] || project_resolved=""
+    if [ "$active" = "$project_version" ] || { [ -n "$project_resolved" ] && [ "$active" = "$project_resolved" ]; }; then
       project_matches="true"
     else
       project_matches="false"
@@ -2669,6 +2700,8 @@ cmd_status() {
       _gos_json_string "go${project_version}"
       printf ',"source":'
       _gos_json_string "$project_source"
+      printf ',"resolved":'
+      if [ -n "$project_resolved" ]; then _gos_json_string "go${project_resolved}"; else printf 'null'; fi
       printf ',"matches_active":%s}' "$project_matches"
     else
       printf 'null'
@@ -2717,8 +2750,12 @@ cmd_status() {
     printf 'Layout:       %s\n' "$layout"
   fi
   if [ -n "$project_version" ]; then
-    if [ "$project_matches" = "true" ]; then
+    if [ "$project_matches" = "true" ] && [ -n "$project_resolved" ]; then
+      _gos_print_styled_value 32 'Project:      ' "go${project_version}" " (${project_source}, satisfied by active go${project_resolved})"
+    elif [ "$project_matches" = "true" ]; then
       _gos_print_styled_value 32 'Project:      ' "go${project_version}" " (${project_source}, matches active)"
+    elif [ -n "$project_resolved" ]; then
+      _gos_print_styled_value 33 'Project:      ' "go${project_version}" " (${project_source}, resolves to installed go${project_resolved}, differs from active)"
     else
       _gos_print_styled_value 33 'Project:      ' "go${project_version}" " (${project_source}, differs from active)"
     fi

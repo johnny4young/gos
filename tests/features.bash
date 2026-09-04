@@ -681,6 +681,25 @@ run_gos "$case_dir" bash "$script" status
 popd >/dev/null
 [ "$status" -eq 0 ] || fail "status failed: ${output}"
 assert_contains "$output" "Project:      go1.20rc1" "status human project"
+
+mkdir -p "$case_dir/minor-project" "$case_dir/versions/go1.20.5/bin"
+printf 'module example.com/status\n\ngo 1.20\n' >"$case_dir/minor-project/go.mod"
+printf '#!/usr/bin/env bash\necho "go version go1.20.5 darwin/arm64"\n' >"$case_dir/versions/go1.20.5/bin/go"
+chmod +x "$case_dir/versions/go1.20.5/bin/go"
+pushd "$case_dir/minor-project" >/dev/null
+GOS_TEST_GO_VERSION="1.20.5" GOS_TEST_VERSIONS_DIR="$case_dir/versions" run_gos "$case_dir" bash "$script" status
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "status with bare minor failed: ${output}"
+assert_contains "$output" "Project:      go1.20 ($case_dir/minor-project/go.mod, satisfied by active go1.20.5)" "status human bare minor satisfied"
+pushd "$case_dir/minor-project" >/dev/null
+GOS_TEST_GO_VERSION="1.20.5" GOS_TEST_VERSIONS_DIR="$case_dir/versions" run_gos "$case_dir" bash "$script" status --json
+popd >/dev/null
+assert_json "$output" "status --json bare minor"
+assert_contains "$output" '"project":{"version":"go1.20","source":"'"$case_dir"'/minor-project/go.mod","resolved":"go1.20.5","matches_active":true}' "status json bare minor resolved"
+pushd "$case_dir/minor-project" >/dev/null
+GOS_TEST_GO_VERSION="1.19.0" GOS_TEST_VERSIONS_DIR="$case_dir/versions" run_gos "$case_dir" bash "$script" status
+popd >/dev/null
+assert_contains "$output" "resolves to installed go1.20.5, differs from active" "status human bare minor installed but inactive"
 assert_contains "$output" "Cache:        1 archive(s)" "status human cache"
 assert_contains "$output" "Rollback:     unavailable" "status human without rollback"
 assert_not_contains "$output" "Residue:" "status human hides residue line when clean"
@@ -2053,6 +2072,30 @@ run_gos "$case_dir" bash "$script" __project-version "${case_dir}/empty"
 [ -z "$output" ] || fail "__project-version without manifest should be empty: ${output}"
 pass "__project-version resolves project manifests offline"
 
+# A bare minor in go.mod (the common form) must resolve to the installed patch
+# release offline, so the shell hook can find go<version>/bin; with none or
+# several installed the minor passes through unchanged.
+mkdir -p "${case_dir}/minor" "${case_dir}/versions/go1.21.6/bin" "${case_dir}/versions/go1.20.0/bin"
+printf 'module example.com/minor\n\ngo 1.21\n' >"${case_dir}/minor/go.mod"
+for fixture_version in 1.21.6 1.20.0; do
+  printf '#!/usr/bin/env bash\necho "go version go%s darwin/arm64"\n' "$fixture_version" >"${case_dir}/versions/go${fixture_version}/bin/go"
+  chmod +x "${case_dir}/versions/go${fixture_version}/bin/go"
+done
+GOS_TEST_VERSIONS_DIR="${case_dir}/versions" run_gos "$case_dir" bash "$script" __project-version "${case_dir}/minor"
+[ "$status" -eq 0 ] || fail "__project-version bare minor failed: ${output}"
+[ "$output" = "1.21.6" ] || fail "__project-version should resolve go.mod 'go 1.21' to the installed 1.21.6, got: ${output}"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "__project-version bare minor resolution must not reach the network"
+fi
+GOS_TEST_VERSIONS_DIR="${case_dir}/none" run_gos "$case_dir" bash "$script" __project-version "${case_dir}/minor"
+[ "$output" = "1.21" ] || fail "__project-version should keep an uninstalled bare minor, got: ${output}"
+mkdir -p "${case_dir}/versions/go1.21.7/bin"
+cp "${case_dir}/versions/go1.21.6/bin/go" "${case_dir}/versions/go1.21.7/bin/go"
+GOS_TEST_VERSIONS_DIR="${case_dir}/versions" run_gos "$case_dir" bash "$script" __project-version "${case_dir}/minor"
+[ "$status" -eq 0 ] || fail "__project-version ambiguous bare minor failed: ${output}"
+[ "$output" = "1.21" ] || fail "__project-version should keep an ambiguous bare minor, got: ${output}"
+pass "__project-version resolves a bare go.mod minor against installed versions"
+
 case_dir="${test_root}/env-auto"
 mkdir -p "${case_dir}/project" "${case_dir}/missing" "${case_dir}/versions/go1.21.6/bin" "${case_dir}/bin"
 printf '1.21.6\n' >"${case_dir}/project/.go-version"
@@ -2077,6 +2120,16 @@ PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
   >"${case_dir}/auto.out" \
   || fail "env --auto hook did not switch and restore PATH"
 assert_contains "$(<"${case_dir}/auto.out")" "go version go1.21.6" "env auto go version"
+mkdir -p "${case_dir}/project-minor"
+printf 'module example.com/auto\n\ngo 1.21\n' >"${case_dir}/project-minor/go.mod"
+minor_output=$(
+  PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
+    GOS_INSTALL_DIR="${case_dir}/go" \
+    GOS_VERSIONS_DIR="${case_dir}/versions" \
+    bash -c 'set -euo pipefail; source "$1"; cd "$2"; __gos_auto_switch; go version' bash "${case_dir}/hook.sh" "${case_dir}/project-minor" 2>&1
+) || fail "env --auto hook failed for a bare go.mod minor: ${minor_output}"
+assert_contains "$minor_output" "go version go1.21.6" "env auto switches for a bare go.mod minor"
+assert_not_contains "$minor_output" "is not installed" "env auto must not hint when the minor is installed"
 hint_output=$(
   PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
     GOS_INSTALL_DIR="${case_dir}/go" \
