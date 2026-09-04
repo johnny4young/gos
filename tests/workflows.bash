@@ -361,6 +361,8 @@ canary_on = workflow_on(canary)
 assert(canary_on.key?("schedule"), "canary workflow must run on a schedule")
 assert(canary_on.key?("workflow_dispatch"), "canary workflow must support manual runs")
 assert(canary.dig("permissions", "contents") == "read", "canary workflow must use read-only contents permission")
+assert(canary.dig("concurrency", "group") == "canary-live-feed", "canary workflow must serialize its list-then-create issue upsert")
+assert(canary.dig("concurrency", "cancel-in-progress") == false, "canary workflow must not cancel a live run when another run is dispatched")
 canary_matrix = canary.dig("jobs", "live-feed", "strategy", "matrix", "os") || []
 %w[ubuntu-latest macos-latest windows-latest].each do |os|
   assert(canary_matrix.include?(os), "canary matrix must include #{os}")
@@ -373,6 +375,13 @@ canary_failure_step = canary.dig("jobs", "live-feed", "steps").find { |step| ste
 assert(canary_failure_step, "canary must open or update a tracking issue when it fails")
 assert(canary_failure_step["run"].to_s.include?("gh issue create"), "canary failure step must create an issue")
 assert(canary_failure_step["run"].to_s.include?("gh issue comment"), "canary failure step must update an existing open issue instead of duplicating it")
+canary_live_steps = canary.dig("jobs", "live-feed", "steps").select { |step| step["run"].to_s.include?("./gos.sh") }
+assert(!canary_live_steps.empty?, "canary must define live gos command steps")
+canary_live_steps.each do |step|
+  timeout = step["timeout-minutes"]
+  assert(timeout.is_a?(Integer) && timeout.between?(1, 15), "canary live step #{step["name"]} must set a short timeout so issue reporting can still run")
+end
+assert(canary_failure_step["timeout-minutes"].is_a?(Integer), "canary issue reporter must have its own timeout")
 
 ci_on = workflow_on(ci)
 assert(ci_on.key?("pull_request"), "CI must run on pull_request")
@@ -408,6 +417,11 @@ end
 
 smoke_runs = ci_jobs.dig("smoke", "steps").map { |step| step["run"].to_s }.join("\n")
 smoke_steps = ci_jobs.dig("smoke", "steps")
+parser_dependencies = step_named(smoke_steps, "Require feed parser matrix dependencies")
+assert(parser_dependencies, "smoke job must require jq and python3 for the feed parser matrix")
+assert(parser_dependencies["if"] == "runner.os != 'Windows'", "feed parser dependencies must be required wherever feature tests run")
+parser_dependency_run = parser_dependencies["run"].to_s
+assert(parser_dependency_run.include?("command -v jq") && parser_dependency_run.include?("command -v python3"), "feed parser dependency step must fail when jq or python3 is unavailable")
 install_completion_shells = smoke_steps.find { |step| step["name"] == "Install completion shells" }
 assert(install_completion_shells, "smoke job must install completion shells")
 assert(install_completion_shells["if"] == "runner.os == 'Linux'", "completion shell install must run on Linux")
@@ -440,7 +454,7 @@ assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surf
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
   "bash scripts/sync-command-surfaces.bash --check",
-  "bash -n $(git ls-files '*.sh' '*.bash')",
+  "git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -453,7 +467,7 @@ end
 # the set-equality assertion above keeps the two in agreement.
 bash_syntax = step_named(smoke_steps, "Bash syntax")
 assert(bash_syntax, "smoke job must define Bash syntax step")
-assert(bash_syntax["run"].to_s.include?("bash -n $(git ls-files '*.sh' '*.bash')"), "smoke job Bash syntax must derive the file list from git ls-files")
+assert(bash_syntax["run"].to_s.include?("git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --"), "smoke job Bash syntax must derive a NUL-delimited file list from git ls-files")
 tracked_powershell_files.each do |path|
   assert(smoke_runs.include?(path), "smoke job PowerShell syntax must cover tracked PowerShell file #{path}")
 end

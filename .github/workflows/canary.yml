@@ -17,11 +17,20 @@ defaults:
   run:
     shell: bash
 
+# The issue reporter uses a list-then-create upsert. Keep only one canary run
+# active at a time so scheduled and manually dispatched runs cannot both create
+# the same per-OS tracking issue.
+concurrency:
+  group: canary-live-feed
+  cancel-in-progress: false
+
 jobs:
   live-feed:
     name: Live feed (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # Live checks have shorter step deadlines so a hung command fails while the
+    # issue-reporting step can still run. This remains an outer safety bound.
+    timeout-minutes: 45
     # issues: write only so a failed run can open or update a tracking issue;
     # without it a scheduled failure reaches nobody but the last committer's
     # inbox, and a canary nobody sees fail is no canary at all.
@@ -39,12 +48,14 @@ jobs:
         run: chmod +x gos.sh
 
       - name: Query the live feed
+        timeout-minutes: 5
         run: |
           ./gos.sh check
           ./gos.sh list | tail -n 5
           ./gos.sh platforms
 
       - name: Install a pinned older Go with mandatory verification
+        timeout-minutes: 10
         env:
           GOS_REQUIRE_CHECKSUM: feed
         run: |
@@ -53,6 +64,7 @@ jobs:
           "$GOS_INSTALL_DIR/bin/go" version | grep -F 'go1.24.0'
 
       - name: Upgrade to latest and roll back
+        timeout-minutes: 10
         env:
           GOS_REQUIRE_CHECKSUM: feed
         run: |
@@ -64,6 +76,7 @@ jobs:
 
       - name: Side-by-side mode against the live feed
         if: runner.os != 'Windows'
+        timeout-minutes: 10
         env:
           GOS_REQUIRE_CHECKSUM: feed
         run: |
@@ -77,6 +90,7 @@ jobs:
 
       - name: Open or update the tracking issue
         if: failure()
+        timeout-minutes: 5
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

@@ -356,7 +356,7 @@ run_with_pty() {
   local runner="$1" out_file="$2"
   pty_ran=0
 
-  if command -v python3 >/dev/null 2>&1; then
+  if [ "${GOS_TEST_PTY_BACKEND:-auto}" != "script" ] && command -v python3 >/dev/null 2>&1; then
     pty_ran=1
     python3 - "$runner" >"$out_file" 2>&1 <<'PYPTY'
 import os
@@ -375,7 +375,13 @@ PYPTY
 
   if command -v script >/dev/null 2>&1; then
     pty_ran=1
-    script -q /dev/null "$runner" >"$out_file" 2>&1
+    if script --version >/dev/null 2>&1; then
+      # util-linux requires -c for the command and -e to propagate its status.
+      script -q -e -c "$runner" /dev/null >"$out_file" 2>&1
+    else
+      # BSD script (including macOS) accepts the command after the transcript.
+      script -q /dev/null "$runner" >"$out_file" 2>&1
+    fi
     return $?
   fi
 
@@ -399,6 +405,28 @@ run_tty_ok() {
   fi
   fail "${name}: TTY runner failed (status ${rc}): $(cat "$out_file")"
 }
+
+# Force the fallback even when python3 is installed so CI covers both the
+# util-linux and BSD script command lines, including child-status propagation.
+if command -v script >/dev/null 2>&1; then
+  runner="${test_root}/script-pty-runner.sh"
+  cat >"$runner" <<'SCRIPT_PTY_RUNNER'
+#!/usr/bin/env bash
+printf 'script-pty-ok\n'
+exit 23
+SCRIPT_PTY_RUNNER
+  chmod +x "$runner"
+  set +e
+  GOS_TEST_PTY_BACKEND=script run_with_pty "$runner" "${test_root}/script-pty.out"
+  script_pty_status=$?
+  set -e
+  [ "$script_pty_status" -eq 23 ] \
+    || fail "script PTY backend did not propagate status 23 (got ${script_pty_status}): $(cat "${test_root}/script-pty.out")"
+  assert_contains "$(cat "${test_root}/script-pty.out")" "script-pty-ok" "script PTY backend output"
+  pass "script PTY fallback runs commands and propagates their status"
+else
+  echo "ok - script PTY fallback skipped: script not installed on this host"
+fi
 
 create_old_install() {
   local install_dir="$1" version="${2:-1.20.0}" marker="${3:-old}"
@@ -629,11 +657,17 @@ assert_contains "$output" '"platforms":["darwin/arm64","linux/amd64"]' "platform
 # platforms) works with jq, python3, or the grep scrape alone, and install
 # verifies through jq/python3 metadata while the scrape-only host falls back
 # to the companion .sha256 (404 in this harness) and warns instead of dying.
+parser_cases_run=0
+parser_cases_skipped=0
 for parsers in jq python3 none; do
   case "$parsers" in
     jq | python3)
       if [ ! -x "${test_root}/parser-${parsers}/${parsers}" ]; then
+        if [ "${CI:-}" = "true" ]; then
+          fail "feed parser ${parsers} is required in CI so every parser branch runs"
+        fi
         echo "ok - feed parser ${parsers} cases skipped: ${parsers} not installed on this host"
+        parser_cases_skipped=$((parser_cases_skipped + 1))
         continue
       fi
       ;;
@@ -654,8 +688,13 @@ for parsers in jq python3 none; do
     assert_contains "$output" "Checksum verified." "install verifies via feed metadata (parsers=${parsers})"
   fi
   [ -x "${case_dir}/go/bin/go" ] || fail "install with parsers=${parsers} left no go binary"
+  parser_cases_run=$((parser_cases_run + 1))
 done
-pass "feed parsing agrees across jq, python3, and the grep fallback"
+if [ "$parser_cases_skipped" -eq 0 ]; then
+  pass "feed parsing agrees across jq, python3, and the grep fallback"
+else
+  pass "feed parsing agrees across ${parser_cases_run}/3 available parser branches"
+fi
 
 case_dir="${test_root}/status"
 mkdir -p "$case_dir/project" "$case_dir/cache"
