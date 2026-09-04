@@ -56,7 +56,47 @@ function Invoke-Download {
     Write-Verbose 'TLS 1.3 is not available on this runtime; keeping the TLS 1.2 floor.'
   }
   [Net.ServicePointManager]::SecurityProtocol = $protocols
-  Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile
+  # Bounded and retried like install.sh's curl invocation: without a timeout a
+  # stalled connection blocks the installer indefinitely.
+  $attempt = 0
+  while ($true) {
+    $attempt++
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile -TimeoutSec 60 -MaximumRedirection 5
+      return
+    } catch {
+      if ($attempt -ge 3) {
+        throw "Could not download $Uri after $attempt attempts: $($_.Exception.Message)"
+      }
+      Write-Warning "Download attempt $attempt failed ($($_.Exception.Message)); retrying."
+      Start-Sleep -Seconds 2
+    }
+  }
+}
+
+# Git for Windows' bash, never the WSL launcher: on a machine with WSL
+# enabled, C:\Windows\System32\bash.exe is the first bash.exe on PATH and it
+# cannot run a Windows path, so gos.cmd probes the Git install locations
+# first and skips System32. Mirror that here so the post-install warning is
+# accurate on exactly those machines.
+function Find-GitBash {
+  $candidates = @(
+    (Join-Path $env:ProgramFiles 'Git\bin\bash.exe'),
+    (Join-Path ${env:ProgramFiles(x86)} 'Git\bin\bash.exe'),
+    (Join-Path $env:LocalAppData 'Programs\Git\bin\bash.exe')
+  )
+  foreach ($candidate in $candidates) {
+    if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+      return $candidate
+    }
+  }
+  $onPath = Get-Command bash.exe -All -ErrorAction SilentlyContinue
+  foreach ($command in @($onPath)) {
+    if ($command -and $command.Source -and ($command.Source -notmatch '\\System32\\')) {
+      return $command.Source
+    }
+  }
+  return $null
 }
 
 function Assert-Sha256 {
@@ -247,7 +287,7 @@ try {
     Write-Info 'Added gos to your user PATH. Open a new terminal before running gos.'
   }
 
-  if (-not (Get-Command bash.exe -ErrorAction SilentlyContinue)) {
+  if (-not (Find-GitBash)) {
     Write-Warning 'Git Bash was not found on PATH. Install Git for Windows or use WSL before running gos.'
   }
 
