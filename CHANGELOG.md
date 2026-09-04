@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- The AUR package tracks the release again (it shipped 1.9.0 still pointing at 1.8.0): `scripts/update-aur.bash <version>` rewrites `PKGBUILD` and `.SRCINFO` from the release tarball digest, `tests/packaging.bash` fails when `pkgver` and `GOS_VERSION` disagree, and RELEASING.md gains the post-release step.
 - The test harness now runs discovery and install cases against jq only, python3 only, and no feed parser at all, so every parser branch is exercised on every machine instead of whichever the host happens to provide; and a TTY test whose runner breaks now fails the suite instead of reporting a skipped branch (two TTY blocks had never actually run).
 - Every GitHub Actions job now sets `timeout-minutes`, the release smoke matrix no longer cancels the other platforms when one fails, ShellCheck is installed from a pinned release like shfmt, CI checks every tracked file for whitespace errors and conflict markers, and the Bash syntax gate derives its file list from `git ls-files`.
 - The nightly canary opens (or updates) a `canary`-labelled tracking issue when it fails instead of relying on the default workflow e-mail.

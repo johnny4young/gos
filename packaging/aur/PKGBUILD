@@ -1,6 +1,6 @@
 # Maintainer: johnny4young <johnny.iv.young@gmail.com>
 pkgname=gos
-pkgver=1.8.0
+pkgver=1.9.0
 pkgrel=1
 pkgdesc='Install and switch Go versions in seconds. One script, zero dependencies.'
 arch=('any')
@@ -12,7 +12,7 @@ optdepends=(
   'coreutils: SHA-256 archive verification'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('4fe23a7a2ec840c2a8553b7e24217e204d77e8b87b30ec8b481b1c20244a806d')
+sha256sums=('0e0af8484d4de0b8c4a25e4465d789ccab6f03f710c06416e5568d583d1c46f5')
 
 package() {
   cd "$srcdir/$pkgname-$pkgver"

@@ -74,6 +74,7 @@ syntax_files=(
   scripts/sync-man-page.bash
   scripts/sync-readme-usage.bash
   scripts/sync-zsh-command-completions.bash
+  scripts/update-aur.bash
   scripts/update-changelog.bash
   scripts/update-homebrew-tap.sh
   scripts/update-packaging.bash

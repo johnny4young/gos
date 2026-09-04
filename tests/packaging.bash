@@ -182,4 +182,37 @@ while IFS= read -r packaged; do
   [ -f "$packaged" ] || fail "AUR PKGBUILD installs a missing file: ${packaged}"
 done <<<"$aur_sources"
 
+# The AUR package must track the released gos version: 1.9.0 shipped with
+# the PKGBUILD still at 1.8.0 because nothing compared them.
+gos_version="$(sed -n 's/^GOS_VERSION="\([^"]*\)"$/\1/p' gos.sh)"
+[ -n "$gos_version" ] || fail "could not read GOS_VERSION from gos.sh"
+[ "$pkgbuild_ver" = "$gos_version" ] \
+  || fail "AUR PKGBUILD pkgver (${pkgbuild_ver}) must match GOS_VERSION (${gos_version}); run scripts/update-aur.bash ${gos_version}"
+
+# scripts/update-aur.bash rewrites both files transactionally from a version
+# and the release tarball digest.
+aur_tmp="${tmp_dir}/aur"
+mkdir -p "$aur_tmp"
+cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO "$aur_tmp/"
+aur_sha="fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+bash scripts/update-aur.bash 9.8.7 "$aur_sha" --dir "$aur_tmp" >/dev/null
+assert_file_contains "$aur_tmp/PKGBUILD" "pkgver=9.8.7"
+assert_file_contains "$aur_tmp/PKGBUILD" "pkgrel=1"
+assert_file_contains "$aur_tmp/PKGBUILD" "sha256sums=('${aur_sha}')"
+assert_file_contains "$aur_tmp/.SRCINFO" "pkgver = 9.8.7"
+assert_file_contains "$aur_tmp/.SRCINFO" "source = gos-9.8.7.tar.gz::https://github.com/johnny4young/gos/archive/refs/tags/v9.8.7.tar.gz"
+assert_file_contains "$aur_tmp/.SRCINFO" "sha256sums = ${aur_sha}"
+set +e
+aur_output="$(bash scripts/update-aur.bash 9.8.7 0000000000000000000000000000000000000000000000000000000000000000 --dir "$aur_tmp" 2>&1)"
+aur_status=$?
+set -e
+[ "$aur_status" -ne 0 ] || fail "update-aur must reject the placeholder digest"
+assert_contains "$aur_output" "placeholder SHA256 is not allowed" "update-aur placeholder"
+set +e
+aur_output="$(bash scripts/update-aur.bash 9.8.7-rc1 "$aur_sha" --dir "$aur_tmp" 2>&1)"
+aur_status=$?
+set -e
+[ "$aur_status" -ne 0 ] || fail "update-aur must reject pre-release versions"
+assert_contains "$aur_output" "stable X.Y.Z only" "update-aur pre-release"
+
 pass "AUR PKGBUILD and .SRCINFO stay consistent and buildable"

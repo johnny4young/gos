@@ -617,6 +617,7 @@ end
   "git diff --check",
   "scripts/update-changelog.bash",
   "scripts/update-packaging.bash",
+  "scripts/update-aur.bash",
   "Dir[\".github/workflows/*.{yml,yaml}\"]"
 ].each do |fragment|
   assert(releasing.include?(fragment), "RELEASING.md must mention #{fragment}")

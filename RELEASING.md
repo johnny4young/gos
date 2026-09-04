@@ -155,10 +155,23 @@ gos version
 bash tests/packaging.bash
 ```
 
-8. Confirm README install commands still match published channels and do not
+8. Point the AUR package at the new tag. The digest covers the source tarball
+   GitHub generates for the tag, so this can only run after the release exists;
+   `tests/packaging.bash` fails on `main` until `pkgver` matches `GOS_VERSION`:
+
+```bash
+scripts/update-aur.bash X.Y.Z
+bash tests/packaging.bash
+git commit -am "chore(aur): point the package at vX.Y.Z"
+```
+
+   Then publish from a checkout of `ssh://aur@aur.archlinux.org/gos.git` (copy
+   `packaging/aur/PKGBUILD` and `.SRCINFO`, commit, push); see
+   `packaging/README.md`.
+9. Confirm README install commands still match published channels and do not
    advertise unreleased package-manager commands.
-9. Confirm the `[Unreleased]` compare link in `CHANGELOG.md` points from the new
-   tag to `HEAD`.
+10. Confirm the `[Unreleased]` compare link in `CHANGELOG.md` points from the new
+    tag to `HEAD`.
 
 ## Recovery Notes
 
