@@ -26,6 +26,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - JSON output escapes every control character (`\u00XX`), not only newline, carriage return, and tab, so a symlink target or PATH entry containing one can no longer produce an invalid document.
 - `GOS_CACHE_DIR` is validated like `GOS_INSTALL_DIR` and `GOS_VERSIONS_DIR` (absolute, no `.`/`..` components, no control characters) before any command that touches the cache, and `gos doctor` gains a `cache-dir` check.
 - Fish completion offers `--json` for `gos use` like the Bash and Zsh completions already did.
+- `gos run` and `gos each` keep the command's stdout clean when they install a missing version on demand: every install progress line now goes to stderr there, so `gos run 1.24 go env GOPATH > out` no longer mixes "Downloading…" into the file.
+- A lock directory whose pid file is missing (the escalated write can fail) is reported as held with an unknown pid instead of "stale", so nobody is told to `rm -rf` a live lock; a lock held by another user's process (where `kill -0` fails with EPERM) is recognized as held too.
+- A leading `--json` is accepted only by the commands with a JSON contract; `gos --json install` and `gos --json run …` now fail with "does not support --json" instead of silently disabling color and progress and printing human text.
 - `gos platforms` works again on hosts that have `python3` but no `jq`: the python3 feed parser contained a syntax error, so every such host reported "no supported platforms found".
 
 ### Performance

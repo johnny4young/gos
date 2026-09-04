@@ -348,6 +348,11 @@ run_gos() {
 
   set +e
   output="$(
+    if [ -n "${GOS_TEST_STDERR_FILE:-}" ]; then
+      exec 3>"$GOS_TEST_STDERR_FILE"
+    else
+      exec 3>&1
+    fi
     PATH="$gos_path" \
       GOS_INSTALL_DIR="${GOS_TEST_INSTALL_DIR:-${case_dir}/go}" \
       GOS_CACHE_DIR="${GOS_TEST_CACHE_DIR:-${case_dir}/cache}" \
@@ -369,7 +374,7 @@ run_gos() {
       GOS_TEST_CP_FAIL_DEST="${GOS_TEST_CP_FAIL_DEST:-}" \
       GOS_REQUIRE_CHECKSUM="${GOS_TEST_REQUIRE_CHECKSUM:-}" \
       GOS_FEED_TTL="${GOS_TEST_FEED_TTL:-}" \
-      "$@" 2>&1
+      "$@" 2>&3
   )"
   status=$?
   set -e
@@ -996,6 +1001,34 @@ run_gos "$case_dir" bash "$script" status --json
 assert_json "$output" "status --json control character"
 assert_contains "$output" 'go1.20rc1\u0001x' "status json escapes control characters"
 pass "JSON output escapes every control character"
+
+case_dir="${test_root}/lock-no-pid"
+mkdir -p "${case_dir}/go.gos-lock"
+run_gos "$case_dir" bash "$script" install 1.21.6
+[ "$status" -ne 0 ] || fail "install should fail when a lock without a pid file exists"
+assert_contains "$output" "another gos operation appears to be running (the lock has no pid recorded)" "lock without pid is treated as held"
+assert_not_contains "$output" "stale gos lock" "lock without pid must not be called stale"
+run_gos "$case_dir" bash "$script" status --json
+assert_json "$output" "status --json lock without pid"
+assert_contains "$output" '"lock":{"state":"held","pid":null}' "status json lock without pid"
+run_gos "$case_dir" bash "$script" doctor --json
+assert_contains "$output" '"name":"lock","status":"ok","message":"another gos operation is running (pid unknown)"' "doctor lock without pid"
+pass "a lock directory without a pid file is reported as held, never stale"
+
+case_dir="${test_root}/leading-json"
+run_gos "$case_dir" bash "$script" --json install 1.21.6
+[ "$status" -ne 0 ] || fail "gos --json install should be rejected"
+assert_contains "$output" "gos install does not support --json" "leading --json rejected for install"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "a rejected leading --json must fail before network access"
+fi
+run_gos "$case_dir" bash "$script" --json run 1.21.6 -- go version
+[ "$status" -ne 0 ] || fail "gos --json run should be rejected"
+assert_contains "$output" "gos run does not support --json" "leading --json rejected for run"
+run_gos "$case_dir" bash "$script" --json version
+[ "$status" -eq 0 ] || fail "gos --json version failed: ${output}"
+assert_json "$output" "leading --json version"
+pass "a leading --json is only accepted by commands with a JSON contract"
 
 case_dir="${test_root}/lock-held"
 mkdir -p "${case_dir}/go.gos-lock"
@@ -2389,6 +2422,15 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
   if [ -s "${case_dir}/urls.log" ]; then
     fail "run with an installed exact version must not reach the network"
   fi
+
+  # An on-demand install inside gos run must keep the command's stdout clean:
+  # every progress line goes to stderr there.
+  rm -rf "${versions_dir}/go1.20.0"
+  GOS_TEST_STDERR_FILE="${case_dir}/run-install.err" GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 go version
+  [ "$status" -eq 0 ] || fail "run with an on-demand install failed: ${output}"
+  [ "$output" = "go version go1.20.0 darwin/arm64" ] || fail "run must keep stdout for the command only, got: ${output}"
+  assert_contains "$(<"${case_dir}/run-install.err")" "Extracting..." "run install progress goes to stderr"
+  assert_contains "$(<"${case_dir}/run-install.err")" "Installed go1.20.0 at" "run install completion goes to stderr"
 
   : >"${case_dir}/urls.log"
   GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20 go version
