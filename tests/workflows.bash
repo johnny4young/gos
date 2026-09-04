@@ -23,7 +23,7 @@ assert_validate_help_stdout() {
   local stderr_file="${test_root}/${label}.stderr"
 
   bash scripts/validate-local.bash "$@" >"$stdout_file" 2>"$stderr_file"
-  grep -Fq "Usage: validate-local.bash [--required-only|--help]" "$stdout_file" \
+  grep -Fq "Usage: validate-local.bash [--required-only|--strict|--help]" "$stdout_file" \
     || fail_shell "validate-local ${label} must print usage to stdout"
   grep -Fq "workflow YAML syntax" "$stdout_file" \
     || fail_shell "validate-local ${label} must list workflow YAML checks"
@@ -56,7 +56,7 @@ assert_validate_invalid_usage() {
     || fail_shell "validate-local ${label} must exit 2"
   [ ! -s "$stdout_file" ] \
     || fail_shell "validate-local ${label} must not print stdout"
-  grep -Fq "Usage: validate-local.bash [--required-only|--help]" "$stderr_file" \
+  grep -Fq "Usage: validate-local.bash [--required-only|--strict|--help]" "$stderr_file" \
     || fail_shell "validate-local ${label} must print usage to stderr"
 }
 
@@ -346,6 +346,17 @@ update_formula_env = update_formula_steps.flat_map { |step| (step["env"] || {}).
 assert(update_formula_env.any? { |key, value| key == "TAP_DEPLOY_KEY" && value.to_s.include?("secrets.TAP_DEPLOY_KEY") }, "update-formula must push to the central tap over the TAP_DEPLOY_KEY deploy key")
 assert(!update_formula_runs.include?("HOMEBREW_TAP_TOKEN"), "update-formula must not use the deprecated homebrew-gos token")
 
+# A job without a timeout runs to the 6-hour default: one hung macOS job bills
+# thousands of minutes and a hung version-bump holds the release concurrency
+# group forever.
+[["ci", ci], ["release", release], ["canary", canary], ["scorecard", scorecard]].each do |name, workflow|
+  workflow.fetch("jobs").each do |job_name, job|
+    timeout = job["timeout-minutes"]
+    assert(timeout.is_a?(Integer) && timeout.between?(1, 60), "#{name} job #{job_name} must set timeout-minutes between 1 and 60")
+  end
+end
+assert(release.dig("jobs", "smoke-test", "strategy", "fail-fast") == false, "release smoke-test matrix must not cancel the other OSes on one failure")
+
 canary_on = workflow_on(canary)
 assert(canary_on.key?("schedule"), "canary workflow must run on a schedule")
 assert(canary_on.key?("workflow_dispatch"), "canary workflow must support manual runs")
@@ -357,6 +368,11 @@ end
 canary_runs = canary.dig("jobs", "live-feed", "steps").map { |step| step["run"].to_s }.join("\n")
 assert(canary_runs.include?("./gos.sh check"), "canary must run gos check against the live feed")
 assert(canary_runs.include?("./gos.sh rollback"), "canary must exercise rollback against a real install")
+assert(canary.dig("jobs", "live-feed", "permissions", "issues") == "write", "canary job must be allowed to open its tracking issue")
+canary_failure_step = canary.dig("jobs", "live-feed", "steps").find { |step| step["if"].to_s == "failure()" }
+assert(canary_failure_step, "canary must open or update a tracking issue when it fails")
+assert(canary_failure_step["run"].to_s.include?("gh issue create"), "canary failure step must create an issue")
+assert(canary_failure_step["run"].to_s.include?("gh issue comment"), "canary failure step must update an existing open issue instead of duplicating it")
 
 ci_on = workflow_on(ci)
 assert(ci_on.key?("pull_request"), "CI must run on pull_request")
@@ -368,13 +384,19 @@ ci_jobs = ci.fetch("jobs") { fail!("CI must define jobs") }
 %w[shellcheck shfmt smoke workflow-validation].each do |job|
   assert(ci_jobs.key?(job), "CI must define #{job} job")
 end
+workflow_validation_runs = ci_jobs.dig("workflow-validation", "steps").map { |step| step["run"].to_s }.join("\n")
+assert(workflow_validation_runs.include?("bash tests/workflows.bash"), "workflow-validation job must run the invariant suite")
+assert(workflow_validation_runs.include?("git diff --check \"$(git hash-object -t tree /dev/null)\" HEAD"), "workflow-validation job must check every tracked file for whitespace errors and conflict markers")
 
 shellcheck_runs = ci_jobs.dig("shellcheck", "steps").map { |step| step["run"].to_s }.join("\n")
 assert(shellcheck_runs.include?("shellcheck gos.sh install.sh completions/gos.bash scripts/*.bash scripts/*.sh tests/*.bash"), "ShellCheck job must cover scripts and tests")
+assert(ci_jobs.dig("shellcheck", "env", "SHELLCHECK_VERSION").to_s.match?(/\Av\d+\.\d+\.\d+\z/), "ShellCheck job must pin an exact koalaman/shellcheck release")
+assert(shellcheck_runs.include?("koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"), "ShellCheck job must install the pinned release binary")
+assert(!shellcheck_runs.include?("apt-get install -y shellcheck"), "ShellCheck job must not depend on the runner image package")
 
 shfmt_job = ci_jobs.fetch("shfmt") { fail!("CI must define shfmt job") }
 assert(shfmt_job["runs-on"] == "ubuntu-latest", "shfmt job must run on ubuntu")
-assert(shfmt_job.dig("env", "SHFMT_VERSION") == "v3.13.1", "shfmt job must pin mvdan/sh release")
+assert(shfmt_job.dig("env", "SHFMT_VERSION").to_s.match?(/\Av\d+\.\d+\.\d+\z/), "shfmt job must pin an exact mvdan/sh release")
 shfmt_runs = shfmt_job.fetch("steps").map { |step| step["run"].to_s }.join("\n")
 assert(shfmt_runs.include?("mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64"), "shfmt job must install pinned release binary")
 assert(shfmt_runs.include?("shfmt -d -i 2 -ci -bn ."), "shfmt job must enforce repo formatting")
@@ -398,6 +420,10 @@ assert(fish_completion["if"] == "runner.os == 'Linux'", "Fish completion syntax 
 assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion syntax must not be optional once fish is installed")
 
 command_surface_sync = step_named(smoke_steps, "Command surface sync")
+bash32 = step_named(smoke_steps, "Bash 3.2 compatibility")
+assert(bash32, "smoke job must exercise the bash 3.2 floor")
+assert(bash32["if"] == "runner.os == 'macOS'", "bash 3.2 compatibility step must run on macOS, the only runner shipping bash 3.2")
+assert(bash32["run"].to_s.include?("grep -F 'version 3.2'") && bash32["run"].to_s.include?("bash tests/features.bash"), "bash 3.2 compatibility step must verify the interpreter and run the feature suite under it")
 assert(command_surface_sync, "smoke job must check generated command surfaces")
 assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surfaces.bash --check"), "command surface sync must use the orchestrator")
 
@@ -414,7 +440,7 @@ assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surf
   "bash tests/packaging.bash",
   "bash tests/windows-extract.bash",
   "bash scripts/sync-command-surfaces.bash --check",
-  "bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-bash-command-completions.bash scripts/sync-command-surfaces.bash scripts/sync-embedded-completions.bash scripts/sync-fish-command-completions.bash scripts/sync-man-page.bash scripts/sync-readme-usage.bash scripts/sync-zsh-command-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash scripts/validate-local.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash",
+  "bash -n $(git ls-files '*.sh' '*.bash')",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -422,9 +448,12 @@ assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surf
 ].each do |command|
   assert(smoke_runs.include?(command), "smoke job must run #{command}")
 end
-tracked_shell_files.each do |path|
-  assert(smoke_runs.include?(path), "smoke job Bash syntax must cover tracked shell file #{path}")
-end
+# The Bash syntax step derives its file list from git, so every tracked shell
+# file is covered by construction; validate-local keeps the explicit list and
+# the set-equality assertion above keeps the two in agreement.
+bash_syntax = step_named(smoke_steps, "Bash syntax")
+assert(bash_syntax, "smoke job must define Bash syntax step")
+assert(bash_syntax["run"].to_s.include?("bash -n $(git ls-files '*.sh' '*.bash')"), "smoke job Bash syntax must derive the file list from git ls-files")
 tracked_powershell_files.each do |path|
   assert(smoke_runs.include?(path), "smoke job PowerShell syntax must cover tracked PowerShell file #{path}")
 end
@@ -588,7 +617,7 @@ end
   "git diff --check",
   "scripts/update-changelog.bash",
   "scripts/update-packaging.bash",
-  "YAML.load_file(\".github/workflows/canary.yml\")"
+  "Dir[\".github/workflows/*.{yml,yaml}\"]"
 ].each do |fragment|
   assert(releasing.include?(fragment), "RELEASING.md must mention #{fragment}")
 end

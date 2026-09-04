@@ -19,6 +19,7 @@ jobs:
   analysis:
     name: Scorecard analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       # Checkout and Scorecard need repository contents, while every other
       # read scope remains disabled by the job-level override.

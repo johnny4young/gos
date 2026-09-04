@@ -21,6 +21,13 @@ jobs:
   live-feed:
     name: Live feed (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    # issues: write only so a failed run can open or update a tracking issue;
+    # without it a scheduled failure reaches nobody but the last committer's
+    # inbox, and a canary nobody sees fail is no canary at all.
+    permissions:
+      contents: read
+      issues: write
     strategy:
       fail-fast: false
       matrix:
@@ -67,3 +74,20 @@ jobs:
           ./gos.sh install 1.24.0   # instant switch, no download
           ./gos.sh list --installed
           "$GOS_INSTALL_DIR/bin/go" version | grep -F 'go1.24.0'
+
+      - name: Open or update the tracking issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OS_NAME: ${{ matrix.os }}
+        run: |
+          title="Canary failed on ${OS_NAME}"
+          gh label create canary --description "Nightly live-feed canary failures" --color B60205 --force
+          existing="$(gh issue list --label canary --state open --search "\"${title}\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still failing: ${RUN_URL}"
+          else
+            gh issue create --title "$title" --label canary --body "The nightly canary against the live go.dev feed failed on ${OS_NAME}: ${RUN_URL}"
+          fi

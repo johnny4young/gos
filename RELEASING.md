@@ -30,7 +30,8 @@ commands, and changelog links aligned.
 4. Verify `CHANGELOG.md` has `## [Unreleased]` immediately after the intro.
    Add curated bullets for every user-facing change before cutting a maintainer
    release; `tests/changelog.bash` fails a post-tag branch whose `Unreleased`
-   section has no bullets. The changelog helper can still generate notes from
+   section has no bullets. The changelog helper
+   (`scripts/update-changelog.bash`) can still generate notes from
    non-merge git commit subjects as a fallback when no bullets are present, but
    treat that as a safety net instead of the normal release path. Keep commit
    subjects release-note friendly, preferably using conventional prefixes such
@@ -65,11 +66,11 @@ bash tests/detection.bash
 bash tests/windows-extract.bash
 bash tests/workflows.bash
 scripts/sync-command-surfaces.bash --check
-bash -n gos.sh install.sh completions/gos.bash scripts/build-windows-package.bash scripts/sync-bash-command-completions.bash scripts/sync-command-surfaces.bash scripts/sync-embedded-completions.bash scripts/sync-fish-command-completions.bash scripts/sync-readme-usage.bash scripts/sync-zsh-command-completions.bash scripts/update-changelog.bash scripts/update-homebrew-tap.sh scripts/update-packaging.bash scripts/validate-local.bash tests/changelog.bash tests/checksum.bash tests/completions.bash tests/detection.bash tests/features.bash tests/homebrew-tap.bash tests/install-transaction.bash tests/install-sh.bash tests/install-ps1.bash tests/lib.bash tests/packaging.bash tests/windows-extract.bash tests/workflows.bash
+bash -n $(git ls-files '*.sh' '*.bash')
 zsh -n completions/gos.zsh
 ./gos.sh version
 ./gos.sh help
-ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); YAML.load_file(".github/workflows/release.yml"); YAML.load_file(".github/workflows/canary.yml")'
+ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].sort.each { |path| YAML.load_file(path) }'
 git diff --check
 ```
 
