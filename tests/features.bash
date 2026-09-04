@@ -77,7 +77,7 @@ while [ "$#" -gt 0 ]; do
       output="$2"
       shift 2
       ;;
-    --proto | --proto-redir | --connect-timeout | --max-time | --retry | -w)
+    --proto | --proto-redir | --connect-timeout | --max-time | --speed-limit | --speed-time | --retry | -w)
       if [ "$1" = "-w" ]; then
         write_out="$2"
       fi
@@ -1746,6 +1746,12 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "download-progress install failed: ${output}"
 archive_args=$(grep 'go1.21.6.darwin-arm64.tar.gz' "${case_dir}/curl-args.log" | tail -n 1 || true)
 assert_contains "$archive_args" "-fsSL" "non-tty archive download keeps curl silent flags"
+assert_contains "$archive_args" "--speed-limit 1024 --speed-time 30" "archive download aborts when the transfer stalls"
+case "$archive_args" in
+  *"--max-time"*) fail "archive downloads must not carry a total time limit: ${archive_args}" ;;
+esac
+feed_args=$(grep 'mode=json' "${case_dir}/curl-args.log" | head -n 1 || true)
+assert_contains "$feed_args" "--max-time 60" "feed download is bounded by a total timeout"
 case "$archive_args" in
   *"--progress-bar"*) fail "non-tty archive download should not use curl progress: ${archive_args}" ;;
 esac

@@ -15,12 +15,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Side-by-side installs no longer escalate to `sudo` for the versions tree just because `GOS_INSTALL_DIR` needs it (and vice versa): the escalation decision now follows the path being written, so a root-owned `/usr/local/go` next to a user-owned `GOS_VERSIONS_DIR` no longer leaves root-owned version directories under `$HOME` or prompts for a password it does not need.
 - A present-but-broken SHA256 tool (for example a `shasum` missing a Perl module) is now reported through the normal "no SHA256 tool output" path instead of aborting `gos install`/`gos self-update` silently under `set -e`.
 - The `jq` checksum and platform lookups tolerate feed entries without a `files` array instead of aborting on the first one, which turned a present checksum into "not found" and forced a needless `include=all` download.
+- `gos install` no longer promises "Resuming download" on wget-only hosts, where `wget -O` restarts the file; and `gos doctor`'s hash probe uses an explicit `mktemp` template so strict BSD `mktemp` implementations no longer produce a false "no working SHA256 tool".
 - `gos platforms` works again on hosts that have `python3` but no `jq`: the python3 feed parser contained a syntax error, so every such host reported "no supported platforms found".
 
 ### Performance
 
 - `gos install 1.24` (a bare minor) and the `gos run`/`gos each` fast paths now resolve the minor from the on-disk discovery feed cache instead of downloading the multi-megabyte `include=all` feed on every run. Checksums still come from a fresh feed fetch: a memoized feed that came from disk is re-downloaded before any checksum lookup, so the cache can only ever influence discovery.
 - The `gos env --auto` hook no longer spawns a `gos` process on every prompt: it re-evaluates only when the directory changes (or while the project's version is still missing, so the switch happens right after `gos use`).
+
+### Security
+
+- Downloads can no longer hang forever on a server that accepts the connection and then stalls: feed and metadata fetches carry a total `--max-time`, archive downloads abort when the transfer drops below 1 KB/s for 30 s, and the wget path enforces the same TLS 1.2 floor curl already had.
 
 ### Changed
 

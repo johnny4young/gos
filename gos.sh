@@ -366,6 +366,10 @@ _gos_download_progress_enabled() {
 # Security: HTTPS integrity relies on the system CA certificate store.
 # For hardened environments, set SSL_CERT_FILE or --cacert as needed.
 # --proto-redir '=https' / --https-only disallow HTTP fallback via redirects.
+# Archives are large, so instead of a total --max-time the transfer aborts
+# when it stalls below 1 KB/s for 30 s (--connect-timeout only bounds the
+# handshake; a server that accepts and then trickles would otherwise hang
+# gos forever). wget's --timeout is already a per-read timeout.
 _gos_download() {
   local url="$1" output="$2" resume="${3:-}"
   # A third "resume" argument continues a partially downloaded file instead of
@@ -379,15 +383,15 @@ _gos_download() {
   # bytes the checksum is computed against.
   if command -v curl &>/dev/null; then
     if _gos_download_progress_enabled; then
-      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --compressed ${resume_curl[@]:+"${resume_curl[@]}"} --progress-bar -fSL -o "$output" "$url"
+      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --speed-limit 1024 --speed-time 30 --retry 2 --compressed ${resume_curl[@]:+"${resume_curl[@]}"} --progress-bar -fSL -o "$output" "$url"
     else
-      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --compressed ${resume_curl[@]:+"${resume_curl[@]}"} -fsSL -o "$output" "$url"
+      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --speed-limit 1024 --speed-time 30 --retry 2 --compressed ${resume_curl[@]:+"${resume_curl[@]}"} -fsSL -o "$output" "$url"
     fi
   elif command -v wget &>/dev/null; then
     if _gos_download_progress_enabled; then
-      wget --https-only --timeout=15 --tries=3 -q --show-progress -O "$output" "$url"
+      wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -q --show-progress -O "$output" "$url"
     else
-      wget --https-only --timeout=15 --tries=3 -qO "$output" "$url"
+      wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -qO "$output" "$url"
     fi
   else
     _gos_error "neither curl nor wget found. Install one and try again."
@@ -395,16 +399,17 @@ _gos_download() {
   fi
 }
 
-# Download a URL to stdout. Supports curl and wget.
+# Download a URL to stdout. Supports curl and wget. Only small feed and
+# metadata bodies come through here, so a total --max-time is appropriate.
 _gos_download_stdout() {
   local url="$1"
   # --compressed: the downloads feed is JSON and gzip-encodes to roughly a
   # quarter of its size; wget's -qO- has no portable equivalent, so only curl
   # opts in (wget still works, just uncompressed).
   if command -v curl &>/dev/null; then
-    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --compressed -fsSL "$url"
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 60 --retry 2 --compressed -fsSL "$url"
   elif command -v wget &>/dev/null; then
-    wget --https-only --timeout=15 --tries=3 -qO- "$url"
+    wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -qO- "$url"
   else
     _gos_error "neither curl nor wget found. Install one and try again."
     return 1
@@ -875,7 +880,7 @@ _gos_sudo_for_target() {
     return
   fi
 
-  err_file=$(mktemp) || {
+  err_file=$(mktemp -t gos.XXXXXX) || {
     # No temp file for stderr capture; run the command directly.
     LC_ALL=C "$@"
     return
@@ -1382,7 +1387,8 @@ _gos_install_version() {
     # restarting. A verified partial is promoted straight to the cache entry.
     partial="${cache_file}.partial"
     archive_file="$partial"
-    if [ -s "$partial" ]; then
+    # Only curl resumes (wget -O restarts the file), so only promise it there.
+    if [ -s "$partial" ] && command -v curl &>/dev/null; then
       echo "Resuming download of ${pkg}..."
     else
       echo "Downloading ${pkg}..."
@@ -3758,7 +3764,7 @@ cmd_doctor() {
   # so a present-but-broken tool — a shasum missing a Perl module, a wrong-arch
   # binary — is caught here instead of only when an install later fails.
   local hash_probe hash_out
-  hash_probe=$(mktemp 2>/dev/null) || hash_probe=""
+  hash_probe=$(mktemp -t gos.XXXXXX 2>/dev/null) || hash_probe=""
   hash_out=""
   if [ -n "$hash_probe" ]; then
     printf 'gos' >"$hash_probe"

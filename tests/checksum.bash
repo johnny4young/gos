@@ -39,7 +39,7 @@ while [ "$#" -gt 0 ]; do
       output="$2"
       shift 2
       ;;
-    --proto|--connect-timeout|--retry)
+    --proto|--proto-redir|--connect-timeout|--max-time|--speed-limit|--speed-time|--retry)
       shift 2
       ;;
     --tlsv1.2|-fsSL)
