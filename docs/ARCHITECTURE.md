@@ -42,8 +42,10 @@ Sections, in file order, with the functions that matter:
 
 ## The command manifest
 
-`_gos_command_manifest` is a heredoc of `name|usage|description` lines. It is the
-single source for:
+`_gos_command_manifest` reads a heredoc of `name|usage|description` lines and
+formats effective usage by appending JSON options from `GOS_JSON_COMMANDS`.
+The conditional `use [--print [--json]]` form stays in its manifest entry.
+This effective manifest is the single source for:
 
 - `gos help` and `gos help <command>`
 - the README command table (`scripts/sync-readme-usage.bash`)
@@ -57,7 +59,9 @@ single source for:
 (every target is snapshotted and restored if a later generator fails);
 `--check` is a CI gate, so none of those surfaces can drift from the manifest.
 The per-command *flag* completions below the generated markers are still hand
-written in each shell file.
+written in each shell file. Tests compare them with effective manifest flags
+(including JSON) and exercise Bash/Fish queries and real Zsh ZLE completion in
+an isolated, time-bounded pseudo-terminal.
 
 Adding a command therefore means: one manifest line, one `cmd_<name>` function,
 one dispatcher case (with the right preconditions), the flag arms in the three

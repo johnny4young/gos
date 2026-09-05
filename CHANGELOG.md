@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Crash-residue enumeration preserves complete paths, including spaces, glob characters, backslashes and newline suffixes: `status`/`doctor` count each backup once, and `prune --rollback` cannot split a backup path into unrelated removal targets.
+- `run` completions offer bare `--` for project mode in all three shells; Fish and Zsh delegate the nested command and its arguments correctly with or without an explicit version/separator. Fish no longer treats nested command arguments as gos subcommands.
+- Help, argument-error usage, command metadata, README and man page share effective JSON option usage, including the conditional `use --print --json` form. Feed parser selection is initialized in the parent shell so subsequent queries reuse it.
+
 - `gos rollback` is now crash-safe like `gos install`: an interrupt between moving the active Go aside and moving the rollback into place used to leave the machine with no Go at all, because rollback never armed the EXIT trap that restores the displaced installation. The trap also stays armed when a post-activation restore fails midway, instead of being disarmed right after the failed attempt.
 - The `gos env --auto` hook and `gos status` now resolve a bare minor from `go.mod` (`go 1.24`) against the installed versions, offline: with `go1.24.3` installed the hook switches to it instead of printing `go1.24 is not installed` on every directory change, and `status` reports `satisfied by active go1.24.3` instead of `differs from active`. `gos status --json` gains a `project.resolved` field.
 - `gos.cmd` (the Windows shim) and `install.ps1` now look for Git for Windows' `bash.exe` in its install locations first and never accept the WSL launcher in `System32`, which `where bash.exe` returned first on machines with WSL enabled and which cannot run a Windows path. Missing Windows environment roots are tolerated, custom Git paths are quoted, and the shim's error goes to stderr so it cannot corrupt `--json` output.

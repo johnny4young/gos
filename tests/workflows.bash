@@ -552,7 +552,7 @@ assert(zsh_completion.include?("__versions --remote-cached"), "Zsh completion mu
 assert(fish_completion_file.include?("__versions --remote-cached"), "Fish completion must use cached dynamic versions")
 assert(bash_completion.include?("install | platforms)") && bash_completion.include?("run | each)"), "Bash completion must complete install/platforms and run/each versions")
 assert(zsh_completion.include?("install)") && zsh_completion.include?("run | each)"), "Zsh completion must complete install and run/each versions")
-assert(fish_completion_file.include?("__fish_seen_subcommand_from install platforms") && fish_completion_file.include?("__fish_seen_subcommand_from run each; and __gos_wants_version"), "Fish completion must complete install/platforms and run/each versions")
+assert(fish_completion_file.include?("__gos_using_command install platforms") && fish_completion_file.include?("__gos_using_command run each; and __gos_wants_version"), "Fish completion must complete install/platforms and run/each versions")
 assert(fish_completion_file.include?("function __gos_needs_command"), "Fish completion must keep offering commands after a leading --json")
 assert(bash_completion.include?("--fix"), "Bash completion must include doctor --fix")
 assert(zsh_completion.include?("--fix"), "Zsh completion must include doctor --fix")

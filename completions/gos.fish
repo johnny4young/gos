@@ -16,8 +16,36 @@ end
 # True while run/each still expect their version slot (nothing typed after
 # the command yet); afterwards the rest of the line is the command to run.
 function __gos_wants_version
-  set -l tokens (string match -v -- --json (commandline -opc))
-  test (count $tokens) -eq 2
+  set -l tokens (commandline -opc)
+  set -e tokens[1]
+  if test "$tokens[1]" = --json
+    set -e tokens[1]
+  end
+  test (count $tokens) -eq 1
+end
+
+# Match the actual gos command, never a word inside run/each's nested argv.
+function __gos_using_command
+  set -l tokens (commandline -opc)
+  set -e tokens[1]
+  if test "$tokens[1]" = --json
+    set -e tokens[1]
+  end
+  contains -- "$tokens[1]" $argv
+end
+
+function __gos_complete_command
+  set -l tokens (commandline -opc)
+  set -e tokens[1]
+  if test "$tokens[1]" = --json
+    set -e tokens[1]
+  end
+  # Fish skips non-option tokens, so bare -- does not occupy the version slot.
+  if test "$tokens[1]" = run; and test "$tokens[2]" = --
+    __fish_complete_subcommand --fcs-skip=2
+  else
+    __fish_complete_subcommand --fcs-skip=3
+  end
 end
 
 # gos-commands:fish:begin
@@ -45,24 +73,25 @@ complete -c gos -n '__gos_needs_command' -a 'help' -d 'Show this help message, o
 # gos-commands:fish:end
 # --json only where gos actually supports it (leading flag or per command).
 complete -c gos -n '__gos_needs_command' -l json -d 'Output machine-readable JSON where supported'
-complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version use' -l json -d 'Output machine-readable JSON'
-complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
-complete -c gos -n '__fish_seen_subcommand_from prune' -l dry-run -d 'Preview removals without deleting'
-complete -c gos -n '__fish_seen_subcommand_from rollback' -l dry-run -d 'Preview the rollback without switching'
-complete -c gos -n '__fish_seen_subcommand_from doctor' -l fix -d 'Apply safe non-destructive fixes'
-complete -c gos -n '__fish_seen_subcommand_from use' -l print -d 'Only resolve the project version'
-complete -c gos -n '__fish_seen_subcommand_from help' -a '(gos __commands 2>/dev/null)' -d 'gos command'
-complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
-complete -c gos -n '__fish_seen_subcommand_from list' -l minor -d 'Keep only the newest version per minor'
-complete -c gos -n '__fish_seen_subcommand_from install platforms' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
-complete -c gos -n '__fish_seen_subcommand_from run each; and __gos_wants_version' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
-complete -c gos -n '__fish_seen_subcommand_from run each; and not __gos_wants_version' -a '(__fish_complete_subcommand --fcs-skip=3)'
-complete -c gos -n '__fish_seen_subcommand_from pin' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
-complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
-complete -c gos -n '__fish_seen_subcommand_from uninstall' -l inactive -d 'Remove all inactive versions'
-complete -c gos -n '__fish_seen_subcommand_from uninstall' -l dry-run -d 'Preview removals without deleting'
-complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
-complete -c gos -n '__fish_seen_subcommand_from env' -l auto -d 'Emit opt-in auto-switch hook'
-complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
-complete -c gos -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell'
-complete -c gos -n '__fish_seen_subcommand_from completions' -l install -d 'Write the completion to the standard per-user directory'
+complete -c gos -n '__gos_using_command check current list platforms status which doctor prune env version use' -l json -d 'Output machine-readable JSON'
+complete -c gos -n '__gos_using_command prune' -l rollback -d 'Also remove the rollback installation'
+complete -c gos -n '__gos_using_command prune' -l dry-run -d 'Preview removals without deleting'
+complete -c gos -n '__gos_using_command rollback' -l dry-run -d 'Preview the rollback without switching'
+complete -c gos -n '__gos_using_command doctor' -l fix -d 'Apply safe non-destructive fixes'
+complete -c gos -n '__gos_using_command use' -l print -d 'Only resolve the project version'
+complete -c gos -n '__gos_using_command help' -a '(gos __commands 2>/dev/null)' -d 'gos command'
+complete -c gos -n '__gos_using_command list' -l installed -d 'List locally installed versions'
+complete -c gos -n '__gos_using_command list' -l minor -d 'Keep only the newest version per minor'
+complete -c gos -n '__gos_using_command install platforms' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
+complete -c gos -n '__gos_using_command run each; and __gos_wants_version' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
+complete -c gos -n '__gos_using_command run; and __gos_wants_version' -a -- -d 'Use the project Go version'
+complete -c gos -n '__gos_using_command run each; and not __gos_wants_version' -a '(__gos_complete_command)'
+complete -c gos -n '__gos_using_command pin' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
+complete -c gos -n '__gos_using_command uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
+complete -c gos -n '__gos_using_command uninstall' -l inactive -d 'Remove all inactive versions'
+complete -c gos -n '__gos_using_command uninstall' -l dry-run -d 'Preview removals without deleting'
+complete -c gos -n '__gos_using_command env' -l fish -d 'Emit fish shell syntax'
+complete -c gos -n '__gos_using_command env' -l auto -d 'Emit opt-in auto-switch hook'
+complete -c gos -n '__gos_using_command use' -a '(__fish_complete_directories)' -d 'Project directory'
+complete -c gos -n '__gos_using_command completions' -a 'bash zsh fish' -d 'Shell'
+complete -c gos -n '__gos_using_command completions' -l install -d 'Write the completion to the standard per-user directory'

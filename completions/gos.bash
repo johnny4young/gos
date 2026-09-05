@@ -48,6 +48,7 @@ _gos_completions() {
             versions=$(gos __versions --remote-cached 2>/dev/null || true)
           fi
           words="$versions"
+          [ "$cmd" != "run" ] || words="-- $words"
         else
           [ "${COMP_WORDS[$slot]:-}" = "--" ] || slot=$((slot + 1))
           [ "${COMP_WORDS[$slot]:-}" != "--" ] || slot=$((slot + 1))
