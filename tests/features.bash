@@ -1160,6 +1160,24 @@ assert_contains "$output" "checksum mismatch" "corrupt resume fails verification
 [ ! -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial" ] || fail "a checksum-mismatched partial must be discarded"
 pass "a corrupt resumable partial is discarded on a checksum mismatch"
 
+case_dir="${test_root}/bare-gos"
+mkdir -p "${case_dir}/project"
+printf '1.20rc1\n' >"${case_dir}/project/.go-version"
+pushd "${case_dir}/project" >/dev/null
+run_gos "$case_dir" bash "$script"
+popd >/dev/null
+[ "$status" -eq 0 ] || fail "bare gos failed: ${output}"
+assert_contains "$output" "Active:  go1.20rc1" "bare gos active line"
+assert_contains "$output" "Project: go1.20rc1 (${case_dir}/project/.go-version)" "bare gos project line"
+assert_contains "$output" "Run 'gos help' for the commands" "bare gos hint"
+assert_not_contains "$output" "COMMANDS:" "bare gos is not the full help"
+if [ -s "${case_dir}/urls.log" ]; then
+  fail "bare gos must stay offline"
+fi
+run_gos "$case_dir" bash "$script" help
+assert_contains "$output" "COMMANDS:" "gos help still lists commands"
+pass "bare gos prints a brief status instead of the full help"
+
 case_dir="${test_root}/version-flags"
 run_gos "$case_dir" bash "$script" --version
 [ "$status" -eq 0 ] || fail "gos --version failed: ${output}"

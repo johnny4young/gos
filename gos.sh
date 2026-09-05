@@ -4212,7 +4212,7 @@ _gos_completion_bash() {
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   # gos-commands:bash:begin
-  local fallback_commands="latest install run each use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
+  local fallback_commands="latest install rollback uninstall use pin run each check current list platforms status which prune doctor env completions self-update version help"
   # gos-commands:bash:end
   local commands="$fallback_commands"
   local cmd_index=1 cmd words="" line slot
@@ -4351,22 +4351,22 @@ _gos() {
   commands=(
     'latest:Install the latest stable Go version'
     'install:Install a specific Go version'
-    'run:Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
-    'each:Run a command against several side-by-side Go versions and report a pass/fail summary'
-    'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
-    'pin:Write .go-version in the current directory (active version by default)'
-    'check:Check whether newer stable Go or gos releases are available (no install)'
     'rollback:Restore the previous Go installation, if available; --dry-run only previews the swap'
     'uninstall:Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
-    'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
+    'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
+    'pin:Write .go-version in the current directory (active version by default)'
+    'run:Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
+    'each:Run a command against several side-by-side Go versions and report a pass/fail summary'
+    'check:Check whether newer stable Go or gos releases are available (no install)'
     'current:Show the currently active Go version'
     'list:List available Go versions (or locally installed ones); --minor keeps the newest per minor'
     'platforms:List supported OS/arch archives for a Go version'
     'status:Show an offline dashboard for gos and the active Go'
     'which:Show the active or side-by-side Go binary path'
+    'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
+    'doctor:Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
     'env:Print the PATH setup line or an opt-in per-shell auto-switch hook'
     'completions:Print a Bash, Zsh, or Fish completion script (or install it with --install)'
-    'doctor:Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
     'self-update:Update gos itself to the latest verified release'
     'version:Show gos version'
     'help:Show this help message, or usage for one command'
@@ -4526,22 +4526,22 @@ end
 # gos-commands:fish:begin
 complete -c gos -n '__gos_needs_command' -a 'latest' -d 'Install the latest stable Go version'
 complete -c gos -n '__gos_needs_command' -a 'install' -d 'Install a specific Go version'
-complete -c gos -n '__gos_needs_command' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
-complete -c gos -n '__gos_needs_command' -a 'each' -d 'Run a command against several side-by-side Go versions and report a pass/fail summary'
-complete -c gos -n '__gos_needs_command' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
-complete -c gos -n '__gos_needs_command' -a 'pin' -d 'Write .go-version in the current directory (active version by default)'
-complete -c gos -n '__gos_needs_command' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'
 complete -c gos -n '__gos_needs_command' -a 'rollback' -d 'Restore the previous Go installation, if available; --dry-run only previews the swap'
 complete -c gos -n '__gos_needs_command' -a 'uninstall' -d 'Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
-complete -c gos -n '__gos_needs_command' -a 'prune' -d 'Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
+complete -c gos -n '__gos_needs_command' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
+complete -c gos -n '__gos_needs_command' -a 'pin' -d 'Write .go-version in the current directory (active version by default)'
+complete -c gos -n '__gos_needs_command' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
+complete -c gos -n '__gos_needs_command' -a 'each' -d 'Run a command against several side-by-side Go versions and report a pass/fail summary'
+complete -c gos -n '__gos_needs_command' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'
 complete -c gos -n '__gos_needs_command' -a 'current' -d 'Show the currently active Go version'
 complete -c gos -n '__gos_needs_command' -a 'list' -d 'List available Go versions (or locally installed ones); --minor keeps the newest per minor'
 complete -c gos -n '__gos_needs_command' -a 'platforms' -d 'List supported OS/arch archives for a Go version'
 complete -c gos -n '__gos_needs_command' -a 'status' -d 'Show an offline dashboard for gos and the active Go'
 complete -c gos -n '__gos_needs_command' -a 'which' -d 'Show the active or side-by-side Go binary path'
+complete -c gos -n '__gos_needs_command' -a 'prune' -d 'Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
+complete -c gos -n '__gos_needs_command' -a 'doctor' -d 'Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
 complete -c gos -n '__gos_needs_command' -a 'env' -d 'Print the PATH setup line or an opt-in per-shell auto-switch hook'
 complete -c gos -n '__gos_needs_command' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script (or install it with --install)'
-complete -c gos -n '__gos_needs_command' -a 'doctor' -d 'Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
 complete -c gos -n '__gos_needs_command' -a 'self-update' -d 'Update gos itself to the latest verified release'
 complete -c gos -n '__gos_needs_command' -a 'version' -d 'Show gos version'
 complete -c gos -n '__gos_needs_command' -a 'help' -d 'Show this help message, or usage for one command'
@@ -4651,34 +4651,34 @@ cmd_completions() {
 }
 
 _gos_command_manifest() {
-  local name usage description
-  while IFS='|' read -r name usage description; do
+  local name usage description group
+  while IFS='|' read -r name usage description group; do
     case "$GOS_JSON_COMMANDS" in
       *" ${name} "*) usage="${usage} [--json]" ;;
     esac
-    printf '%s|%s|%s\n' "$name" "$usage" "$description"
+    printf '%s|%s|%s|%s\n' "$name" "$usage" "$description" "$group"
   done <<'GOS_COMMANDS'
-latest|latest|Install the latest stable Go version
-install|install <version>|Install a specific Go version
-run|run [version] [--] <command> [args...]|Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version
-each|each <v1,v2,...> [--] <command> [args...]|Run a command against several side-by-side Go versions and report a pass/fail summary
-use|use [--print [--json]] [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it
-pin|pin [version]|Write .go-version in the current directory (active version by default)
-check|check|Check whether newer stable Go or gos releases are available (no install)
-rollback|rollback [--dry-run]|Restore the previous Go installation, if available; --dry-run only previews the swap
-uninstall|uninstall <version or --inactive> [--dry-run]|Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback
-prune|prune [--rollback] [--dry-run]|Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews
-current|current|Show the currently active Go version
-list|list [--installed] [--minor]|List available Go versions (or locally installed ones); --minor keeps the newest per minor
-platforms|platforms [version]|List supported OS/arch archives for a Go version
-status|status|Show an offline dashboard for gos and the active Go
-which|which [version]|Show the active or side-by-side Go binary path
-env|env [--fish] [--auto]|Print the PATH setup line or an opt-in per-shell auto-switch hook
-completions|completions <shell> [--install]|Print a Bash, Zsh, or Fish completion script (or install it with --install)
-doctor|doctor [--fix]|Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line
-self-update|self-update|Update gos itself to the latest verified release
-version|version|Show gos version
-help|help [command]|Show this help message, or usage for one command
+latest|latest|Install the latest stable Go version|Install & switch
+install|install <version>|Install a specific Go version|Install & switch
+rollback|rollback [--dry-run]|Restore the previous Go installation, if available; --dry-run only previews the swap|Install & switch
+uninstall|uninstall <version or --inactive> [--dry-run]|Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback|Install & switch
+use|use [--print [--json]] [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it|Project
+pin|pin [version]|Write .go-version in the current directory (active version by default)|Project
+run|run [version] [--] <command> [args...]|Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version|Project
+each|each <v1,v2,...> [--] <command> [args...]|Run a command against several side-by-side Go versions and report a pass/fail summary|Project
+check|check|Check whether newer stable Go or gos releases are available (no install)|Inspect
+current|current|Show the currently active Go version|Inspect
+list|list [--installed] [--minor]|List available Go versions (or locally installed ones); --minor keeps the newest per minor|Inspect
+platforms|platforms [version]|List supported OS/arch archives for a Go version|Inspect
+status|status|Show an offline dashboard for gos and the active Go|Inspect
+which|which [version]|Show the active or side-by-side Go binary path|Inspect
+prune|prune [--rollback] [--dry-run]|Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews|Maintain
+doctor|doctor [--fix]|Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line|Maintain
+env|env [--fish] [--auto]|Print the PATH setup line or an opt-in per-shell auto-switch hook|Maintain
+completions|completions <shell> [--install]|Print a Bash, Zsh, or Fish completion script (or install it with --install)|Maintain
+self-update|self-update|Update gos itself to the latest verified release|Maintain
+version|version|Show gos version|Meta
+help|help [command]|Show this help message, or usage for one command|Meta
 GOS_COMMANDS
 }
 
@@ -4688,7 +4688,7 @@ GOS_COMMANDS
 # consumers; an optional example is printed after two spaces.
 _gos_usage() {
   local cmd="$1" example="${2:-}" usage
-  usage=$(_gos_command_manifest | while IFS='|' read -r entry_name entry_usage _entry_description; do
+  usage=$(_gos_command_manifest | while IFS='|' read -r entry_name entry_usage _entry_description _entry_group; do
     if [ "$entry_name" = "$cmd" ]; then
       printf '%s' "$entry_usage"
     fi
@@ -4701,9 +4701,17 @@ _gos_usage() {
   fi
 }
 
+# The COMMANDS block of gos help: entries under their manifest group. Group
+# headers sit at column 0 so the two-space-indented entries stay the only
+# lines that look like commands (completions and tests parse them that way).
 _gos_command_help() {
-  local _command_name command_usage command_description
-  _gos_command_manifest | while IFS='|' read -r _command_name command_usage command_description; do
+  local _command_name command_usage command_description command_group last_group=""
+  _gos_command_manifest | while IFS='|' read -r _command_name command_usage command_description command_group; do
+    if [ "$command_group" != "$last_group" ]; then
+      [ -z "$last_group" ] || printf '\n'
+      printf '%s\n' "$command_group"
+      last_group="$command_group"
+    fi
     printf '  %-19s %s\n' "$command_usage" "$command_description"
   done
 }
@@ -4720,7 +4728,7 @@ cmd_help() {
   # Per-command help straight from the manifest, so it can never drift from
   # the full listing, the README table, or the completions.
   if [ -n "$topic" ]; then
-    entry=$(_gos_command_manifest | while IFS='|' read -r entry_name entry_usage entry_description; do
+    entry=$(_gos_command_manifest | while IFS='|' read -r entry_name entry_usage entry_description _entry_group; do
       if [ "$entry_name" = "$topic" ]; then
         printf '%s|%s\n' "$entry_usage" "$entry_description"
       fi
@@ -4777,15 +4785,15 @@ EOF
 
 _gos_commands() {
   local command_name _command_usage _command_description
-  _gos_command_manifest | while IFS='|' read -r command_name _command_usage _command_description; do
+  _gos_command_manifest | while IFS='|' read -r command_name _command_usage _command_description _command_group; do
     printf '%s\n' "$command_name"
   done
 }
 
 _gos_command_details_json() {
-  local first="true" command_name command_usage command_description
+  local first="true" command_name command_usage command_description command_group
   printf '['
-  _gos_command_manifest | while IFS='|' read -r command_name command_usage command_description; do
+  _gos_command_manifest | while IFS='|' read -r command_name command_usage command_description command_group; do
     if [ "$first" = "true" ]; then
       first="false"
     else
@@ -4797,9 +4805,20 @@ _gos_command_details_json() {
     _gos_json_string "$command_usage"
     printf ',"description":'
     _gos_json_string "$command_description"
+    printf ',"group":'
+    _gos_json_string "$command_group"
     printf '}'
   done
   printf ']'
+}
+
+# The three-field name|usage|description form the surface generators parse;
+# the group column stays internal to gos help and the --json details.
+_gos_command_details() {
+  local command_name command_usage command_description _command_group
+  _gos_command_manifest | while IFS='|' read -r command_name command_usage command_description _command_group; do
+    printf '%s|%s|%s\n' "$command_name" "$command_usage" "$command_description"
+  done
 }
 
 cmd___commands() {
@@ -4825,7 +4844,7 @@ cmd___commands() {
     fi
     printf '}\n'
   elif [ "$details" = "true" ]; then
-    _gos_command_manifest
+    _gos_command_details
   else
     _gos_commands
   fi
@@ -4945,6 +4964,24 @@ _gos_preflight() {
   done
 }
 
+_gos_brief_status() {
+  local active go_path resolved version source
+  active=$(_gos_current)
+  if [ "$active" = "none" ]; then
+    _gos_print_styled_value 33 'Active:  ' 'none' ' (install one with: gos latest)'
+  else
+    go_path=$(_gos_active_go_path 2>/dev/null) || go_path=""
+    _gos_print_styled_value 32 'Active:  ' "go${active}" "${go_path:+ (${go_path})}"
+  fi
+  if resolved=$(_gos_resolve_project_version "$PWD" 2>/dev/null); then
+    version="${resolved%%|*}"
+    version="${version#go}"
+    source="${resolved#*|}"
+    printf 'Project: go%s (%s)\n' "$version" "$source"
+  fi
+  printf "Run 'gos help' for the commands and 'gos status' for the full dashboard.\n"
+}
+
 main() {
   # Select in the parent before any feed pipeline/command substitution. The
   # children inherit this choice; assignments made inside them cannot memoize
@@ -4955,6 +4992,14 @@ main() {
     GOS_OUTPUT_JSON=1
     leading_json="true"
     shift
+  fi
+
+  # Bare `gos` answers the question people actually have (which Go is
+  # active, what does this project want) in three lines; `gos help` still
+  # lists every command.
+  if [ "$#" -eq 0 ] && [ "$leading_json" != "true" ]; then
+    _gos_brief_status
+    return
   fi
 
   local cmd="${1:-help}"

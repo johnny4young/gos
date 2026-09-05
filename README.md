@@ -293,27 +293,29 @@ exec fish          # for Fish
 
 ## Usage
 
+Bare `gos` prints a three-line status (active Go, project version, next step); `gos help` lists every command by group and `gos help <command>` shows one usage line.
+
 <!-- gos-commands:begin -->
 | Command | Description |
 |---|---|
 | `gos latest` | Install the latest stable Go version |
 | `gos install <version>` | Install a specific Go version |
-| `gos run [version] [--] <command> [args...]` | Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version |
-| `gos each <v1,v2,...> [--] <command> [args...]` | Run a command against several side-by-side Go versions and report a pass/fail summary |
-| `gos use [--print [--json]] [path]` | Install the Go version requested by `.go-version`, `.tool-versions`, or `go.mod`; `--print` only resolves it |
-| `gos pin [version]` | Write `.go-version` in the current directory (active version by default) |
-| `gos check [--json]` | Check whether newer stable Go or gos releases are available (no install) |
 | `gos rollback [--dry-run]` | Restore the previous Go installation, if available; `--dry-run` only previews the swap |
 | `gos uninstall <version or --inactive> [--dry-run]` | Remove an installed version (side-by-side mode); `--inactive` removes all but the active and rollback |
-| `gos prune [--rollback] [--dry-run] [--json]` | Remove cached Go archives; `--rollback` also removes the rollback copy, `--dry-run` only previews |
+| `gos use [--print [--json]] [path]` | Install the Go version requested by `.go-version`, `.tool-versions`, or `go.mod`; `--print` only resolves it |
+| `gos pin [version]` | Write `.go-version` in the current directory (active version by default) |
+| `gos run [version] [--] <command> [args...]` | Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version |
+| `gos each <v1,v2,...> [--] <command> [args...]` | Run a command against several side-by-side Go versions and report a pass/fail summary |
+| `gos check [--json]` | Check whether newer stable Go or gos releases are available (no install) |
 | `gos current [--json]` | Show the currently active Go version |
 | `gos list [--installed] [--minor] [--json]` | List available Go versions (or locally installed ones); `--minor` keeps the newest per minor |
 | `gos platforms [version] [--json]` | List supported OS/arch archives for a Go version |
 | `gos status [--json]` | Show an offline dashboard for gos and the active Go |
 | `gos which [version] [--json]` | Show the active or side-by-side Go binary path |
+| `gos prune [--rollback] [--dry-run] [--json]` | Remove cached Go archives; `--rollback` also removes the rollback copy, `--dry-run` only previews |
+| `gos doctor [--fix] [--json]` | Diagnose gos, Go, PATH, and local tool dependencies; `--fix` creates safe missing directories and prints the shell setup line |
 | `gos env [--fish] [--auto] [--json]` | Print the PATH setup line or an opt-in per-shell auto-switch hook |
 | `gos completions <shell> [--install]` | Print a Bash, Zsh, or Fish completion script (or install it with `--install`) |
-| `gos doctor [--fix] [--json]` | Diagnose gos, Go, PATH, and local tool dependencies; `--fix` creates safe missing directories and prints the shell setup line |
 | `gos self-update` | Update gos itself to the latest verified release |
 | `gos version [--json]` | Show gos version |
 | `gos help [command]` | Show this help message, or usage for one command |

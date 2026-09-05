@@ -125,22 +125,22 @@ expected_commands="$(
   cat <<'COMMANDS'
 latest
 install
-run
-each
-use
-pin
-check
 rollback
 uninstall
-prune
+use
+pin
+run
+each
+check
 current
 list
 platforms
 status
 which
+prune
+doctor
 env
 completions
-doctor
 self-update
 version
 help
@@ -151,14 +151,14 @@ assert_not_contains "$commands_output" "__commands" "__commands public list"
 
 commands_json="$(bash "$script" __commands --json)"
 assert_json "$commands_json" "__commands --json"
-assert_contains "$commands_json" '"commands":["latest","install","run","each","use","pin","check","rollback","uninstall","prune","current","list","platforms","status","which","env","completions","doctor","self-update","version","help"]' "__commands json"
+assert_contains "$commands_json" '"commands":["latest","install","rollback","uninstall","use","pin","run","each","check","current","list","platforms","status","which","prune","doctor","env","completions","self-update","version","help"]' "__commands json"
 commands_details="$(bash "$script" __commands --details)"
 assert_contains "$commands_details" "latest|latest|Install the latest stable Go version" "__commands details latest"
 assert_contains "$commands_details" "self-update|self-update|Update gos itself to the latest verified release" "__commands details self-update"
 
 commands_details_json="$(bash "$script" __commands --details --json)"
 assert_json "$commands_details_json" "__commands --details --json"
-assert_contains "$commands_details_json" '"name":"latest","usage":"latest","description":"Install the latest stable Go version"' "__commands details json latest"
+assert_contains "$commands_details_json" '"name":"latest","usage":"latest","description":"Install the latest stable Go version","group":"Install & switch"' "__commands details json latest"
 assert_contains "$commands_details_json" '"name":"self-update","usage":"self-update","description":"Update gos itself to the latest verified release"' "__commands details json self-update"
 
 help_output="$(bash "$script" help)"
@@ -217,6 +217,9 @@ pass "every manifest flag is offered by the bash, zsh, and fish completions"
 commands_space="$(printf '%s\n' "$commands_output" | tr '\n' ' ' | sed 's/ $//')"
 assert_contains "$bash_completion_text" "local fallback_commands=\"${commands_space}\"" "bash fallback command list"
 assert_not_contains "$help_output" "__commands" "help hides internal command manifest"
+# Group headers sit at column 0 between the indented entries.
+assert_contains "$help_output" $'\nInstall & switch\n  latest' "help groups commands"
+assert_contains "$help_output" $'\nMeta\n  version' "help last group"
 help_commands="$(
   printf '%s\n' "$help_output" | awk '
     $0 == "COMMANDS:" { in_commands = 1; next }
