@@ -16,6 +16,12 @@ completion = Path(sys.argv[1]).resolve()
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     (root / '_gos').write_text(completion.read_text())
+    # Runner fpath entries can be insecure. Keep a hostile entry in the fixture
+    # so compinit must exclude it rather than prompt or trust it with -u.
+    insecure = root / 'insecure'
+    insecure.mkdir()
+    insecure.chmod(0o777)
+    (insecure / '_gos_untrusted').write_text('#compdef gos-untrusted\n')
     (root / 'fixture-target').touch()
     capture = root / 'capture'
     setup = root / 'setup.zsh'
@@ -23,9 +29,13 @@ with tempfile.TemporaryDirectory() as directory:
 PS1='gos-test> '
 RPROMPT=''
 cd {shlex.quote(directory)}
-fpath=({shlex.quote(directory)} $fpath)
+fpath=({shlex.quote(directory)} {shlex.quote(str(insecure))} $fpath)
 autoload -Uz compinit
-compinit -D
+compinit -i -D
+if (( ${{+_comps[gos-untrusted]}} )); then
+  print -r -- 'GOS_UNTRUSTED_COMPLETION_LOADED'
+  exit 1
+fi
 compdef _gos gos
 gos() {{ print -r -- 1.21.6; }}
 gos-probe-command() {{ :; }}
