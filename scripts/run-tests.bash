@@ -88,11 +88,15 @@ if [ "$jobs" = "auto" ]; then
   [ "$jobs" -le 4 ] || jobs=4
 fi
 case "$jobs" in
-  '' | *[!0-9]* | 0)
+  '' | *[!0-9]* | 0*)
     echo "Error: --jobs must be a positive integer or auto." >&2
     exit 2
     ;;
 esac
+if ! [ "$jobs" -gt 0 ] 2>/dev/null; then
+  echo "Error: --jobs is outside the supported integer range." >&2
+  exit 2
+fi
 
 # Discover suites from git so an untracked file can never run in CI and a
 # tracked one can never be forgotten; fall back to the directory listing for
@@ -100,7 +104,7 @@ esac
 discover_suites() {
   local path
   {
-    git ls-files 'tests/*.bash' 2>/dev/null || ls tests/*.bash
+    git -c core.quotePath=false ls-files 'tests/*.bash' 2>/dev/null || ls tests/*.bash
   } | while IFS= read -r path; do
     case "${path##*/}" in
       lib*.bash) continue ;;
@@ -111,36 +115,48 @@ discover_suites() {
 
 # Print the os rule that excludes the suite on the target os, or nothing.
 suite_skip_reason() {
-  local path="$1" header key value
-  header="$(sed -n 's/^# gos-suite:[[:space:]]*//p' "$path" | head -n 1)"
+  local path="$1" header key value token reason="" os_list os
+  header="$(sed -n 's/^# gos-suite:[[:space:]]*//p' "$path")" || return 2
   [ -n "$header" ] || return 0
   for token in $header; do
     key="${token%%=*}"
     value="${token#*=}"
     case "$key" in
+      only-os | skip-os) ;;
+      *)
+        echo "Error: ${path}: unknown gos-suite key '${key}'." >&2
+        return 2
+        ;;
+    esac
+    os_list="$value"
+    while :; do
+      os="${os_list%%,*}"
+      case "$os" in
+        linux | macos | windows) ;;
+        *)
+          echo "Error: ${path}: invalid gos-suite OS '${os}'." >&2
+          return 2
+          ;;
+      esac
+      [ "$os_list" != "$os" ] || break
+      os_list="${os_list#*,}"
+    done
+    case "$key" in
       only-os)
         case ",${value}," in
           *",${target_os},"*) ;;
-          *)
-            printf 'only-os=%s\n' "$value"
-            return 0
-            ;;
+          *) reason="only-os=${value}" ;;
         esac
         ;;
       skip-os)
         case ",${value}," in
-          *",${target_os},"*)
-            printf 'skip-os=%s\n' "$value"
-            return 0
-            ;;
+          *",${target_os},"*) reason="skip-os=${value}" ;;
         esac
-        ;;
-      *)
-        echo "Error: ${path}: unknown gos-suite key '${key}'." >&2
-        exit 2
         ;;
     esac
   done
+  [ -z "$reason" ] || printf '%s\n' "$reason"
+  return 0
 }
 
 all_suites="$(discover_suites)"
@@ -157,10 +173,14 @@ if [ "${#requested[@]}" -gt 0 ]; then
       tests/*) ;;
       *) path="tests/${path%.bash}.bash" ;;
     esac
-    printf '%s\n' "$all_suites" | grep -qx "$path" || {
+    printf '%s\n' "$all_suites" | grep -Fx -- "$path" >/dev/null || {
       echo "Error: unknown test suite '${name}' (see --list)." >&2
       exit 2
     }
+    # A repeated request is one suite, not concurrent writers to the same log.
+    if printf '%s' "$selected" | grep -Fx -- "$path" >/dev/null; then
+      continue
+    fi
     selected="${selected}${path}"$'\n'
   done
 else
@@ -186,8 +206,8 @@ trap 'rm -rf "$log_dir"' EXIT
 run_suite() {
   # Writes the suite's combined output to its log and its status to a marker.
   local path="$1" name status
-  name="${path##*/}"
-  name="${name%.bash}"
+  name="$path"
+  mkdir -p "${log_dir}/${name%/*}"
   status=0
   # No stdin: a suite that reads it would otherwise eat the runner's own
   # input (and CI has none anyway).
@@ -197,11 +217,10 @@ run_suite() {
 
 report_suite() {
   local path="$1" name status
-  name="${path##*/}"
-  name="${name%.bash}"
-  status="$(cat "${log_dir}/${name}.status")"
+  name="$path"
+  status="$(cat "${log_dir}/${name}.status")" || return 1
   printf '=== %s (%s) ===\n' "$path" "$([ "$status" -eq 0 ] && echo ok || echo "FAILED, status ${status}")"
-  cat "${log_dir}/${name}.log"
+  cat "${log_dir}/${name}.log" || return 1
   [ "$status" -eq 0 ]
 }
 

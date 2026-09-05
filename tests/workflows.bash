@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# gos-suite: skip-os=windows
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -165,7 +164,7 @@ end
 validate_powershell_files = script_array(validate_local, "powershell_files")
 
 tracked_shell_files = tracked_files.select { |path| path.end_with?(".bash", ".sh") }.sort
-assert(validate_local.include?("git ls-files '*.sh' '*.bash'"), "validate-local must derive its Bash syntax file list from git ls-files like CI")
+assert(validate_local.include?("git ls-files -z '*.sh' '*.bash'"), "validate-local must derive its Bash syntax file list from git ls-files like CI")
 assert(tracked_shell_files.include?("scripts/run-tests.bash"), "the suite runner must be tracked")
 
 # Suites are discovered by scripts/run-tests.bash from git, so the only
@@ -177,11 +176,14 @@ listed_suites = `bash scripts/run-tests.bash --list --os linux`.lines.map { |lin
 assert($?.success?, "scripts/run-tests.bash --list must succeed")
 assert(listed_suites == tracked_test_scripts, "run-tests must discover every tracked suite: #{listed_suites.inspect} vs #{tracked_test_scripts.inspect}")
 windows_skips = `bash scripts/run-tests.bash --list --os windows`.lines.select { |line| line.include?("skipped") }.map { |line| line.split("\t").first.strip }
+assert($?.success?, "Windows suite discovery must succeed")
+assert(!windows_skips.include?("tests/workflows.bash"), "workflow invariants must run on Windows")
 %w[tests/side-by-side.bash tests/doctor-status.bash tests/packaging.bash tests/homebrew-tap.bash].each do |suite|
   next unless tracked_test_scripts.include?(suite)
   assert(windows_skips.include?(suite), "#{suite} must declare it does not run on Windows")
 end
 macos_skips = `bash scripts/run-tests.bash --list --os macos`.lines.select { |line| line.include?("skipped") }.map { |line| line.split("\t").first.strip }
+assert($?.success?, "macOS suite discovery must succeed")
 %w[tests/packaging.bash tests/homebrew-tap.bash].each do |suite|
   assert(macos_skips.include?(suite), "#{suite} must declare only-os=linux")
 end
@@ -452,14 +454,14 @@ command_surface_sync = step_named(smoke_steps, "Command surface sync")
 bash32 = step_named(smoke_steps, "Bash 3.2 compatibility")
 assert(bash32, "smoke job must exercise the bash 3.2 floor")
 assert(bash32["if"] == "runner.os == 'macOS'", "bash 3.2 compatibility step must run on macOS, the only runner shipping bash 3.2")
-assert(bash32["run"].to_s.include?("grep -F 'version 3.2'") && bash32["run"].to_s.include?("bash scripts/run-tests.bash") && bash32["run"].to_s.include?("side-by-side") && bash32["run"].to_s.include?("install-transaction"), "bash 3.2 compatibility step must verify the interpreter and run the feature suites under it")
+assert(bash32["run"].to_s.include?("grep -F 'version 3.2'") && bash32["run"].to_s.include?("bash scripts/run-tests.bash") && bash32["run"].to_s.lines.any? { |line| line.strip == "bash scripts/run-tests.bash --jobs 2" }, "bash 3.2 compatibility step must verify the interpreter and run the feature suites under it")
 assert(command_surface_sync, "smoke job must check generated command surfaces")
 assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surfaces.bash --check"), "command surface sync must use the orchestrator")
 
 [
   "bash scripts/run-tests.bash",
   "bash scripts/sync-command-surfaces.bash --check",
-  "git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --",
+  "git ls-files -z '*.sh' '*.bash' | xargs -0 -n 1 bash -n --",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -472,7 +474,7 @@ end
 # the set-equality assertion above keeps the two in agreement.
 bash_syntax = step_named(smoke_steps, "Bash syntax")
 assert(bash_syntax, "smoke job must define Bash syntax step")
-assert(bash_syntax["run"].to_s.include?("git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --"), "smoke job Bash syntax must derive a NUL-delimited file list from git ls-files")
+assert(bash_syntax["run"].to_s.include?("git ls-files -z '*.sh' '*.bash' | xargs -0 -n 1 bash -n --"), "smoke job Bash syntax must derive a NUL-delimited file list from git ls-files")
 tracked_powershell_files.each do |path|
   assert(smoke_runs.include?(path), "smoke job PowerShell syntax must cover tracked PowerShell file #{path}")
 end
