@@ -8,10 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- Classified exit codes: `2` for invalid arguments or configuration, `3` for a failed download or feed fetch, `4` for a checksum or release that could not be verified, `5` when another gos holds the mutation lock; `1` stays the generic failure. With `--json` a failed command now prints one `{"error":{"code":...,"message":...}}` document on stdout instead of leaving it empty. Documented in `gos help`, the man page, and the README.
 - `gos --version` and `gos -V` print the gos version like `gos version`.
 - `docs/ARCHITECTURE.md` maps `gos.sh`, the command manifest and its generated surfaces, the install transaction and its crash-recovery trap, the trust boundaries, the on-disk state, and the bash 3.2 rules; CONTRIBUTING and the README point to it.
 
 ### Fixed
+
+- Classified failures now survive all list output modes; doctor probes keep a single report, missing operands return usage errors, and lock creation failures remain generic. Trailing JSON flags are honored even for early argument/configuration failures without consuming child command flags. Bare status includes a Project line when no manifest exists.
 
 - Crash-residue enumeration preserves complete paths, including spaces, glob characters, backslashes and newline suffixes: `status`/`doctor` count each backup once, and `prune --rollback` cannot split a backup path into unrelated removal targets.
 - `run` completions offer bare `--` for project mode in all three shells; Fish and Zsh delegate the nested command and its arguments correctly with or without an explicit version/separator. Fish no longer treats nested command arguments as gos subcommands.
@@ -48,6 +51,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- `gos` with no arguments now prints a three-line status (active Go, the project's requested version, and where to go next) instead of the full help; `gos help` is unchanged. Scripts that relied on the bare command printing help should call `gos help`.
+- `gos help` groups the commands (Install & switch, Project, Inspect, Maintain, Meta); the manifest, and therefore the README table, the man page, and the completion lists, follow that order.
 - Shell completions: `gos pin` and `gos platforms` now complete versions, `gos run`/`gos each` complete the version slot, then command names, then files instead of offering Go versions for every word, and fish keeps offering commands after a leading `--json`. The test suite now checks that every flag in a command's usage is offered by all three shells.
 - Argument errors print the usage line from the command manifest (the same text as `gos help <command>`, with `[--json]` appended where supported), and `gos platforms`/`gos which` reject unknown options instead of treating them as a version.
 - Internal consolidation with no behavior change: one feed parser cascade (`_gos_feed_query`), one download argument builder (`_gos_http_get`), shared helpers for side-by-side checks, bare minors, crash residue, colour gating, and version splitting, a dispatcher preflight table, and locks taken after argument parsing; the top of `gos.sh` carries a section map.

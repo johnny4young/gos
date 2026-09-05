@@ -85,6 +85,8 @@ lines << ".SH ENVIRONMENT"
   lines << ".B #{name}"
   lines << "\\&#{man(description)}"
 end
+lines << ".SH EXIT STATUS"
+lines << "0 on success, 1 on a generic failure, 2 for invalid arguments or configuration, 3 when a download or feed fetch failed, 4 when a checksum or release could not be verified, and 5 when another gos holds the mutation lock. With \\fB\\-\\-json\\fR a failed command prints one {\"error\":{\"code\":...,\"message\":...}} document on standard output. The doctor command keeps its diagnostic report and exits 1 when it reports problems; invalid doctor arguments still produce a usage error document."
 lines << ".SH SEE ALSO"
 lines << ".BR go (1)"
 lines << ".SH HOMEPAGE"

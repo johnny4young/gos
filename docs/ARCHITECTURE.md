@@ -42,9 +42,12 @@ Sections, in file order, with the functions that matter:
 
 ## The command manifest
 
-`_gos_command_manifest` reads a heredoc of `name|usage|description` lines and
+`_gos_command_manifest` reads a heredoc of `name|usage|description|group` lines and
 formats effective usage by appending JSON options from `GOS_JSON_COMMANDS`.
 The conditional `use [--print [--json]]` form stays in its manifest entry.
+Entries are ordered by task group for help and generated command lists.
+`__commands --details` retains the three-field `name|usage|description` format;
+`__commands --details --json` includes the additive `group` field.
 This effective manifest is the single source for:
 
 - `gos help` and `gos help <command>`
@@ -165,10 +168,23 @@ Invariant, enforced by `tests/workflows.bash`: every function that writes under
 
 ## Output contracts
 
-- stdout is data; stderr is diagnostics. Errors are `Error: ...` on stderr and
-  exit 1; warnings are `Warning: ...` on stderr.
+- stdout is data; stderr is diagnostics. Errors are `Error: ...` on stderr;
+  warnings are `Warning: ...` on stderr. Exit 1 is a generic failure; 2 is
+  invalid arguments/configuration, 3 a download/feed failure, 4 a verification
+  failure, and 5 a blocking mutation lock. `gos each` keeps exit 1 when any
+  version fails; `gos run` passes through its child command's exit status.
 - `--json` (leading or per command) is the stable machine contract for the
-  commands listed in `gos help`; fields are only ever added.
+  commands listed in `gos help`; fields are only ever added. Failures print
+  one `{"error":{"code":"usage|network|verification|lock|failure","message":"..."}}`
+  document. Doctor retains its diagnostic report and exit 1 for problems;
+  invalid doctor arguments still produce a usage error document.
+- `_gos_fail` records a class in the parent process and the EXIT trap promotes
+  generic status 1 after cleanup. A classified failure inside a subshell cannot
+  update its parent: fetch/classify before pipelines or substitutions. Handled
+  validator probes (doctor) must isolate their state instead. Recognize JSON
+  before preflight, but never scan child arguments of `run` or `each`.
+- Bare `gos` is an offline three-line status, including an explicit Project
+  line when no manifest is found. `gos help` remains the full command listing.
 - Install progress goes to stdout for `install`/`latest`/`use` and to stderr
   for `run`/`each`, whose stdout belongs to the command they run.
 - Color and progress bars appear only on a TTY and never under `--json`,

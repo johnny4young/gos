@@ -18,11 +18,11 @@ nothing but \fBcurl\fR (or \fBwget\fR) and \fBbash\fR.
 .B gos install <version>
 \&Install a specific Go version
 .TP
-.B gos run [version] [\-\-] <command> [args...]
-\&Run a command with a side-by-side Go version without activating it globally; a bare \-\- uses the project version
+.B gos rollback [\-\-dry-run]
+\&Restore the previous Go installation, if available; \-\-dry-run only previews the swap
 .TP
-.B gos each <v1,v2,...> [\-\-] <command> [args...]
-\&Run a command against several side-by-side Go versions and report a pass/fail summary
+.B gos uninstall <version or \-\-inactive> [\-\-dry-run]
+\&Remove an installed version (side-by-side mode); \-\-inactive removes all but the active and rollback
 .TP
 .B gos use [\-\-print [\-\-json]] [path]
 \&Install the Go version requested by .go-version, .tool-versions, or go.mod; \-\-print only resolves it
@@ -30,17 +30,14 @@ nothing but \fBcurl\fR (or \fBwget\fR) and \fBbash\fR.
 .B gos pin [version]
 \&Write .go-version in the current directory (active version by default)
 .TP
+.B gos run [version] [\-\-] <command> [args...]
+\&Run a command with a side-by-side Go version without activating it globally; a bare \-\- uses the project version
+.TP
+.B gos each <v1,v2,...> [\-\-] <command> [args...]
+\&Run a command against several side-by-side Go versions and report a pass/fail summary
+.TP
 .B gos check [\-\-json]
 \&Check whether newer stable Go or gos releases are available (no install)
-.TP
-.B gos rollback [\-\-dry-run]
-\&Restore the previous Go installation, if available; \-\-dry-run only previews the swap
-.TP
-.B gos uninstall <version or \-\-inactive> [\-\-dry-run]
-\&Remove an installed version (side-by-side mode); \-\-inactive removes all but the active and rollback
-.TP
-.B gos prune [\-\-rollback] [\-\-dry-run] [\-\-json]
-\&Remove cached Go archives; \-\-rollback also removes the rollback copy, \-\-dry-run only previews
 .TP
 .B gos current [\-\-json]
 \&Show the currently active Go version
@@ -57,14 +54,17 @@ nothing but \fBcurl\fR (or \fBwget\fR) and \fBbash\fR.
 .B gos which [version] [\-\-json]
 \&Show the active or side-by-side Go binary path
 .TP
+.B gos prune [\-\-rollback] [\-\-dry-run] [\-\-json]
+\&Remove cached Go archives; \-\-rollback also removes the rollback copy, \-\-dry-run only previews
+.TP
+.B gos doctor [\-\-fix] [\-\-json]
+\&Diagnose gos, Go, PATH, and local tool dependencies; \-\-fix creates safe missing directories and prints the shell setup line
+.TP
 .B gos env [\-\-fish] [\-\-auto] [\-\-json]
 \&Print the PATH setup line or an opt-in per-shell auto-switch hook
 .TP
 .B gos completions <shell> [\-\-install]
 \&Print a Bash, Zsh, or Fish completion script (or install it with \-\-install)
-.TP
-.B gos doctor [\-\-fix] [\-\-json]
-\&Diagnose gos, Go, PATH, and local tool dependencies; \-\-fix creates safe missing directories and prints the shell setup line
 .TP
 .B gos self-update
 \&Update gos itself to the latest verified release
@@ -96,6 +96,8 @@ nothing but \fBcurl\fR (or \fBwget\fR) and \fBbash\fR.
 .TP
 .B NO_COLOR
 \&When set, disables colored and symbol output (also GOS_NO_COLOR=1).
+.SH EXIT STATUS
+0 on success, 1 on a generic failure, 2 for invalid arguments or configuration, 3 when a download or feed fetch failed, 4 when a checksum or release could not be verified, and 5 when another gos holds the mutation lock. With \fB\-\-json\fR a failed command prints one {"error":{"code":...,"message":...}} document on standard output. The doctor command keeps its diagnostic report and exits 1 when it reports problems; invalid doctor arguments still produce a usage error document.
 .SH SEE ALSO
 .BR go (1)
 .SH HOMEPAGE
