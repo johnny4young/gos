@@ -224,3 +224,26 @@ else
   rm -f "$symlink_probe"
   pass "side-by-side mode tests skipped (filesystem lacks symlink support)"
 fi
+
+# A flat-mode gos (GOS_VERSIONS_DIR unset, e.g. a cron job or sudo shell that
+# did not source the rc file) must warn before turning a side-by-side symlink
+# into a flat install, and then do so.
+orphan_probe="${test_root}/orphan-link-probe"
+if ln -s "$script" "$orphan_probe" 2>/dev/null && [ -L "$orphan_probe" ]; then
+  rm -f "$orphan_probe"
+  case_dir="${test_root}/orphaned-versions-link"
+  mkdir -p "${case_dir}/versions/go1.21.6/bin"
+  printf '#!/usr/bin/env bash\necho "go version go1.21.6 darwin/arm64"\n' >"${case_dir}/versions/go1.21.6/bin/go"
+  chmod +x "${case_dir}/versions/go1.21.6/bin/go"
+  ln -s "${case_dir}/versions/go1.21.6" "${case_dir}/go"
+  run_gos "$case_dir" bash "$script" install 1.20.0
+  [ "$status" -eq 0 ] || fail "flat install over a side-by-side symlink failed: ${output}"
+  assert_contains "$output" "Warning: ${case_dir}/go is a side-by-side symlink (-> ${case_dir}/versions/go1.21.6) but GOS_VERSIONS_DIR is not set in this shell." "orphaned versions link warning"
+  assert_contains "$output" "export GOS_VERSIONS_DIR to keep managing versions side by side" "orphaned versions link hint"
+  [ -d "${case_dir}/go" ] && [ ! -L "${case_dir}/go" ] || fail "the install must have become a flat directory"
+  [ -x "${case_dir}/versions/go1.21.6/bin/go" ] || fail "the previous side-by-side version must survive as the rollback target"
+  pass "flat-mode installs warn before converting a side-by-side symlink"
+else
+  rm -f "$orphan_probe"
+  pass "orphaned versions link test skipped (filesystem lacks symlink support)"
+fi

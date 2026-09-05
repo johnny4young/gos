@@ -369,6 +369,51 @@ FAKE_MV
 chmod +x "${fake_bin}/uname" "${fake_bin}/curl" "${fake_bin}/sha256sum" \
   "${fake_bin}/tar" "${fake_bin}/go" "${fake_bin}/mv" "${fake_bin}/cp"
 
+# wget adapter: gos's wget branch (-qO file / -qO-) has to work without curl
+# on PATH, so GOS_TEST_DOWNLOADER=wget runs a case with this fake wget and a
+# copy of the fake bin that lacks curl. The adapter logs its own argv and
+# hands the URL to the fake curl's feed/archive dispatcher.
+wget_bin="${test_root}/wget-bin"
+fake_bin_no_curl="${test_root}/bin-no-curl"
+mkdir -p "$wget_bin" "$fake_bin_no_curl"
+cat >"${wget_bin}/wget" <<'FAKE_WGET'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >>"$GOS_TEST_WGET_ARGS_LOG"
+output=""
+url=""
+to_stdout=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -O | -qO)
+      output="$2"
+      shift 2
+      ;;
+    -qO-)
+      to_stdout=1
+      shift
+      ;;
+    -q | --show-progress | --https-only | --secure-protocol=* | --timeout=* | --tries=*)
+      shift
+      ;;
+    *)
+      url="$1"
+      shift
+      ;;
+  esac
+done
+if [ "$to_stdout" -eq 1 ]; then
+  GOS_TEST_CURL_ARGS_LOG= exec "$GOS_TEST_FAKE_CURL" "$url"
+fi
+GOS_TEST_CURL_ARGS_LOG= exec "$GOS_TEST_FAKE_CURL" -o "$output" "$url"
+FAKE_WGET
+chmod +x "${wget_bin}/wget"
+for fake in "${fake_bin}"/*; do
+  [ "${fake##*/}" = "curl" ] && continue
+  ln -s "$fake" "${fake_bin_no_curl}/${fake##*/}"
+done
+
 run_gos() {
   local case_dir="$1"
   shift
@@ -378,7 +423,7 @@ run_gos() {
   : >"${case_dir}/urls.log"
   : >"${case_dir}/curl-args.log"
 
-  local gos_path
+  local gos_path parser_bin
   case "${GOS_TEST_PARSERS:-host}" in
     host) gos_path="${fake_bin}:${original_path}" ;;
     jq) gos_path="${fake_bin}:${parser_jq_bin}:${tools_bin}" ;;
@@ -386,6 +431,19 @@ run_gos() {
     none) gos_path="${fake_bin}:${tools_bin}" ;;
     *) fail "unknown GOS_TEST_PARSERS value: ${GOS_TEST_PARSERS}" ;;
   esac
+  # A downloader other than curl needs a PATH with no curl at all, so the
+  # host PATH is replaced by the restricted tools dir plus whichever feed
+  # parser the host has.
+  if [ "${GOS_TEST_DOWNLOADER:-curl}" != "curl" ]; then
+    parser_bin="$parser_python3_bin"
+    [ ! -x "${parser_jq_bin}/jq" ] || parser_bin="$parser_jq_bin"
+    case "$GOS_TEST_DOWNLOADER" in
+      wget) gos_path="${wget_bin}:${fake_bin_no_curl}:${parser_bin}:${tools_bin}" ;;
+      none) gos_path="${fake_bin_no_curl}:${parser_bin}:${tools_bin}" ;;
+      *) fail "unknown GOS_TEST_DOWNLOADER value: ${GOS_TEST_DOWNLOADER}" ;;
+    esac
+  fi
+  : >"${case_dir}/wget-args.log"
 
   set +e
   output="$(
@@ -400,6 +458,8 @@ run_gos() {
       GOS_DOWNLOAD_MIRROR="${GOS_TEST_MIRROR:-}" \
       GOS_VERSIONS_DIR="${GOS_TEST_VERSIONS_DIR:-}" \
       GOS_TEST_URL_LOG="${case_dir}/urls.log" \
+      GOS_TEST_WGET_ARGS_LOG="${case_dir}/wget-args.log" \
+      GOS_TEST_FAKE_CURL="${fake_bin}/curl" \
       GOS_TEST_CURL_ARGS_LOG="${case_dir}/curl-args.log" \
       GOS_TEST_DOWNLOAD_MODE="${GOS_TEST_DOWNLOAD_MODE:-ok}" \
       GOS_TEST_EXTRACT_MODE="${GOS_TEST_EXTRACT_MODE:-ok}" \
