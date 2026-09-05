@@ -740,6 +740,77 @@ run_gos "$case_dir" bash "$script" platforms 1.21.6 --json
 assert_json "$output" "platforms --json"
 assert_contains "$output" '"platforms":["darwin/arm64","linux/amd64"]' "platforms json"
 
+# Orphan paths are filesystem records, not shell words: preserve whitespace,
+# glob characters, backslashes and even a newline in a residue suffix. A
+# neighboring path and a split-prefix victim must survive.
+case_dir="${test_root}/orphan-paths"
+install_dir="${case_dir}/team go[*]\\slot"
+create_old_install "$install_dir"
+mkdir -p "${case_dir}/team" "${case_dir}/team goX\\slot.gos-backup.1"
+mkdir -p "${install_dir}.gos-backup.1" "${install_dir}.gos-current."$'line\nbreak'
+ln -s "${case_dir}/missing" "${install_dir}.gos-backup.dangling"
+GOS_TEST_INSTALL_DIR="$install_dir" run_gos "$case_dir" bash "$script" status --json
+[ "$status" -eq 0 ] || fail "status with special orphan paths failed: ${output}"
+assert_contains "$output" '"orphaned_backups":3' "exact orphan record count"
+GOS_TEST_INSTALL_DIR="$install_dir" run_gos "$case_dir" env PATH="${install_dir}/bin:${fake_bin}:${original_path}" bash "$script" doctor --json
+[ "$status" -eq 0 ] || fail "doctor with special orphan paths failed: ${output}"
+assert_contains "$output" '3 orphaned backup(s)' "doctor exact orphan record count"
+GOS_TEST_INSTALL_DIR="$install_dir" run_gos "$case_dir" bash "$script" prune --rollback --dry-run --json
+[ "$status" -eq 0 ] || fail "orphan dry run failed: ${output}"
+assert_contains "$output" '"orphaned_backups_found":3,"orphaned_backups_removed":3' "dry-run orphan counts"
+[ -d "${install_dir}.gos-backup.1" ] && [ -L "${install_dir}.gos-backup.dangling" ] \
+  || fail "dry run removed an orphan"
+GOS_TEST_INSTALL_DIR="$install_dir" run_gos "$case_dir" bash "$script" prune --rollback --json
+[ "$status" -eq 0 ] || fail "orphan prune failed: ${output}"
+assert_contains "$output" '"orphaned_backups_found":3,"orphaned_backups_removed":3' "prune orphan counts"
+[ ! -e "${install_dir}.gos-backup.1" ] && [ ! -L "${install_dir}.gos-backup.dangling" ] \
+  && [ ! -e "${install_dir}.gos-current."$'line\nbreak' ] || fail "prune left orphan residue"
+[ -x "${install_dir}/bin/go" ] && [ -d "${case_dir}/team" ] \
+  && [ -d "${case_dir}/team goX\\slot.gos-backup.1" ] || fail "prune touched unrelated paths"
+pass "status, doctor and prune preserve complete orphan path records"
+
+# Parser selection must survive pipelines/substitutions. Stub the dispatcher
+# target, not the parser: all three query kinds still use the real backend.
+for parsers in jq python3 none; do
+  if [ "$parsers" != none ] && [ ! -x "${test_root}/parser-${parsers}/${parsers}" ]; then
+    continue # The matrix below reports/enforces unavailable parser branches.
+  fi
+  case_dir="${test_root}/parser-selection-${parsers}"
+  mkdir -p "$case_dir"
+  # shellcheck disable=SC2016 # Child shell owns these variables/functions.
+  GOS_TEST_PARSERS="$parsers" GOS_TEST_PARSER_LOG="${case_dir}/probes" \
+    run_gos "$case_dir" bash -c '
+      . "$1"
+      command() {
+        case "$*" in
+          "-v jq" | "-v python3") printf "%s\n" "$*" >>"$GOS_TEST_PARSER_LOG" ;;
+        esac
+        builtin command "$@"
+      }
+      cmd_list() {
+        local result
+        local json="[{\"version\":\"go1.21.6\",\"files\":[{\"filename\":\"go1.21.6.linux-amd64.tar.gz\",\"kind\":\"archive\",\"os\":\"linux\",\"arch\":\"amd64\",\"sha256\":\"abc\"}]}]"
+        result=$(_gos_feed_versions "$json")
+        [ "$result" = 1.21.6 ]
+        result=$(printf "%s" "$json" | _gos_feed_query checksum go1.21.6.linux-amd64.tar.gz)
+        [ "$GOS_FEED_PARSER" = grep ] || [ "$result" = abc ]
+        result=$(printf "%s" "$json" | _gos_feed_query platforms go1.21.6)
+        [ "$result" = linux/amd64 ]
+        _gos_has_checksum_parser || true
+      }
+      main list
+      [ -n "$GOS_FEED_PARSER" ]
+      _gos_feed_parser
+    ' bash "$sourceable_script"
+  [ "$status" -eq 0 ] || fail "parser selection (${parsers}) failed: ${output}"
+  expected_probes=2
+  [ "$parsers" != jq ] || expected_probes=1
+  actual_probes=$(wc -l <"${case_dir}/probes" | tr -d '[:space:]')
+  [ "$actual_probes" -eq "$expected_probes" ] \
+    || fail "parser ${parsers} re-probed across queries (${actual_probes} vs ${expected_probes})"
+done
+pass "feed queries inherit one parent-shell parser selection"
+
 # Every feed parser branch must produce the same answers: discovery (list,
 # platforms) works with jq, python3, or the grep scrape alone, and install
 # verifies through jq/python3 metadata while the scrape-only host falls back
@@ -953,6 +1024,14 @@ assert_contains "$output" "supports --json only together with --print" "use json
 mkdir -p "${case_dir}/go.gos-lock"
 run_gos "$case_dir" bash "$script" use --print "$case_dir/project"
 [ "$status" -eq 0 ] || fail "use --print must not take or be blocked by the mutation lock: ${output}"
+# An option-shaped substring inside a path is not a parsed --print flag.
+mkdir -p "${case_dir}/project --print nested"
+printf '1.21.6\n' >"${case_dir}/project --print nested/.go-version"
+run_gos "$case_dir" bash "$script" use "${case_dir}/project --print nested"
+[ "$status" -ne 0 ] || fail "use must not bypass the lock for a path containing --print"
+assert_contains "$output" 'another gos operation appears to be running (the lock has no pid recorded).' "use parses flags before deciding to lock"
+[ ! -s "${case_dir}/urls.log" ] || fail "locked use reached the network"
+[ ! -e "${case_dir}/go" ] || fail "locked use mutated the install"
 rmdir "${case_dir}/go.gos-lock"
 pass "use --print resolves the project version without installing"
 
@@ -2288,6 +2367,20 @@ assert_contains "$output" "unexpected argument for gos help" "help trailing argu
 run_gos "$case_dir" bash "$script" help
 [ "$status" -eq 0 ] || fail "plain help failed: ${output}"
 assert_contains "$output" "COMMANDS:" "plain help keeps the full listing"
+# The effective manifest includes JSON contracts, so help, argument errors,
+# metadata and generated docs all consume exactly the same usage text.
+while IFS='|' read -r command_name command_usage _description; do
+  run_gos "$case_dir" bash "$script" help "$command_name"
+  [ "$status" -eq 0 ] || fail "help ${command_name} failed: ${output}"
+  [ "${output%%$'\n'*}" = "Usage: gos ${command_usage}" ] \
+    || fail "help ${command_name} diverged from effective manifest: ${output}"
+  # shellcheck disable=SC2016 # The child prints the argument-error formatter.
+  run_gos "$case_dir" bash -c '. "$1"; _gos_usage "$2"' bash "$sourceable_script" "$command_name"
+  [ "$output" = "Usage: gos ${command_usage}" ] \
+    || fail "error usage ${command_name} diverged from help: ${output}"
+done <<<"$(bash "$script" __commands --details)"
+run_gos "$case_dir" bash "$script" help use
+assert_contains "$output" 'use [--print [--json]] [path]' "conditional use JSON usage"
 pass "help shows a single command's usage from the manifest"
 
 case_dir="${test_root}/cli-extra-args"
@@ -2300,6 +2393,13 @@ fi
 run_gos "$case_dir" bash "$script" platforms 1.21.6 extra
 [ "$status" -ne 0 ] || fail "platforms with trailing argument should fail"
 assert_contains "$output" "unexpected argument for gos platforms" "platforms trailing argument"
+run_gos "$case_dir" bash "$script" platforms --bogus
+[ "$status" -ne 0 ] || fail "platforms with an unknown option should fail"
+assert_contains "$output" "unknown option for gos platforms: --bogus" "platforms unknown option"
+assert_contains "$output" "Usage: gos platforms [version] [--json]" "platforms usage from the manifest"
+run_gos "$case_dir" bash "$script" which --bogus
+[ "$status" -ne 0 ] || fail "which with an unknown option should fail"
+assert_contains "$output" "unknown option for gos which: --bogus" "which unknown option"
 if [ -s "${case_dir}/urls.log" ]; then
   fail "platforms with a trailing argument must not reach the network"
 fi

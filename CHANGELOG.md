@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Crash-residue enumeration preserves complete paths, including spaces, glob characters, backslashes and newline suffixes: `status`/`doctor` count each backup once, and `prune --rollback` cannot split a backup path into unrelated removal targets.
+- `run` completions offer bare `--` for project mode in all three shells; Fish and Zsh delegate the nested command and its arguments correctly with or without an explicit version/separator. Fish no longer treats nested command arguments as gos subcommands.
+- Help, argument-error usage, command metadata, README and man page share effective JSON option usage, including the conditional `use --print --json` form. Feed parser selection is initialized in the parent shell so subsequent queries reuse it.
+
 - `gos rollback` is now crash-safe like `gos install`: an interrupt between moving the active Go aside and moving the rollback into place used to leave the machine with no Go at all, because rollback never armed the EXIT trap that restores the displaced installation. The trap also stays armed when a post-activation restore fails midway, instead of being disarmed right after the failed attempt.
 - The `gos env --auto` hook and `gos status` now resolve a bare minor from `go.mod` (`go 1.24`) against the installed versions, offline: with `go1.24.3` installed the hook switches to it instead of printing `go1.24 is not installed` on every directory change, and `status` reports `satisfied by active go1.24.3` instead of `differs from active`. `gos status --json` gains a `project.resolved` field.
 - `gos.cmd` (the Windows shim) and `install.ps1` now look for Git for Windows' `bash.exe` in its install locations first and never accept the WSL launcher in `System32`, which `where bash.exe` returned first on machines with WSL enabled and which cannot run a Windows path. Missing Windows environment roots are tolerated, custom Git paths are quoted, and the shim's error goes to stderr so it cannot corrupt `--json` output.
@@ -44,6 +48,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- Shell completions: `gos pin` and `gos platforms` now complete versions, `gos run`/`gos each` complete the version slot, then command names, then files instead of offering Go versions for every word, and fish keeps offering commands after a leading `--json`. The test suite now checks that every flag in a command's usage is offered by all three shells.
+- Argument errors print the usage line from the command manifest (the same text as `gos help <command>`, with `[--json]` appended where supported), and `gos platforms`/`gos which` reject unknown options instead of treating them as a version.
+- Internal consolidation with no behavior change: one feed parser cascade (`_gos_feed_query`), one download argument builder (`_gos_http_get`), shared helpers for side-by-side checks, bare minors, crash residue, colour gating, and version splitting, a dispatcher preflight table, and locks taken after argument parsing; the top of `gos.sh` carries a section map.
 - The AUR package tracks the release again (it shipped 1.9.0 still pointing at 1.8.0): `scripts/update-aur.bash <version>` rewrites `PKGBUILD` and `.SRCINFO` from the release tarball digest, `tests/packaging.bash` fails when `pkgver` and `GOS_VERSION` disagree, and RELEASING.md gains the post-release step.
 - The test harness now runs discovery and install cases against jq only, python3 only, and no feed parser at all; CI requires both optional parsers so every parser branch is exercised there, while local runs clearly report unavailable parser cases. A TTY test whose runner breaks now fails the suite instead of reporting a skipped branch (two TTY blocks had never actually run).
 - Every GitHub Actions job now sets `timeout-minutes`, the release smoke matrix no longer cancels the other platforms when one fails, ShellCheck is installed from a pinned release like shfmt, CI checks every tracked file for whitespace errors and conflict markers, and the Bash syntax gate derives its file list from `git ls-files`.

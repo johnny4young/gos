@@ -4,7 +4,8 @@
 _gos() {
   local context state state_descr line
   typeset -A opt_args
-  local -a commands
+  local -a commands versions
+  local cmd slot
   # gos-commands:zsh:begin
   commands=(
     'latest:Install the latest stable Go version'
@@ -42,7 +43,42 @@ _gos() {
         prune)
           _arguments '--rollback[Also remove the rollback installation]' '--dry-run[Preview removals without deleting]' '--json[Output machine-readable JSON]'
           ;;
-        install | run | each)
+        install)
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
+          fi
+          ;;
+        run | each)
+          # _arguments shifts words to start with run/each for the args
+          # state. Count the version/optional separator explicitly: -- is a
+          # real version-slot value for run, not an _arguments option marker.
+          cmd="${line[1]}"
+          if ((CURRENT == 2)); then
+            versions=()
+            if command -v gos >/dev/null 2>&1; then
+              versions=(${(f)"$(gos __versions --remote-cached 2>/dev/null)"})
+            fi
+            [ "$cmd" != "run" ] || versions=(-- "${versions[@]}")
+            compadd -- "${versions[@]}"
+          else
+            slot=3
+            if [ "$cmd" != "run" ] || [ "${words[2]}" != "--" ]; then
+              [ "${words[3]}" != "--" ] || slot=4
+            fi
+            # Give _normal the nested command as words[1], preserving its
+            # arguments and their own -- terminators verbatim.
+            shift "$((slot - 1))" words
+            ((CURRENT -= slot - 1))
+            _normal
+          fi
+          ;;
+        pin)
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
+          fi
+          ;;
+        platforms)
+          _arguments '--json[Output machine-readable JSON]'
           if command -v gos >/dev/null 2>&1; then
             _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
           fi
@@ -77,7 +113,7 @@ _gos() {
         doctor)
           _arguments '--fix[Apply safe non-destructive fixes]' '--json[Output machine-readable JSON]'
           ;;
-        check | current | platforms | status | version)
+        check | current | status | version)
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)

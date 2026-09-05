@@ -165,6 +165,55 @@ help_output="$(bash "$script" help)"
 bash_completion_text="$(<"${test_root}/gos.bash")"
 zsh_completion_text="$(<"${test_root}/gos.zsh")"
 fish_completion_text="$(<"${test_root}/gos.fish")"
+
+# Flag parity: every --flag a command's manifest usage line advertises must be
+# offered by all three completions for that command. The command lists are
+# generated; the per-command flag arms are hand-written per shell and used to
+# drift (fish lacked use --json, pin completed nothing).
+shell_block() {
+  # Print the case arm of $2 (bash or zsh completion text in $1): the lines
+  # from a label such as "install | run | each)" that names the command up to
+  # the closing ";;".
+  printf '%s\n' "$1" | awk -v cmd="$2" '
+    /^[[:space:]]+[A-Za-z_|[:space:]-]+\)$/ {
+      label = $0
+      sub(/^[[:space:]]+/, "", label)
+      sub(/\)$/, "", label)
+      n = split(label, names, /[[:space:]]*\|[[:space:]]*/)
+      in_block = 0
+      for (i = 1; i <= n; i++) if (names[i] == cmd) in_block = 1
+    }
+    in_block { print }
+    in_block && /^[[:space:]]+;;$/ { in_block = 0 }
+  '
+}
+# Independently guard JSON coverage rather than assuming the manifest happens
+# to include it: removing a JSON suffix must fail this test too.
+json_commands=$(sed -n 's/^GOS_JSON_COMMANDS="\(.*\)"$/\1/p' "$script")
+for command_name in $json_commands use; do
+  [ "$command_name" != __commands ] || continue
+  command_usage=$(bash "$script" help "$command_name")
+  assert_contains "$command_usage" '--json' "effective ${command_name} JSON usage"
+done
+parity_failures=""
+while IFS='|' read -r command_name command_usage _command_description; do
+  for flag in $(printf '%s\n' "$command_usage" | grep -oE -- '--[a-z][a-z-]*' || true); do
+    case "$(shell_block "$bash_completion_text" "$command_name")" in
+      *"$flag"*) ;;
+      *) parity_failures="${parity_failures}bash:${command_name}:${flag} " ;;
+    esac
+    case "$(shell_block "$zsh_completion_text" "$command_name")" in
+      *"${flag}["*) ;;
+      *) parity_failures="${parity_failures}zsh:${command_name}:${flag} " ;;
+    esac
+    if ! printf '%s\n' "$fish_completion_text" | grep -E "__gos_using_command[^']* ${command_name}[ ']" | grep -q -- " -l ${flag#--} "; then
+      parity_failures="${parity_failures}fish:${command_name}:${flag} "
+    fi
+  done
+done <<<"$(bash "$script" __commands --details)"
+[ -z "$parity_failures" ] || fail "completion flags missing for manifest usage: ${parity_failures}"
+pass "every manifest flag is offered by the bash, zsh, and fish completions"
+
 commands_space="$(printf '%s\n' "$commands_output" | tr '\n' ' ' | sed 's/ $//')"
 assert_contains "$bash_completion_text" "local fallback_commands=\"${commands_space}\"" "bash fallback command list"
 assert_not_contains "$help_output" "__commands" "help hides internal command manifest"
@@ -227,7 +276,7 @@ output="$(bash "$script" completions 2>&1)"
 status=$?
 set -e
 [ "$status" -ne 0 ] || fail "gos completions without a shell should fail"
-assert_contains "$output" "Usage: gos completions <bash|zsh|fish>" "missing shell usage"
+assert_contains "$output" "Usage: gos completions <shell> [--install]" "missing shell usage"
 
 set +e
 output="$(bash "$script" completions powershell 2>&1)"
@@ -265,3 +314,58 @@ printed_bash="$(bash "$script" completions bash)"
   || fail "installed bash completion differs from the printed form"
 
 pass "embedded completions stay in sync, validate, and install to XDG dirs"
+
+# Execute completion functions with a stub gos: no network or real toolchain
+# state is consulted, and candidates must follow the current argument slot.
+(
+  # shellcheck source=completions/gos.bash
+  . "${repo_root}/completions/gos.bash"
+  gos() { printf '1.21.6\n'; }
+  # shellcheck disable=SC2329 # compgen -c discovers this command fixture.
+  gos-probe-command() { :; }
+  cd "$test_root"
+  touch fixture-target
+  complete_words() {
+    COMP_WORDS=(gos "$@")
+    COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
+    _gos_completions
+    printf '%s\n' ${COMPREPLY[@]:+"${COMPREPLY[@]}"}
+  }
+  for cmd in run each; do
+    candidates=$(complete_words "$cmd" '')
+    assert_contains "$candidates" '1.21.6' "bash ${cmd} versions"
+    if [ "$cmd" = run ]; then
+      assert_contains "$candidates" '--' 'bash run project mode'
+    else
+      assert_not_contains "$candidates" '--' 'bash each version-only mode'
+    fi
+    for separator in '' --; do
+      args=("$cmd" 1.21.6)
+      [ -z "$separator" ] || args+=(--)
+      candidates=$(complete_words "${args[@]}" gos-probe-)
+      assert_contains "$candidates" gos-probe-command 'bash nested command'
+      candidates=$(complete_words "${args[@]}" gos-probe-command fixture-t)
+      [ "$candidates" = fixture-target ] || fail "bash nested files: ${candidates}"
+    done
+  done
+  candidates=$(complete_words run -- gos-probe-)
+  assert_contains "$candidates" gos-probe-command 'bash project-mode command'
+  candidates=$(complete_words run -- gos-probe-command fixture-t)
+  [ "$candidates" = fixture-target ] || fail "bash project-mode files: ${candidates}"
+  for cmd in pin platforms; do
+    candidates=$(complete_words "$cmd" 1.21)
+    [ "$candidates" = 1.21.6 ] || fail "bash ${cmd} version: ${candidates}"
+  done
+)
+pass "Bash completes run/each slots and pin/platforms versions offline"
+
+if command -v fish >/dev/null 2>&1; then
+  fish --no-config "${repo_root}/tests/completions-fish.fish" "${test_root}/gos.fish" "$test_root"
+else
+  pass "Fish behavioral completions skipped: fish unavailable (CI Linux runs it)"
+fi
+if command -v zsh >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+  python3 "${repo_root}/tests/completions-zsh.py" "${test_root}/gos.zsh"
+else
+  pass "Zsh behavioral completions skipped: zsh/python3 unavailable (CI Unix runs it)"
+fi

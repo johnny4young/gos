@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# gos — install and switch Go versions. One script, zero dependencies.
+#
+# Map (search for the "# ───" section headers; docs/ARCHITECTURE.md has the
+# long version):
+#   Helpers            configuration defaults, the EXIT trap, output/colour,
+#                      path validation, downloads (_gos_http_get)
+#   Go downloads feed  feed fetch and memo (_gos_feed_json), the jq/python3/grep
+#                      parser cascade (_gos_feed_query), checksums and the
+#                      archive cache, sudo (_gos_sudo_for), the mutation lock,
+#                      activation (_gos_activate_install / _gos_install_version),
+#                      project manifests, version ordering
+#   Commands           one cmd_<name> per manifest entry, plus the hidden
+#                      __commands / __versions / __project-version helpers,
+#                      the embedded completions, and the command manifest
+#   Entrypoint         _gos_preflight and main's dispatcher
 set -euo pipefail
 
 GOS_VERSION="1.9.0"
@@ -155,12 +170,18 @@ _gos_json_string() {
   printf '"%s"' "$(_gos_json_escape "$1")"
 }
 
-_gos_color_enabled() {
+# Color is interactive-only: never under --json, NO_COLOR, GOS_NO_COLOR=1,
+# TERM=dumb, or when the given file descriptor is not a terminal.
+_gos_fd_color_enabled() {
   [ "${GOS_OUTPUT_JSON:-0}" != "1" ] || return 1
-  [ -t 1 ] || return 1
+  [ -t "$1" ] || return 1
   [ -z "${NO_COLOR:-}" ] || return 1
   [ "${GOS_NO_COLOR:-0}" != "1" ] || return 1
   [ "${TERM:-}" != "dumb" ] || return 1
+}
+
+_gos_color_enabled() {
+  _gos_fd_color_enabled 1
 }
 
 _gos_color_text() {
@@ -182,11 +203,7 @@ _gos_print_styled_value() {
 }
 
 _gos_stderr_color_enabled() {
-  [ "${GOS_OUTPUT_JSON:-0}" != "1" ] || return 1
-  [ -t 2 ] || return 1
-  [ -z "${NO_COLOR:-}" ] || return 1
-  [ "${GOS_NO_COLOR:-0}" != "1" ] || return 1
-  [ "${TERM:-}" != "dumb" ] || return 1
+  _gos_fd_color_enabled 2
 }
 
 _gos_error() {
@@ -401,6 +418,27 @@ _gos_versions_mode() {
   [ -n "$GOS_VERSIONS_DIR" ]
 }
 
+# Fail with the standard message when a side-by-side-only feature is used in
+# the flat layout. Usage: _gos_require_versions_mode <what> [<hint line>]
+_gos_require_versions_mode() {
+  local what="$1" hint="${2:-}"
+  _gos_versions_mode && return 0
+  _gos_error "${what} requires side-by-side mode (set GOS_VERSIONS_DIR)."
+  [ -z "$hint" ] || echo "$hint" >&2
+  return 1
+}
+# shellcheck disable=SC2016 # The hint shows the user the literal line to run.
+GOS_VERSIONS_MODE_EXAMPLE='Example: export GOS_INSTALL_DIR="$HOME/.gos/go"; export GOS_VERSIONS_DIR="$HOME/.gos/versions"'
+
+# True for a bare X.Y (no patch, no pre-release suffix), the form that names a
+# minor rather than one release and has to be resolved before use.
+_gos_version_is_bare_minor() {
+  case "$1" in
+    *rc* | *beta* | *.*.*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 # Warn when a mutating command would silently convert a side-by-side layout back
 # to a flat install because GOS_VERSIONS_DIR is unset in this shell (e.g. a cron
 # job or sudo shell that doesn't source the user's rc). Fires only when the
@@ -456,36 +494,48 @@ _gos_download_progress_enabled() {
   [ -t 2 ] || return 1
 }
 
-# Download a URL to a file. Supports curl and wget.
-# Security: HTTPS integrity relies on the system CA certificate store.
-# For hardened environments, set SSL_CERT_FILE or --cacert as needed.
+# One place builds the curl/wget argument list for every download, so the
+# hardening flags cannot drift between the archive and the metadata paths.
+# Security: HTTPS integrity relies on the system CA certificate store. For
+# hardened environments, set SSL_CERT_FILE or --cacert as needed.
 # --proto-redir '=https' / --https-only disallow HTTP fallback via redirects.
-# Archives are large, so instead of a total --max-time the transfer aborts
-# when it stalls below 1 KB/s for 30 s (--connect-timeout only bounds the
-# handshake; a server that accepts and then trickles would otherwise hang
-# gos forever). wget's --timeout is already a per-read timeout.
-_gos_download() {
-  local url="$1" output="$2" resume="${3:-}"
-  # A third "resume" argument continues a partially downloaded file instead of
-  # restarting it. Only curl opts in (-C -): wget's -c does not compose cleanly
-  # with -O, and the checksum validates the assembled file regardless.
-  local -a resume_curl=()
-  [ "$resume" = "resume" ] && resume_curl=(-C -)
-  # --compressed lets go.dev serve the JSON feed gzip-encoded (~4x smaller);
-  # for the already-compressed archives it is a no-op, and if a mirror ever
-  # sends Content-Encoding: gzip on one, curl transparently restores the exact
-  # bytes the checksum is computed against.
+# Metadata bodies are small and get a total --max-time; archives are large,
+# so they abort when the transfer stalls below 1 KB/s for 30 s instead
+# (--connect-timeout only bounds the handshake). wget's --timeout is already
+# a per-read timeout. --compressed lets go.dev serve the JSON feed
+# gzip-encoded (~4x smaller); for archives it is a no-op, and if a mirror
+# ever sends Content-Encoding: gzip on one, curl restores the exact bytes the
+# checksum is computed against. wget cannot resume with -O and cannot ask for
+# compression portably, so it just fetches.
+#
+# Usage: _gos_http_get <url> [<output-file> [resume]]
+# Without an output file the body goes to stdout.
+_gos_http_get() {
+  local url="$1" output="${2:-}" resume="${3:-}"
   if command -v curl &>/dev/null; then
-    if _gos_download_progress_enabled; then
-      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --speed-limit 1024 --speed-time 30 --retry 2 --compressed ${resume_curl[@]:+"${resume_curl[@]}"} --progress-bar -fSL -o "$output" "$url"
+    local -a args
+    args=(--proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15)
+    if [ -n "$output" ]; then
+      args=("${args[@]}" --speed-limit 1024 --speed-time 30 --retry 2 --compressed)
+      [ "$resume" = "resume" ] && args=("${args[@]}" -C -)
+      if _gos_download_progress_enabled; then
+        args=("${args[@]}" --progress-bar -fSL)
+      else
+        args=("${args[@]}" -fsSL)
+      fi
+      curl "${args[@]}" -o "$output" "$url"
     else
-      curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --speed-limit 1024 --speed-time 30 --retry 2 --compressed ${resume_curl[@]:+"${resume_curl[@]}"} -fsSL -o "$output" "$url"
+      curl "${args[@]}" --max-time 60 --retry 2 --compressed -fsSL "$url"
     fi
   elif command -v wget &>/dev/null; then
-    if _gos_download_progress_enabled; then
-      wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -q --show-progress -O "$output" "$url"
+    if [ -n "$output" ]; then
+      if _gos_download_progress_enabled; then
+        wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -q --show-progress -O "$output" "$url"
+      else
+        wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -qO "$output" "$url"
+      fi
     else
-      wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -qO "$output" "$url"
+      wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -qO- "$url"
     fi
   else
     _gos_error "neither curl nor wget found. Install one and try again."
@@ -493,21 +543,14 @@ _gos_download() {
   fi
 }
 
-# Download a URL to stdout. Supports curl and wget. Only small feed and
-# metadata bodies come through here, so a total --max-time is appropriate.
+# Download a URL to a file; a third "resume" argument continues a partial file.
+_gos_download() {
+  _gos_http_get "$1" "$2" "${3:-}"
+}
+
+# Download a URL to stdout.
 _gos_download_stdout() {
-  local url="$1"
-  # --compressed: the downloads feed is JSON and gzip-encodes to roughly a
-  # quarter of its size; wget's -qO- has no portable equivalent, so only curl
-  # opts in (wget still works, just uncompressed).
-  if command -v curl &>/dev/null; then
-    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 60 --retry 2 --compressed -fsSL "$url"
-  elif command -v wget &>/dev/null; then
-    wget --https-only --secure-protocol=TLSv1_2 --timeout=15 --tries=3 -qO- "$url"
-  else
-    _gos_error "neither curl nor wget found. Install one and try again."
-    return 1
-  fi
+  _gos_http_get "$1"
 }
 
 # ─── Go downloads feed ────────────────────────────────────────────────────────
@@ -647,28 +690,115 @@ _gos_feed_json() {
   fi
 }
 
-# Print bare version numbers (no "go" prefix) from feed JSON in feed order,
-# using the most robust parser available.
-_gos_feed_versions() {
-  local json="$1"
+# The downloads feed is parsed with jq, then python3, then a grep scrape.
+# The choice is made once per run and every query goes through the same
+# cascade, so the three parsers can no longer drift apart one query at a
+# time (the python3 platforms branch shipped with a syntax error for months
+# because nothing shared code with the jq branch that everyone ran).
+GOS_FEED_PARSER=""
+_gos_feed_parser() {
+  if [ -z "$GOS_FEED_PARSER" ]; then
+    if command -v jq &>/dev/null; then
+      GOS_FEED_PARSER="jq"
+    elif command -v python3 &>/dev/null; then
+      GOS_FEED_PARSER="python3"
+    else
+      GOS_FEED_PARSER="grep"
+    fi
+  fi
+}
 
-  if command -v jq &>/dev/null; then
-    printf '%s\n' "$json" | jq -r '.[].version' | sed 's/^go//'
-  elif command -v python3 &>/dev/null; then
-    printf '%s\n' "$json" | python3 -c '
+# Query feed JSON read from stdin. Usage:
+#   _gos_feed_query versions             bare versions (no "go" prefix), feed order
+#   _gos_feed_query checksum <pkg>       sha256 of one archive filename (jq/python3 only)
+#   _gos_feed_query platforms <goX.Y.Z>  sorted os/arch pairs with an archive
+_gos_feed_query() {
+  local kind="$1" arg="${2:-}"
+  _gos_feed_parser
+  case "${kind}:${GOS_FEED_PARSER}" in
+    versions:jq)
+      jq -r '.[].version' | sed 's/^go//'
+      ;;
+    versions:python3)
+      python3 -c '
 import json, sys
 
 for item in json.load(sys.stdin):
     version = item.get("version", "")
     print(version[2:] if version.startswith("go") else version)
 '
-  else
-    # Last-resort text scraping; the character class keeps rc/beta suffixes.
-    printf '%s\n' "$json" \
-      | grep -o '"version": *"go[0-9][0-9A-Za-z.]*"' \
-      | grep -o 'go[0-9][0-9A-Za-z.]*' \
-      | sed 's/^go//'
-  fi
+      ;;
+    versions:grep)
+      # Last-resort text scraping; the character class keeps rc/beta suffixes.
+      grep -o '"version": *"go[0-9][0-9A-Za-z.]*"' \
+        | grep -o 'go[0-9][0-9A-Za-z.]*' \
+        | sed 's/^go//'
+      ;;
+    checksum:jq)
+      # (.files // []) tolerates entries without a files array (the feed has
+      # published such entries); a bare .files[] aborts jq on the first one
+      # and silently turns a present checksum into "not found".
+      jq -r --arg pkg "$arg" '.[] | (.files // [])[] | select(.filename == $pkg) | .sha256'
+      ;;
+    checksum:python3)
+      python3 -c "
+import json, sys
+pkg = sys.argv[1]
+data = json.load(sys.stdin)
+for v in data:
+    for f in v.get('files', []):
+        if f.get('filename') == pkg:
+            print(f.get('sha256', ''))
+            sys.exit(0)
+" "$arg"
+      ;;
+    checksum:grep)
+      # The scrape does not read checksums; callers fall back to the .sha256
+      # companion file (or fail closed under GOS_REQUIRE_CHECKSUM=feed).
+      cat >/dev/null
+      ;;
+    platforms:jq)
+      jq -r --arg version "$arg" \
+        '.[] | select(.version == $version) | (.files // [])[] | select(.kind == "archive") | "\(.os)/\(.arch)"' \
+        | sort -u
+      ;;
+    platforms:python3)
+      python3 -c '
+import json
+import sys
+
+version = sys.argv[1]
+data = json.load(sys.stdin)
+platforms = set()
+for item in data:
+    if item.get("version") != version:
+        continue
+    for file in item.get("files", []):
+        if file.get("kind") == "archive":
+            platforms.add("%s/%s" % (file.get("os"), file.get("arch")))
+for platform in sorted(platforms):
+    print(platform)
+' "$arg"
+      ;;
+    platforms:grep)
+      # Filter the scraped filenames to plain os/arch pairs: non-archive
+      # entries (go1.x.src.tar.gz) pass through the sed unchanged and must not
+      # leak into the output as bogus platforms.
+      grep -o "${arg}\\.[^\"]*" \
+        | sed -E "s/^${arg//./\\.}\\.([^-]+)-([^.]*)\\..*/\\1\\/\\2/" \
+        | grep -E '^[a-z0-9]+/[a-z0-9]+$' \
+        | sort -u
+      ;;
+    *)
+      _gos_error "internal: unknown feed query '${kind}' for parser '${GOS_FEED_PARSER}'."
+      return 1
+      ;;
+  esac
+}
+
+# Print bare version numbers (no "go" prefix) from feed JSON in feed order.
+_gos_feed_versions() {
+  printf '%s\n' "$1" | _gos_feed_query versions
 }
 
 _gos_fetch_latest() {
@@ -691,12 +821,10 @@ _gos_fetch_latest() {
 _gos_resolve_bare_minor() {
   local version="$1" json resolved escaped
 
-  case "$version" in
-    *rc* | *beta* | *.*.*)
-      printf '%s\n' "$version"
-      return 0
-      ;;
-  esac
+  if ! _gos_version_is_bare_minor "$version"; then
+    printf '%s\n' "$version"
+    return 0
+  fi
 
   # Discovery only: the TTL disk cache is fine here (the checksum lookup that
   # follows always fetches fresh metadata), and it is what keeps
@@ -786,7 +914,8 @@ _gos_try_cache() {
 # Fetch expected SHA256 for a package filename from the Go API.
 # Uses jq if available, falls back to python3 (always present on macOS).
 _gos_has_checksum_parser() {
-  command -v jq &>/dev/null || command -v python3 &>/dev/null
+  _gos_feed_parser
+  [ "$GOS_FEED_PARSER" != "grep" ]
 }
 
 _gos_validate_checksum_policy() {
@@ -837,25 +966,7 @@ _gos_fetch_checksum() {
     return 0
   }
 
-  if command -v jq &>/dev/null; then
-    # (.files // []) tolerates entries without a files array (the feed has
-    # published such entries); a bare .files[] aborts jq on the first one and
-    # silently turns a present checksum into "not found".
-    printf '%s\n' "$json" | jq -r --arg pkg "$pkg" '.[] | (.files // [])[] | select(.filename == $pkg) | .sha256'
-  elif command -v python3 &>/dev/null; then
-    printf '%s\n' "$json" | python3 -c "
-import json, sys
-pkg = sys.argv[1]
-data = json.load(sys.stdin)
-for v in data:
-    for f in v.get('files', []):
-        if f.get('filename') == pkg:
-            print(f.get('sha256', ''))
-            sys.exit(0)
-" "$pkg"
-  else
-    echo ""
-  fi
+  printf '%s\n' "$json" | _gos_feed_query checksum "$pkg"
 }
 
 # Fallback checksum source: the companion .sha256 file published next to each
@@ -1230,6 +1341,25 @@ _gos_restore_backup() {
   fi
 }
 
+# Crash residue: interrupted activations can strand *.gos-backup.<pid> /
+# *.gos-current.<pid> siblings of the install slot. Prints each existing one
+# (directories and symlinks, dangling included), NUL-delimited so even a
+# newline in a crash-residue filename remains part of one path.
+_gos_orphaned_backups() {
+  local orphan
+  for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
+    [ -d "$orphan" ] || [ -L "$orphan" ] || continue
+    printf '%s\0' "$orphan"
+  done
+}
+
+# Size of a regular file in bytes (0 on failure), portable across stat flavors.
+_gos_file_size_bytes() {
+  local size
+  size=$(wc -c <"$1" | tr -d '[:space:]') || size=0
+  printf '%s\n' "${size:-0}"
+}
+
 _gos_rollback_dir() {
   printf '%s.gos-rollback' "$GOS_INSTALL_DIR"
 }
@@ -1473,9 +1603,8 @@ _gos_install_version() {
     fi
   fi
 
-  if [ "$activate" != "true" ] && ! _gos_versions_mode; then
-    _gos_error "installing without activation requires side-by-side mode (set GOS_VERSIONS_DIR)."
-    return 1
+  if [ "$activate" != "true" ]; then
+    _gos_require_versions_mode "installing without activation" || return 1
   fi
 
   os=$(_gos_os)
@@ -1849,38 +1978,7 @@ _gos_platforms_for_version() {
     return 1
   }
 
-  if command -v jq &>/dev/null; then
-    echo "$json" \
-      | jq -r --arg version "$go_version" \
-        '.[] | select(.version == $version) | (.files // [])[] | select(.kind == "archive") | "\(.os)/\(.arch)"' \
-      | sort -u
-  elif command -v python3 &>/dev/null; then
-    echo "$json" | python3 -c '
-import json
-import sys
-
-version = sys.argv[1]
-data = json.load(sys.stdin)
-platforms = set()
-for item in data:
-    if item.get("version") != version:
-        continue
-    for file in item.get("files", []):
-        if file.get("kind") == "archive":
-            platforms.add("%s/%s" % (file.get("os"), file.get("arch")))
-for platform in sorted(platforms):
-    print(platform)
-' "$go_version"
-  else
-    # Filter the scraped filenames to plain os/arch pairs: non-archive entries
-    # (go1.x.src.tar.gz) pass through the sed unchanged and must not leak into
-    # the output as bogus platforms.
-    echo "$json" \
-      | grep -o "${go_version}\\.[^\"]*" \
-      | sed -E "s/^${go_version//./\\.}\\.([^-]+)-([^.]*)\\..*/\\1\\/\\2/" \
-      | grep -E '^[a-z0-9]+/[a-z0-9]+$' \
-      | sort -u
-  fi
+  printf '%s\n' "$json" | _gos_feed_query platforms "$go_version"
 }
 
 _gos_json_array_from_lines() {
@@ -1919,7 +2017,7 @@ _gos_cache_archive_stats() {
     for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip; do
       [ -f "$file" ] || continue
       count=$((count + 1))
-      size=$(wc -c <"$file" | tr -d '[:space:]') || size=0
+      size=$(_gos_file_size_bytes "$file")
       bytes=$((bytes + size))
     done
   fi
@@ -2006,46 +2104,29 @@ _gos_semver_is_newer() {
 # Compare validated Go versions, including beta/rc ordering. The components use
 # the same decimal-string comparator as SemVer so unusually long versions do not
 # inherit the shell's integer limit.
-_gos_go_version_is_newer() {
-  local candidate="$1" current="$2"
-  local candidate_core candidate_major candidate_minor candidate_patch
-  local current_core current_major current_minor current_patch
-  local candidate_rank candidate_pre current_rank current_pre
+# Split a validated Go version into "core|rank|pre": beta < rc < release
+# (ranks 0, 1, 2) and the pre-release number, so ordering is one comparison
+# chain instead of the same case block written twice.
+_gos_split_go_version() {
+  case "$1" in
+    *beta*) printf '%s|0|%s\n' "${1%%beta*}" "${1##*beta}" ;;
+    *rc*) printf '%s|1|%s\n' "${1%%rc*}" "${1##*rc}" ;;
+    *) printf '%s|2|0\n' "$1" ;;
+  esac
+}
 
-  case "$candidate" in
-    *beta*)
-      candidate_core="${candidate%%beta*}"
-      candidate_rank=0
-      candidate_pre="${candidate##*beta}"
-      ;;
-    *rc*)
-      candidate_core="${candidate%%rc*}"
-      candidate_rank=1
-      candidate_pre="${candidate##*rc}"
-      ;;
-    *)
-      candidate_core="$candidate"
-      candidate_rank=2
-      candidate_pre=0
-      ;;
-  esac
-  case "$current" in
-    *beta*)
-      current_core="${current%%beta*}"
-      current_rank=0
-      current_pre="${current##*beta}"
-      ;;
-    *rc*)
-      current_core="${current%%rc*}"
-      current_rank=1
-      current_pre="${current##*rc}"
-      ;;
-    *)
-      current_core="$current"
-      current_rank=2
-      current_pre=0
-      ;;
-  esac
+_gos_go_version_is_newer() {
+  local candidate current
+  candidate=$(_gos_split_go_version "$1")
+  current=$(_gos_split_go_version "$2")
+  local candidate_core="${candidate%%|*}" current_core="${current%%|*}"
+  local candidate_rank current_rank candidate_pre="${candidate##*|}" current_pre="${current##*|}"
+  candidate_rank="${candidate#*|}"
+  candidate_rank="${candidate_rank%%|*}"
+  current_rank="${current#*|}"
+  current_rank="${current_rank%%|*}"
+  local candidate_major candidate_minor candidate_patch
+  local current_major current_minor current_patch
 
   IFS=. read -r candidate_major candidate_minor candidate_patch <<<"$candidate_core"
   IFS=. read -r current_major current_minor current_patch <<<"$current_core"
@@ -2076,7 +2157,7 @@ _gos_go_version_is_newer() {
 cmd_latest() {
   if [ "$#" -gt 0 ]; then
     _gos_error "unexpected argument for gos latest: ${1}"
-    echo "Usage: gos latest" >&2
+    _gos_usage latest
     return 1
   fi
 
@@ -2195,12 +2276,12 @@ cmd_check() {
 cmd_install() {
   local version="${1:-}"
   if [ -z "$version" ]; then
-    echo "Usage: gos install <version>  e.g. gos install 1.26.1" >&2
+    _gos_usage install "e.g. gos install 1.26.1"
     return 1
   fi
   if [ "$#" -gt 1 ]; then
     _gos_error "unexpected argument for gos install: ${2}"
-    echo "Usage: gos install <version>  e.g. gos install 1.26.1" >&2
+    _gos_usage install "e.g. gos install 1.26.1"
     return 1
   fi
 
@@ -2216,18 +2297,15 @@ cmd_install() {
   # shell — not the resolver's command-substitution subshell — is what lets the
   # resolver and the install below share a single feed request.
   local resolved
-  case "$version" in
-    *rc* | *beta* | *.*.*) ;;
-    *)
-      _gos_validate_feed_ttl || return 1
-      _gos_feed_json true true >/dev/null 2>&1 || true
-      resolved=$(_gos_resolve_bare_minor "$version")
-      if [ "$resolved" != "$version" ]; then
-        _gos_progress "Resolved Go ${version} to go${resolved}."
-        version="$resolved"
-      fi
-      ;;
-  esac
+  if _gos_version_is_bare_minor "$version"; then
+    _gos_validate_feed_ttl || return 1
+    _gos_feed_json true true >/dev/null 2>&1 || true
+    resolved=$(_gos_resolve_bare_minor "$version")
+    if [ "$resolved" != "$version" ]; then
+      _gos_progress "Resolved Go ${version} to go${resolved}."
+      version="$resolved"
+    fi
+  fi
 
   local current
   current=$(_gos_current)
@@ -2256,33 +2334,30 @@ _gos_ensure_version_dir() {
 
   _gos_validate_version "$version" || return 1
 
-  case "$version" in
-    *rc* | *beta* | *.*.*) ;;
-    *)
-      set +e
-      resolved=$(_gos_resolve_installed_bare_minor "$version")
-      case "$?" in
-        0)
-          set -e
+  if _gos_version_is_bare_minor "$version"; then
+    set +e
+    resolved=$(_gos_resolve_installed_bare_minor "$version")
+    case "$?" in
+      0)
+        set -e
+        version="$resolved"
+        ;;
+      1)
+        set -e
+        _gos_validate_feed_ttl || return 1
+        _gos_feed_json true true >/dev/null 2>&1 || true
+        resolved=$(_gos_resolve_bare_minor "$version")
+        if [ "$resolved" != "$version" ]; then
+          _gos_progress "Resolved Go ${version} to go${resolved}."
           version="$resolved"
-          ;;
-        1)
-          set -e
-          _gos_validate_feed_ttl || return 1
-          _gos_feed_json true true >/dev/null 2>&1 || true
-          resolved=$(_gos_resolve_bare_minor "$version")
-          if [ "$resolved" != "$version" ]; then
-            _gos_progress "Resolved Go ${version} to go${resolved}."
-            version="$resolved"
-          fi
-          ;;
-        *)
-          set -e
-          return 1
-          ;;
-      esac
-      ;;
-  esac
+        fi
+        ;;
+      *)
+        set -e
+        return 1
+        ;;
+    esac
+  fi
 
   version_dir=$(_gos_version_dir_for "$version")
   if [ ! -x "${version_dir}/bin/go" ]; then
@@ -2306,7 +2381,7 @@ cmd_run() {
   local version="${1:-}" project_resolved project_source
 
   if [ -z "$version" ]; then
-    echo "Usage: gos run [version] [--] <command> [args...]" >&2
+    _gos_usage run
     return 1
   fi
   shift
@@ -2320,7 +2395,7 @@ cmd_run() {
   if [ "$version" = "--" ]; then
     if ! project_resolved=$(_gos_resolve_project_version "$PWD"); then
       _gos_error "no version given and no .go-version or go.mod found from ${PWD} upward."
-      echo "Usage: gos run [version] [--] <command> [args...]" >&2
+      _gos_usage run
       return 1
     fi
     version="${project_resolved%%|*}"
@@ -2331,17 +2406,13 @@ cmd_run() {
     shift
   fi
   if [ "$#" -eq 0 ]; then
-    echo "Usage: gos run [version] [--] <command> [args...]" >&2
+    _gos_usage run
     return 1
   fi
 
   version="${version#go}"
 
-  if ! _gos_versions_mode; then
-    _gos_error "gos run requires side-by-side mode (set GOS_VERSIONS_DIR)."
-    echo "Example: export GOS_INSTALL_DIR=\"\$HOME/.gos/go\"; export GOS_VERSIONS_DIR=\"\$HOME/.gos/versions\"" >&2
-    return 1
-  fi
+  _gos_require_versions_mode "gos run" "$GOS_VERSIONS_MODE_EXAMPLE" || return 1
   _gos_validate_versions_dir || return 1
 
   _gos_ensure_version_dir "$version" || return 1
@@ -2368,7 +2439,7 @@ cmd_each() {
           ;;
         --)
           _gos_error "gos each needs a comma-separated version list before --."
-          echo "Usage: gos each <v1,v2,...> [--] <command> [args...]" >&2
+          _gos_usage each
           return 1
           ;;
         *)
@@ -2385,19 +2456,15 @@ cmd_each() {
   done
 
   if [ -z "$versions_arg" ]; then
-    echo "Usage: gos each <v1,v2,...> [--] <command> [args...]" >&2
+    _gos_usage each
     return 1
   fi
   if [ "${#command[@]}" -eq 0 ]; then
-    echo "Usage: gos each <v1,v2,...> [--] <command> [args...]" >&2
+    _gos_usage each
     return 1
   fi
 
-  if ! _gos_versions_mode; then
-    _gos_error "gos each requires side-by-side mode (set GOS_VERSIONS_DIR)."
-    echo "Example: export GOS_INSTALL_DIR=\"\$HOME/.gos/go\"; export GOS_VERSIONS_DIR=\"\$HOME/.gos/versions\"" >&2
-    return 1
-  fi
+  _gos_require_versions_mode "gos each" "$GOS_VERSIONS_MODE_EXAMPLE" || return 1
   _gos_validate_versions_dir || return 1
 
   # Split the comma list, preserving order. IFS split is fine: versions never
@@ -2534,12 +2601,10 @@ _gos_installed_versions() {
 # _gos_resolve_installed_bare_minor directly.
 _gos_resolve_installed_version() {
   local version="$1" resolved
-  case "$version" in
-    *rc* | *beta* | *.*.*)
-      printf '%s\n' "$version"
-      return 0
-      ;;
-  esac
+  if ! _gos_version_is_bare_minor "$version"; then
+    printf '%s\n' "$version"
+    return 0
+  fi
   if resolved=$(_gos_resolve_installed_bare_minor "$version" 2>/dev/null) && [ -n "$resolved" ]; then
     printf '%s\n' "$resolved"
   else
@@ -2633,7 +2698,7 @@ cmd_list() {
       --minor) minor_only="true" ;;
       *)
         _gos_error "unknown option for gos list: ${arg}"
-        echo "Usage: gos list [--installed] [--minor] [--json]" >&2
+        _gos_usage list
         return 1
         ;;
     esac
@@ -2702,15 +2767,22 @@ EOF
 cmd_platforms() {
   local version="" arg platforms
   for arg in "$@"; do
-    if [ "$arg" = "--json" ]; then
-      GOS_OUTPUT_JSON=1
-    elif [ -z "$version" ]; then
-      version="${arg#go}"
-    else
-      _gos_error "unexpected argument for gos platforms: ${arg}"
-      echo "Usage: gos platforms [version] [--json]" >&2
-      return 1
-    fi
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      -*)
+        _gos_error "unknown option for gos platforms: ${arg}"
+        _gos_usage platforms
+        return 1
+        ;;
+      *)
+        if [ -n "$version" ]; then
+          _gos_error "unexpected argument for gos platforms: ${arg}"
+          _gos_usage platforms
+          return 1
+        fi
+        version="${arg#go}"
+        ;;
+    esac
   done
 
   _gos_validate_feed_ttl || return 1
@@ -2750,12 +2822,17 @@ cmd_which() {
   for arg in "$@"; do
     case "$arg" in
       --json) GOS_OUTPUT_JSON=1 ;;
+      -*)
+        _gos_error "unknown option for gos which: ${arg}"
+        _gos_usage which
+        return 1
+        ;;
       *)
         if [ -z "$version" ]; then
           version="${arg#go}"
         else
           _gos_error "unexpected argument for gos which: ${arg}"
-          echo "Usage: gos which [version] [--json]" >&2
+          _gos_usage which
           return 1
         fi
         ;;
@@ -2764,10 +2841,7 @@ cmd_which() {
 
   if [ -n "$version" ]; then
     _gos_validate_version "$version" || return 1
-    if ! _gos_versions_mode; then
-      _gos_error "gos which <version> requires side-by-side mode (set GOS_VERSIONS_DIR)."
-      return 1
-    fi
+    _gos_require_versions_mode "gos which <version>" || return 1
     _gos_validate_versions_dir || return 1
     version_dir=$(_gos_version_dir_for "$version")
     go_path="${version_dir}/bin/go"
@@ -2863,10 +2937,9 @@ cmd_status() {
   [ "$rollback_state" = "ok" ] && rollback_available="true"
   # Crash residue and the mutation lock are exactly the state a user needs
   # visible when something feels off; both checks stay offline.
-  for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
-    [ -d "$orphan" ] || [ -L "$orphan" ] || continue
+  while IFS= read -r -d '' orphan; do
     orphaned_backups=$((orphaned_backups + 1))
-  done
+  done < <(_gos_orphaned_backups)
   lock_dir=$(_gos_lock_dir)
   lock_state=$(_gos_lock_state)
   lock_pid="${lock_state#*|}"
@@ -2993,13 +3066,13 @@ cmd_use() {
       --json) GOS_OUTPUT_JSON=1 ;;
       -*)
         _gos_error "unknown option for gos use: ${arg}"
-        echo "Usage: gos use [--print] [path]" >&2
+        _gos_usage use
         return 1
         ;;
       *)
         if [ -n "$start_dir" ]; then
           _gos_error "unexpected argument for gos use: ${arg}"
-          echo "Usage: gos use [--print] [path]" >&2
+          _gos_usage use
           return 1
         fi
         start_dir="$arg"
@@ -3012,6 +3085,11 @@ cmd_use() {
   if _gos_json_enabled && [ "$print_only" != "true" ]; then
     _gos_error "gos use supports --json only together with --print."
     return 1
+  fi
+  # --print only resolves; a read-only query must not take (or be blocked
+  # by) the mutation lock, so the lock is taken here, after parsing.
+  if [ "$print_only" != "true" ]; then
+    _gos_acquire_lock || return 1
   fi
 
   if ! resolved=$(_gos_resolve_project_version "$start_dir"); then
@@ -3048,7 +3126,7 @@ cmd_pin() {
   local version="${1:-}"
   if [ "$#" -gt 1 ]; then
     _gos_error "unexpected argument for gos pin: ${2}"
-    echo "Usage: gos pin [version]  e.g. gos pin 1.24.0" >&2
+    _gos_usage pin "e.g. gos pin 1.24.0"
     return 1
   fi
 
@@ -3058,7 +3136,7 @@ cmd_pin() {
     version=$(_gos_current)
     if [ "$version" = "none" ]; then
       _gos_error "no version given and no active Go found to pin."
-      echo "Usage: gos pin [version]  e.g. gos pin 1.24.0" >&2
+      _gos_usage pin "e.g. gos pin 1.24.0"
       return 1
     fi
     echo "Pinning the active Go ${version}."
@@ -3078,13 +3156,14 @@ cmd_rollback() {
       --dry-run) dry_run="true" ;;
       *)
         _gos_error "unexpected argument for gos rollback: ${arg}"
-        echo "Usage: gos rollback [--dry-run]" >&2
+        _gos_usage rollback
         return 1
         ;;
     esac
   done
 
   if [ "$dry_run" != "true" ]; then
+    _gos_acquire_lock || return 1
     _gos_activate_rollback
     return
   fi
@@ -3115,10 +3194,16 @@ cmd_rollback() {
 # Remove every installed side-by-side version except the active one. The
 # rollback target is kept too: deleting it would silently disarm gos rollback,
 # so it is skipped with a hint pointing at the explicit single-version path.
+# Past-tense verb for a real run, "Would ..." for a dry run, so previews and
+# real runs describe the same actions. Usage: _gos_action_verb <dry_run> <done> <would>
+_gos_action_verb() {
+  if [ "$1" = "true" ]; then printf '%s\n' "$3"; else printf '%s\n' "$2"; fi
+}
+
 _gos_uninstall_inactive() {
   local dry_run="$1" installed version_dir rollback_dir removed=0 size removed_kib=0
-  local removal_verb="Uninstalled"
-  [ "$dry_run" = "true" ] && removal_verb="Would uninstall"
+  local removal_verb
+  removal_verb=$(_gos_action_verb "$dry_run" "Uninstalled" "Would uninstall")
 
   rollback_dir=$(_gos_rollback_dir)
   for installed in $(_gos_installed_versions); do
@@ -3157,13 +3242,13 @@ cmd_uninstall() {
       --dry-run) dry_run="true" ;;
       -*)
         _gos_error "unknown option for gos uninstall: ${arg}"
-        echo "Usage: gos uninstall <version or --inactive> [--dry-run]" >&2
+        _gos_usage uninstall
         return 1
         ;;
       *)
         if [ -n "$version" ]; then
           _gos_error "unexpected argument for gos uninstall: ${arg}"
-          echo "Usage: gos uninstall <version or --inactive> [--dry-run]" >&2
+          _gos_usage uninstall
           return 1
         fi
         version="$arg"
@@ -3176,16 +3261,16 @@ cmd_uninstall() {
     return 1
   fi
   if [ -z "$version" ] && [ "$inactive" != "true" ]; then
-    echo "Usage: gos uninstall <version or --inactive> [--dry-run]  e.g. gos uninstall 1.24.0" >&2
+    _gos_usage uninstall "e.g. gos uninstall 1.24.0"
     return 1
   fi
 
-  if ! _gos_versions_mode; then
-    _gos_error "gos uninstall requires side-by-side mode (set GOS_VERSIONS_DIR)."
-    echo "In the classic layout there is only one install; replace it with gos install/latest." >&2
-    return 1
-  fi
+  _gos_require_versions_mode "gos uninstall" "In the classic layout there is only one install; replace it with gos install/latest." || return 1
   _gos_validate_versions_dir || return 1
+  # A dry run mutates nothing and must not take (or be blocked by) the lock.
+  if [ "$dry_run" != "true" ]; then
+    _gos_acquire_lock || return 1
+  fi
 
   if [ "$inactive" = "true" ]; then
     _gos_uninstall_inactive "$dry_run"
@@ -3198,29 +3283,23 @@ cmd_uninstall() {
   # A bare X.Y resolves to the matching installed patch release, mirroring
   # `gos install 1.21` (which installs the newest 1.21.x): resolve against
   # what is actually installed so uninstall stays network-free.
-  case "$version" in
-    *rc* | *beta* | *.*.*) ;;
-    *)
-      local installed match_count=0 resolved=""
-      for installed in $(_gos_installed_versions); do
-        case "$installed" in
-          "$version" | "$version".*)
-            resolved="$installed"
-            match_count=$((match_count + 1))
-            ;;
-        esac
-      done
-      if [ "$match_count" -eq 1 ]; then
+  if _gos_version_is_bare_minor "$version"; then
+    local resolved
+    set +e
+    resolved=$(_gos_resolve_installed_bare_minor "$version")
+    case "$?" in
+      0)
+        set -e
         version="$resolved"
-      elif [ "$match_count" -gt 1 ]; then
-        _gos_error "'${version}' matches multiple installed Go versions; re-run with an exact version:"
-        for installed in $(_gos_installed_versions); do
-          case "$installed" in "$version" | "$version".*) echo "  go${installed}" >&2 ;; esac
-        done
+        ;;
+      1) set -e ;;
+      *)
+        # Ambiguous: the helper already listed the candidates on stderr.
+        set -e
         return 1
-      fi
-      ;;
-  esac
+        ;;
+    esac
+  fi
 
   version_dir=$(_gos_version_dir_for "$version")
   if [ ! -d "$version_dir" ]; then
@@ -3414,7 +3493,7 @@ cmd_env() {
       --auto) auto="true" ;;
       *)
         _gos_error "unknown option for gos env: ${arg}"
-        echo "Usage: gos env [--fish] [--auto] [--json]" >&2
+        _gos_usage env
         return 1
         ;;
     esac
@@ -3485,7 +3564,7 @@ cmd_self_update() {
 
   if [ "$#" -gt 0 ]; then
     _gos_error "unexpected argument for gos self-update: ${1}"
-    echo "Usage: gos self-update" >&2
+    _gos_usage self-update
     return 1
   fi
 
@@ -3626,7 +3705,7 @@ cmd_self_update() {
 cmd_prune() {
   local prune_rollback="false" dry_run="false" arg rollback_dir removed=0 removed_bytes=0 size file rollback_state
   local removed_feed=0 removed_feed_bytes=0
-  local removal_verb="Removed"
+  local removal_verb
 
   for arg in "$@"; do
     case "$arg" in
@@ -3635,7 +3714,7 @@ cmd_prune() {
       --json) GOS_OUTPUT_JSON=1 ;;
       *)
         _gos_error "unknown option for gos prune: ${arg}"
-        echo "Usage: gos prune [--rollback] [--dry-run] [--json]" >&2
+        _gos_usage prune
         return 1
         ;;
     esac
@@ -3646,7 +3725,7 @@ cmd_prune() {
   if [ "$prune_rollback" = "true" ] && [ "$dry_run" != "true" ]; then
     _gos_acquire_lock || return 1
   fi
-  [ "$dry_run" = "true" ] && removal_verb="Would remove"
+  removal_verb=$(_gos_action_verb "$dry_run" "Removed" "Would remove")
 
   # Delete only files that look like cached Go archives, including .partial
   # files left by an interrupted (resumable) download. GOS_CACHE_DIR is
@@ -3654,7 +3733,7 @@ cmd_prune() {
   if [ -d "$GOS_CACHE_DIR" ]; then
     for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip "$GOS_CACHE_DIR"/go*.partial; do
       [ -f "$file" ] || continue
-      size=$(wc -c <"$file" | tr -d '[:space:]') || size=0
+      size=$(_gos_file_size_bytes "$file")
       [ "$dry_run" = "true" ] || rm -f "$file"
       removed=$((removed + 1))
       removed_bytes=$((removed_bytes + size))
@@ -3675,7 +3754,7 @@ cmd_prune() {
   local feed_file
   for feed_file in "$(_gos_feed_cache_path false)" "$(_gos_feed_cache_path true)"; do
     [ -f "$feed_file" ] || continue
-    size=$(wc -c <"$feed_file" | tr -d '[:space:]') || size=0
+    size=$(_gos_file_size_bytes "$feed_file")
     [ "$dry_run" = "true" ] || rm -f "$feed_file"
     removed_feed=$((removed_feed + 1))
     removed_feed_bytes=$((removed_feed_bytes + size))
@@ -3706,9 +3785,7 @@ cmd_prune() {
   # healthy (they may be the sole surviving copy otherwise), and only with
   # --rollback, which already means "discard my safety copies".
   local orphan orphans_removed=0 orphans_found=0
-  for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
-    # -L so a stranded side-by-side symlink backup is reported/removed too.
-    [ -d "$orphan" ] || [ -L "$orphan" ] || continue
+  while IFS= read -r -d '' orphan; do
     orphans_found=$((orphans_found + 1))
     if [ "$prune_rollback" = "true" ] && [ -x "${GOS_INSTALL_DIR}/bin/go" ]; then
       if [ "$dry_run" != "true" ]; then
@@ -3719,7 +3796,7 @@ cmd_prune() {
     else
       _gos_json_enabled || echo "Orphaned backup found at ${orphan} (remove it with: gos prune --rollback)."
     fi
-  done
+  done < <(_gos_orphaned_backups)
 
   if _gos_json_enabled; then
     printf '{"dry_run":%s,"removed_archives":%s,"removed_bytes":%s,"removed_feed_files":%s,"removed_feed_bytes":%s,"cache_dir":' \
@@ -3944,10 +4021,9 @@ cmd_doctor() {
   # like status does. Neither is a "problem": an interrupted install left the
   # backup on purpose, and a held lock means another gos is simply running.
   local orphan doctor_orphans=0
-  for orphan in "${GOS_INSTALL_DIR}.gos-backup."* "${GOS_INSTALL_DIR}.gos-current."*; do
-    [ -d "$orphan" ] || [ -L "$orphan" ] || continue
+  while IFS= read -r -d '' orphan; do
     doctor_orphans=$((doctor_orphans + 1))
-  done
+  done < <(_gos_orphaned_backups)
   if [ "$doctor_orphans" -eq 0 ]; then
     _gos_doctor_check "ok" "residue" "no orphaned backups from interrupted installs"
   else
@@ -4077,7 +4153,7 @@ _gos_completions() {
   local fallback_commands="latest install run each use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
   # gos-commands:bash:end
   local commands="$fallback_commands"
-  local cmd_index=1 cmd words="" line
+  local cmd_index=1 cmd words="" line slot
   local versions=""
 
   if command -v gos >/dev/null 2>&1; then
@@ -4101,9 +4177,42 @@ _gos_completions() {
       prune)
         words="--rollback --dry-run --json"
         ;;
-      install | run | each)
+      install | platforms)
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions --remote-cached 2>/dev/null || true)
+        fi
+        words="$versions"
+        [ "$cmd" = "platforms" ] && words="--json $versions"
+        ;;
+      run | each)
+        # Slot after the command is the version (or a bare -- for run's
+        # project mode); the slot after that (past an optional --) is the
+        # command to run, then its arguments as files.
+        slot=$((cmd_index + 1))
+        if [ "$COMP_CWORD" -eq "$slot" ]; then
+          if command -v gos >/dev/null 2>&1; then
+            versions=$(gos __versions --remote-cached 2>/dev/null || true)
+          fi
+          words="$versions"
+          [ "$cmd" != "run" ] || words="-- $words"
+        else
+          [ "${COMP_WORDS[$slot]:-}" = "--" ] || slot=$((slot + 1))
+          [ "${COMP_WORDS[$slot]:-}" != "--" ] || slot=$((slot + 1))
+          if [ "$COMP_CWORD" -eq "$slot" ]; then
+            while IFS= read -r line; do
+              COMPREPLY+=("$line")
+            done < <(compgen -c -- "$cur")
+          else
+            while IFS= read -r line; do
+              COMPREPLY+=("$line")
+            done < <(compgen -f -- "$cur")
+          fi
+          return
+        fi
+        ;;
+      pin)
+        if command -v gos >/dev/null 2>&1; then
+          versions=$(gos __versions 2>/dev/null || true)
         fi
         words="$versions"
         ;;
@@ -4137,7 +4246,7 @@ _gos_completions() {
       doctor)
         words="--fix --json"
         ;;
-      check | current | platforms | status | version)
+      check | current | status | version)
         words="--json"
         ;;
       use)
@@ -4174,7 +4283,8 @@ _gos_completion_zsh() {
 _gos() {
   local context state state_descr line
   typeset -A opt_args
-  local -a commands
+  local -a commands versions
+  local cmd slot
   # gos-commands:zsh:begin
   commands=(
     'latest:Install the latest stable Go version'
@@ -4212,7 +4322,42 @@ _gos() {
         prune)
           _arguments '--rollback[Also remove the rollback installation]' '--dry-run[Preview removals without deleting]' '--json[Output machine-readable JSON]'
           ;;
-        install | run | each)
+        install)
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
+          fi
+          ;;
+        run | each)
+          # _arguments shifts words to start with run/each for the args
+          # state. Count the version/optional separator explicitly: -- is a
+          # real version-slot value for run, not an _arguments option marker.
+          cmd="${line[1]}"
+          if ((CURRENT == 2)); then
+            versions=()
+            if command -v gos >/dev/null 2>&1; then
+              versions=(${(f)"$(gos __versions --remote-cached 2>/dev/null)"})
+            fi
+            [ "$cmd" != "run" ] || versions=(-- "${versions[@]}")
+            compadd -- "${versions[@]}"
+          else
+            slot=3
+            if [ "$cmd" != "run" ] || [ "${words[2]}" != "--" ]; then
+              [ "${words[3]}" != "--" ] || slot=4
+            fi
+            # Give _normal the nested command as words[1], preserving its
+            # arguments and their own -- terminators verbatim.
+            shift "$((slot - 1))" words
+            ((CURRENT -= slot - 1))
+            _normal
+          fi
+          ;;
+        pin)
+          if command -v gos >/dev/null 2>&1; then
+            _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
+          fi
+          ;;
+        platforms)
+          _arguments '--json[Output machine-readable JSON]'
           if command -v gos >/dev/null 2>&1; then
             _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
           fi
@@ -4247,7 +4392,7 @@ _gos() {
         doctor)
           _arguments '--fix[Apply safe non-destructive fixes]' '--json[Output machine-readable JSON]'
           ;;
-        check | current | platforms | status | version)
+        check | current | status | version)
           _arguments '--json[Output machine-readable JSON]'
           ;;
         use)
@@ -4269,49 +4414,100 @@ _gos_completion_fish() {
 # Fish completion for gos
 
 complete -c gos -f
+
+# True while no command has been typed yet. Unlike __fish_use_subcommand it
+# ignores a leading --json, so `gos --json <TAB>` still offers the commands.
+function __gos_needs_command
+  set -l tokens (commandline -opc)
+  set -e tokens[1]
+  for token in $tokens
+    test "$token" = --json; or return 1
+  end
+  return 0
+end
+
+# True while run/each still expect their version slot (nothing typed after
+# the command yet); afterwards the rest of the line is the command to run.
+function __gos_wants_version
+  set -l tokens (commandline -opc)
+  set -e tokens[1]
+  if test "$tokens[1]" = --json
+    set -e tokens[1]
+  end
+  test (count $tokens) -eq 1
+end
+
+# Match the actual gos command, never a word inside run/each's nested argv.
+function __gos_using_command
+  set -l tokens (commandline -opc)
+  set -e tokens[1]
+  if test "$tokens[1]" = --json
+    set -e tokens[1]
+  end
+  contains -- "$tokens[1]" $argv
+end
+
+function __gos_complete_command
+  set -l tokens (commandline -opc)
+  set -e tokens[1]
+  if test "$tokens[1]" = --json
+    set -e tokens[1]
+  end
+  # Fish skips non-option tokens, so bare -- does not occupy the version slot.
+  if test "$tokens[1]" = run; and test "$tokens[2]" = --
+    __fish_complete_subcommand --fcs-skip=2
+  else
+    __fish_complete_subcommand --fcs-skip=3
+  end
+end
+
 # gos-commands:fish:begin
-complete -c gos -n '__fish_use_subcommand' -a 'latest' -d 'Install the latest stable Go version'
-complete -c gos -n '__fish_use_subcommand' -a 'install' -d 'Install a specific Go version'
-complete -c gos -n '__fish_use_subcommand' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
-complete -c gos -n '__fish_use_subcommand' -a 'each' -d 'Run a command against several side-by-side Go versions and report a pass/fail summary'
-complete -c gos -n '__fish_use_subcommand' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
-complete -c gos -n '__fish_use_subcommand' -a 'pin' -d 'Write .go-version in the current directory (active version by default)'
-complete -c gos -n '__fish_use_subcommand' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'
-complete -c gos -n '__fish_use_subcommand' -a 'rollback' -d 'Restore the previous Go installation, if available; --dry-run only previews the swap'
-complete -c gos -n '__fish_use_subcommand' -a 'uninstall' -d 'Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
-complete -c gos -n '__fish_use_subcommand' -a 'prune' -d 'Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
-complete -c gos -n '__fish_use_subcommand' -a 'current' -d 'Show the currently active Go version'
-complete -c gos -n '__fish_use_subcommand' -a 'list' -d 'List available Go versions (or locally installed ones); --minor keeps the newest per minor'
-complete -c gos -n '__fish_use_subcommand' -a 'platforms' -d 'List supported OS/arch archives for a Go version'
-complete -c gos -n '__fish_use_subcommand' -a 'status' -d 'Show an offline dashboard for gos and the active Go'
-complete -c gos -n '__fish_use_subcommand' -a 'which' -d 'Show the active or side-by-side Go binary path'
-complete -c gos -n '__fish_use_subcommand' -a 'env' -d 'Print the PATH setup line or an opt-in per-shell auto-switch hook'
-complete -c gos -n '__fish_use_subcommand' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script (or install it with --install)'
-complete -c gos -n '__fish_use_subcommand' -a 'doctor' -d 'Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
-complete -c gos -n '__fish_use_subcommand' -a 'self-update' -d 'Update gos itself to the latest verified release'
-complete -c gos -n '__fish_use_subcommand' -a 'version' -d 'Show gos version'
-complete -c gos -n '__fish_use_subcommand' -a 'help' -d 'Show this help message, or usage for one command'
+complete -c gos -n '__gos_needs_command' -a 'latest' -d 'Install the latest stable Go version'
+complete -c gos -n '__gos_needs_command' -a 'install' -d 'Install a specific Go version'
+complete -c gos -n '__gos_needs_command' -a 'run' -d 'Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version'
+complete -c gos -n '__gos_needs_command' -a 'each' -d 'Run a command against several side-by-side Go versions and report a pass/fail summary'
+complete -c gos -n '__gos_needs_command' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
+complete -c gos -n '__gos_needs_command' -a 'pin' -d 'Write .go-version in the current directory (active version by default)'
+complete -c gos -n '__gos_needs_command' -a 'check' -d 'Check whether newer stable Go or gos releases are available (no install)'
+complete -c gos -n '__gos_needs_command' -a 'rollback' -d 'Restore the previous Go installation, if available; --dry-run only previews the swap'
+complete -c gos -n '__gos_needs_command' -a 'uninstall' -d 'Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
+complete -c gos -n '__gos_needs_command' -a 'prune' -d 'Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
+complete -c gos -n '__gos_needs_command' -a 'current' -d 'Show the currently active Go version'
+complete -c gos -n '__gos_needs_command' -a 'list' -d 'List available Go versions (or locally installed ones); --minor keeps the newest per minor'
+complete -c gos -n '__gos_needs_command' -a 'platforms' -d 'List supported OS/arch archives for a Go version'
+complete -c gos -n '__gos_needs_command' -a 'status' -d 'Show an offline dashboard for gos and the active Go'
+complete -c gos -n '__gos_needs_command' -a 'which' -d 'Show the active or side-by-side Go binary path'
+complete -c gos -n '__gos_needs_command' -a 'env' -d 'Print the PATH setup line or an opt-in per-shell auto-switch hook'
+complete -c gos -n '__gos_needs_command' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script (or install it with --install)'
+complete -c gos -n '__gos_needs_command' -a 'doctor' -d 'Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
+complete -c gos -n '__gos_needs_command' -a 'self-update' -d 'Update gos itself to the latest verified release'
+complete -c gos -n '__gos_needs_command' -a 'version' -d 'Show gos version'
+complete -c gos -n '__gos_needs_command' -a 'help' -d 'Show this help message, or usage for one command'
 # gos-commands:fish:end
 # --json only where gos actually supports it (leading flag or per command).
-complete -c gos -n '__fish_use_subcommand' -l json -d 'Output machine-readable JSON where supported'
-complete -c gos -n '__fish_seen_subcommand_from check current list platforms status which doctor prune env version use' -l json -d 'Output machine-readable JSON'
-complete -c gos -n '__fish_seen_subcommand_from prune' -l rollback -d 'Also remove the rollback installation'
-complete -c gos -n '__fish_seen_subcommand_from prune' -l dry-run -d 'Preview removals without deleting'
-complete -c gos -n '__fish_seen_subcommand_from rollback' -l dry-run -d 'Preview the rollback without switching'
-complete -c gos -n '__fish_seen_subcommand_from doctor' -l fix -d 'Apply safe non-destructive fixes'
-complete -c gos -n '__fish_seen_subcommand_from use' -l print -d 'Only resolve the project version'
-complete -c gos -n '__fish_seen_subcommand_from help' -a '(gos __commands 2>/dev/null)' -d 'gos command'
-complete -c gos -n '__fish_seen_subcommand_from list' -l installed -d 'List locally installed versions'
-complete -c gos -n '__fish_seen_subcommand_from list' -l minor -d 'Keep only the newest version per minor'
-complete -c gos -n '__fish_seen_subcommand_from install run each' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
-complete -c gos -n '__fish_seen_subcommand_from uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
-complete -c gos -n '__fish_seen_subcommand_from uninstall' -l inactive -d 'Remove all inactive versions'
-complete -c gos -n '__fish_seen_subcommand_from uninstall' -l dry-run -d 'Preview removals without deleting'
-complete -c gos -n '__fish_seen_subcommand_from env' -l fish -d 'Emit fish shell syntax'
-complete -c gos -n '__fish_seen_subcommand_from env' -l auto -d 'Emit opt-in auto-switch hook'
-complete -c gos -n '__fish_seen_subcommand_from use' -a '(__fish_complete_directories)' -d 'Project directory'
-complete -c gos -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish' -d 'Shell'
-complete -c gos -n '__fish_seen_subcommand_from completions' -l install -d 'Write the completion to the standard per-user directory'
+complete -c gos -n '__gos_needs_command' -l json -d 'Output machine-readable JSON where supported'
+complete -c gos -n '__gos_using_command check current list platforms status which doctor prune env version use' -l json -d 'Output machine-readable JSON'
+complete -c gos -n '__gos_using_command prune' -l rollback -d 'Also remove the rollback installation'
+complete -c gos -n '__gos_using_command prune' -l dry-run -d 'Preview removals without deleting'
+complete -c gos -n '__gos_using_command rollback' -l dry-run -d 'Preview the rollback without switching'
+complete -c gos -n '__gos_using_command doctor' -l fix -d 'Apply safe non-destructive fixes'
+complete -c gos -n '__gos_using_command use' -l print -d 'Only resolve the project version'
+complete -c gos -n '__gos_using_command help' -a '(gos __commands 2>/dev/null)' -d 'gos command'
+complete -c gos -n '__gos_using_command list' -l installed -d 'List locally installed versions'
+complete -c gos -n '__gos_using_command list' -l minor -d 'Keep only the newest version per minor'
+complete -c gos -n '__gos_using_command install platforms' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
+complete -c gos -n '__gos_using_command run each; and __gos_wants_version' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
+complete -c gos -n '__gos_using_command run; and __gos_wants_version' -a -- -d 'Use the project Go version'
+complete -c gos -n '__gos_using_command run each; and not __gos_wants_version' -a '(__gos_complete_command)'
+complete -c gos -n '__gos_using_command pin' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
+complete -c gos -n '__gos_using_command uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
+complete -c gos -n '__gos_using_command uninstall' -l inactive -d 'Remove all inactive versions'
+complete -c gos -n '__gos_using_command uninstall' -l dry-run -d 'Preview removals without deleting'
+complete -c gos -n '__gos_using_command env' -l fish -d 'Emit fish shell syntax'
+complete -c gos -n '__gos_using_command env' -l auto -d 'Emit opt-in auto-switch hook'
+complete -c gos -n '__gos_using_command use' -a '(__fish_complete_directories)' -d 'Project directory'
+complete -c gos -n '__gos_using_command completions' -a 'bash zsh fish' -d 'Shell'
+complete -c gos -n '__gos_using_command completions' -l install -d 'Write the completion to the standard per-user directory'
 GOS_COMPLETION_FISH
 }
 # gos-completions:fish:end
@@ -4334,13 +4530,13 @@ cmd_completions() {
       --install) do_install="true" ;;
       -*)
         _gos_error "unknown option for gos completions: ${arg}"
-        echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
+        _gos_usage completions
         return 1
         ;;
       *)
         if [ -n "$shell_name" ]; then
           _gos_error "unexpected argument for gos completions: ${arg}"
-          echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
+          _gos_usage completions
           return 1
         fi
         shell_name="$arg"
@@ -4349,7 +4545,7 @@ cmd_completions() {
   done
 
   if [ -z "$shell_name" ]; then
-    echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
+    _gos_usage completions
     return 1
   fi
 
@@ -4360,7 +4556,7 @@ cmd_completions() {
     fish) emitter=_gos_completion_fish ;;
     *)
       _gos_error "unsupported shell for gos completions: ${shell_name}"
-      echo "Usage: gos completions <bash|zsh|fish> [--install]" >&2
+      _gos_usage completions
       return 1
       ;;
   esac
@@ -4393,12 +4589,18 @@ cmd_completions() {
 }
 
 _gos_command_manifest() {
-  cat <<'GOS_COMMANDS'
+  local name usage description
+  while IFS='|' read -r name usage description; do
+    case "$GOS_JSON_COMMANDS" in
+      *" ${name} "*) usage="${usage} [--json]" ;;
+    esac
+    printf '%s|%s|%s\n' "$name" "$usage" "$description"
+  done <<'GOS_COMMANDS'
 latest|latest|Install the latest stable Go version
 install|install <version>|Install a specific Go version
 run|run [version] [--] <command> [args...]|Run a command with a side-by-side Go version without activating it globally; a bare -- uses the project version
 each|each <v1,v2,...> [--] <command> [args...]|Run a command against several side-by-side Go versions and report a pass/fail summary
-use|use [--print] [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it
+use|use [--print [--json]] [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it
 pin|pin [version]|Write .go-version in the current directory (active version by default)
 check|check|Check whether newer stable Go or gos releases are available (no install)
 rollback|rollback [--dry-run]|Restore the previous Go installation, if available; --dry-run only previews the swap
@@ -4418,6 +4620,25 @@ help|help [command]|Show this help message, or usage for one command
 GOS_COMMANDS
 }
 
+# Print "Usage: gos <usage>" for a manifest command on stderr, so the usage
+# line in an argument error can never drift from gos help <command>, the
+# README table, and the man page. The manifest formats JSON flags for all
+# consumers; an optional example is printed after two spaces.
+_gos_usage() {
+  local cmd="$1" example="${2:-}" usage
+  usage=$(_gos_command_manifest | while IFS='|' read -r entry_name entry_usage _entry_description; do
+    if [ "$entry_name" = "$cmd" ]; then
+      printf '%s' "$entry_usage"
+    fi
+  done)
+  [ -n "$usage" ] || usage="$cmd"
+  if [ -n "$example" ]; then
+    printf 'Usage: gos %s  %s\n' "$usage" "$example" >&2
+  else
+    printf 'Usage: gos %s\n' "$usage" >&2
+  fi
+}
+
 _gos_command_help() {
   local _command_name command_usage command_description
   _gos_command_manifest | while IFS='|' read -r _command_name command_usage command_description; do
@@ -4426,11 +4647,11 @@ _gos_command_help() {
 }
 
 cmd_help() {
-  local topic="${1:-}" entry entry_usage entry_description suggestion suggestions
+  local topic="${1:-}" entry entry_usage entry_description
 
   if [ "$#" -gt 1 ]; then
     _gos_error "unexpected argument for gos help: ${2}"
-    echo "Usage: gos help [command]" >&2
+    _gos_usage help
     return 1
   fi
 
@@ -4443,16 +4664,7 @@ cmd_help() {
       fi
     done)
     if [ -z "$entry" ]; then
-      _gos_error "unknown command: ${topic}"
-      suggestions=$(_gos_suggest_command "$topic")
-      if [ -n "$suggestions" ]; then
-        echo "Did you mean?" >&2
-        while IFS= read -r suggestion; do
-          echo "  ${suggestion}" >&2
-        done <<EOF
-$suggestions
-EOF
-      fi
+      _gos_report_unknown_command "$topic"
       return 1
     fi
     entry_usage="${entry%%|*}"
@@ -4551,6 +4763,22 @@ cmd___commands() {
   fi
 }
 
+# "unknown command" plus the did-you-mean list, shared by the dispatcher and
+# gos help <topic>.
+_gos_report_unknown_command() {
+  local input="$1" suggestion suggestions
+  _gos_error "unknown command: ${input}"
+  suggestions=$(_gos_suggest_command "$input")
+  if [ -n "$suggestions" ]; then
+    echo "Did you mean?" >&2
+    while IFS= read -r suggestion; do
+      echo "  ${suggestion}" >&2
+    done <<EOF
+$suggestions
+EOF
+  fi
+}
+
 _gos_suggest_command() {
   local input="$1"
 
@@ -4628,7 +4856,32 @@ _gos_suggest_command() {
 # rejection of the flag.
 GOS_JSON_COMMANDS=" check current list platforms status which env doctor prune version __commands "
 
+# Preconditions a command needs before it runs, named so every dispatcher
+# line reads as a list. The mutation lock is not among them for commands
+# whose flags decide whether they mutate (use --print, rollback/uninstall
+# --dry-run): those take it themselves once their arguments are parsed.
+_gos_preflight() {
+  local check
+  for check in "$@"; do
+    case "$check" in
+      checksum-policy) _gos_validate_checksum_policy || return 1 ;;
+      install-dir) _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1 ;;
+      cache-dir) _gos_validate_cache_dir || return 1 ;;
+      versions-dir) _gos_validate_versions_dir || return 1 ;;
+      lock) _gos_acquire_lock || return 1 ;;
+      *)
+        _gos_error "internal: unknown preflight check '${check}'."
+        return 1
+        ;;
+    esac
+  done
+}
+
 main() {
+  # Select in the parent before any feed pipeline/command substitution. The
+  # children inherit this choice; assignments made inside them cannot memoize
+  # parser discovery for subsequent queries in the parent.
+  _gos_feed_parser
   local leading_json="false"
   if [ "${1:-}" = "--json" ]; then
     GOS_OUTPUT_JSON=1
@@ -4662,69 +4915,39 @@ main() {
 
   case "$cmd" in
     latest)
-      _gos_validate_checksum_policy || return 1
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
-      _gos_validate_versions_dir || return 1
-      _gos_acquire_lock || return 1
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir lock || return 1
       cmd_latest "$@"
       ;;
     install)
-      _gos_validate_checksum_policy || return 1
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
-      _gos_validate_versions_dir || return 1
-      _gos_acquire_lock || return 1
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir lock || return 1
       cmd_install "$@"
       ;;
     run)
       GOS_PROGRESS_FD=2
-      _gos_validate_checksum_policy || return 1
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
-      _gos_validate_versions_dir || return 1
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir || return 1
       cmd_run "$@"
       ;;
     each)
       GOS_PROGRESS_FD=2
-      _gos_validate_checksum_policy || return 1
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
-      _gos_validate_versions_dir || return 1
       # Each version installs under its own lock; no command-level lock here.
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir || return 1
       cmd_each "$@"
       ;;
     use)
-      _gos_validate_checksum_policy || return 1
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
-      _gos_validate_versions_dir || return 1
-      # --print only resolves; a read-only query must not take (or be
-      # blocked by) the mutation lock.
-      case " $* " in
-        *" --print "*) ;;
-        *) _gos_acquire_lock || return 1 ;;
-      esac
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir || return 1
       cmd_use "$@"
       ;;
     pin) cmd_pin "$@" ;;
     rollback)
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      # A dry run mutates nothing and must not take (or be blocked by) the
-      # mutation lock.
-      case " $* " in
-        *" --dry-run "*) ;;
-        *) _gos_acquire_lock || return 1 ;;
-      esac
+      _gos_preflight install-dir || return 1
       cmd_rollback "$@"
       ;;
     prune)
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_cache_dir || return 1
+      _gos_preflight install-dir cache-dir || return 1
       cmd_prune "$@"
       ;;
     check)
-      _gos_validate_cache_dir || return 1
+      _gos_preflight cache-dir || return 1
       cmd_check "$@"
       ;;
     self-update | selfupdate)
@@ -4733,18 +4956,11 @@ main() {
       cmd_self_update "$@"
       ;;
     uninstall)
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
-      _gos_validate_versions_dir || return 1
-      # A dry run mutates nothing and must not take (or be blocked by) the
-      # mutation lock.
-      case " $* " in
-        *" --dry-run "*) ;;
-        *) _gos_acquire_lock || return 1 ;;
-      esac
+      _gos_preflight install-dir versions-dir || return 1
       cmd_uninstall "$@"
       ;;
     env)
-      _gos_validate_install_dir "$GOS_INSTALL_DIR" || return 1
+      _gos_preflight install-dir || return 1
       cmd_env "$@"
       ;;
     __commands) cmd___commands "$@" ;;
@@ -4752,11 +4968,11 @@ main() {
     completions) cmd_completions "$@" ;;
     current) cmd_current "$@" ;;
     list)
-      _gos_validate_cache_dir || return 1
+      _gos_preflight cache-dir || return 1
       cmd_list "$@"
       ;;
     platforms)
-      _gos_validate_cache_dir || return 1
+      _gos_preflight cache-dir || return 1
       cmd_platforms "$@"
       ;;
     status) cmd_status "$@" ;;
@@ -4766,17 +4982,7 @@ main() {
     version | --version | -V) cmd_version "$@" ;;
     help | --help | -h) cmd_help "$@" ;;
     *)
-      local suggestion suggestions
-      _gos_error "unknown command: $cmd"
-      suggestions=$(_gos_suggest_command "$cmd")
-      if [ -n "$suggestions" ]; then
-        echo "Did you mean?" >&2
-        while IFS= read -r suggestion; do
-          echo "  ${suggestion}" >&2
-        done <<EOF
-$suggestions
-EOF
-      fi
+      _gos_report_unknown_command "$cmd"
       cmd_help
       return 1
       ;;

@@ -7,7 +7,7 @@ _gos_completions() {
   local fallback_commands="latest install run each use pin check rollback uninstall prune current list platforms status which env completions doctor self-update version help"
   # gos-commands:bash:end
   local commands="$fallback_commands"
-  local cmd_index=1 cmd words="" line
+  local cmd_index=1 cmd words="" line slot
   local versions=""
 
   if command -v gos >/dev/null 2>&1; then
@@ -31,9 +31,42 @@ _gos_completions() {
       prune)
         words="--rollback --dry-run --json"
         ;;
-      install | run | each)
+      install | platforms)
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions --remote-cached 2>/dev/null || true)
+        fi
+        words="$versions"
+        [ "$cmd" = "platforms" ] && words="--json $versions"
+        ;;
+      run | each)
+        # Slot after the command is the version (or a bare -- for run's
+        # project mode); the slot after that (past an optional --) is the
+        # command to run, then its arguments as files.
+        slot=$((cmd_index + 1))
+        if [ "$COMP_CWORD" -eq "$slot" ]; then
+          if command -v gos >/dev/null 2>&1; then
+            versions=$(gos __versions --remote-cached 2>/dev/null || true)
+          fi
+          words="$versions"
+          [ "$cmd" != "run" ] || words="-- $words"
+        else
+          [ "${COMP_WORDS[$slot]:-}" = "--" ] || slot=$((slot + 1))
+          [ "${COMP_WORDS[$slot]:-}" != "--" ] || slot=$((slot + 1))
+          if [ "$COMP_CWORD" -eq "$slot" ]; then
+            while IFS= read -r line; do
+              COMPREPLY+=("$line")
+            done < <(compgen -c -- "$cur")
+          else
+            while IFS= read -r line; do
+              COMPREPLY+=("$line")
+            done < <(compgen -f -- "$cur")
+          fi
+          return
+        fi
+        ;;
+      pin)
+        if command -v gos >/dev/null 2>&1; then
+          versions=$(gos __versions 2>/dev/null || true)
         fi
         words="$versions"
         ;;
@@ -67,7 +100,7 @@ _gos_completions() {
       doctor)
         words="--fix --json"
         ;;
-      check | current | platforms | status | version)
+      check | current | status | version)
         words="--json"
         ;;
       use)
