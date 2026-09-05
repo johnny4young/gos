@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# gos-suite: skip-os=windows
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tests/lib.bash

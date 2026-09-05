@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# gos-suite: skip-os=windows
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -162,14 +163,28 @@ workflows.each do |path, config|
 end
 
 validate_syntax_files = script_array(validate_local, "syntax_files")
-validate_test_scripts = script_array(validate_local, "test_scripts")
 validate_powershell_files = script_array(validate_local, "powershell_files")
 
 tracked_shell_files = tracked_files.select { |path| path.end_with?(".bash", ".sh") }.sort
 assert(validate_syntax_files.sort == tracked_shell_files, "validate-local syntax_files must cover every tracked .bash/.sh file")
 
-tracked_test_scripts = tracked_files.select { |path| path.start_with?("tests/") && path.end_with?(".bash") && path != "tests/lib.bash" }.sort
-assert(validate_test_scripts.sort == tracked_test_scripts, "validate-local test_scripts must run every tracked Bash test except tests/lib.bash")
+# Suites are discovered by scripts/run-tests.bash from git, so the only
+# registration is the file itself; assert the runner sees every tracked suite
+# and that the per-OS rules match what CI used to hard-code.
+tracked_test_scripts = tracked_files.select { |path| path.start_with?("tests/") && path.end_with?(".bash") && !File.basename(path).start_with?("lib") }.sort
+assert(validate_local.include?("scripts/run-tests.bash"), "validate-local must run the suites through scripts/run-tests.bash")
+listed_suites = `bash scripts/run-tests.bash --list --os linux`.lines.map { |line| line.split("\t").first.strip }.sort
+assert($?.success?, "scripts/run-tests.bash --list must succeed")
+assert(listed_suites == tracked_test_scripts, "run-tests must discover every tracked suite: #{listed_suites.inspect} vs #{tracked_test_scripts.inspect}")
+windows_skips = `bash scripts/run-tests.bash --list --os windows`.lines.select { |line| line.include?("skipped") }.map { |line| line.split("\t").first.strip }
+%w[tests/features.bash tests/packaging.bash tests/homebrew-tap.bash].each do |suite|
+  next unless tracked_test_scripts.include?(suite)
+  assert(windows_skips.include?(suite), "#{suite} must declare it does not run on Windows")
+end
+macos_skips = `bash scripts/run-tests.bash --list --os macos`.lines.select { |line| line.include?("skipped") }.map { |line| line.split("\t").first.strip }
+%w[tests/packaging.bash tests/homebrew-tap.bash].each do |suite|
+  assert(macos_skips.include?(suite), "#{suite} must declare only-os=linux")
+end
 
 tracked_powershell_files = tracked_files.select { |path| path.end_with?(".ps1") }.sort
 assert(validate_powershell_files.sort == tracked_powershell_files, "validate-local powershell_files must cover every tracked PowerShell script")
@@ -437,22 +452,12 @@ command_surface_sync = step_named(smoke_steps, "Command surface sync")
 bash32 = step_named(smoke_steps, "Bash 3.2 compatibility")
 assert(bash32, "smoke job must exercise the bash 3.2 floor")
 assert(bash32["if"] == "runner.os == 'macOS'", "bash 3.2 compatibility step must run on macOS, the only runner shipping bash 3.2")
-assert(bash32["run"].to_s.include?("grep -F 'version 3.2'") && bash32["run"].to_s.include?("bash tests/features.bash"), "bash 3.2 compatibility step must verify the interpreter and run the feature suite under it")
+assert(bash32["run"].to_s.include?("grep -F 'version 3.2'") && bash32["run"].to_s.include?("bash scripts/run-tests.bash") && bash32["run"].to_s.include?("features"), "bash 3.2 compatibility step must verify the interpreter and run the feature suites under it")
 assert(command_surface_sync, "smoke job must check generated command surfaces")
 assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surfaces.bash --check"), "command surface sync must use the orchestrator")
 
 [
-  "bash tests/changelog.bash",
-  "bash tests/checksum.bash",
-  "bash tests/completions.bash",
-  "bash tests/detection.bash",
-  "bash tests/features.bash",
-  "bash tests/homebrew-tap.bash",
-  "bash tests/install-transaction.bash",
-  "bash tests/install-sh.bash",
-  "bash tests/install-ps1.bash",
-  "bash tests/packaging.bash",
-  "bash tests/windows-extract.bash",
+  "bash scripts/run-tests.bash",
   "bash scripts/sync-command-surfaces.bash --check",
   "git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --",
   "./gos.sh version",
@@ -471,6 +476,7 @@ assert(bash_syntax["run"].to_s.include?("git ls-files -z '*.sh' '*.bash' | xargs
 tracked_powershell_files.each do |path|
   assert(smoke_runs.include?(path), "smoke job PowerShell syntax must cover tracked PowerShell file #{path}")
 end
+assert(!smoke_runs.match?(%r{bash tests/}), "smoke job must run suites through scripts/run-tests.bash, not hand-listed bash tests/ commands")
 assert(smoke_runs.include?("packaging/chocolatey/tools/chocolateyInstall.ps1"), "smoke job must parse the Chocolatey PowerShell installer")
 assert(smoke_runs.include?("packaging/chocolatey/tools/chocolateyUninstall.ps1"), "smoke job must parse the Chocolatey PowerShell uninstaller")
 assert(smoke_runs.include?("packaging/windows/uninstall.ps1"), "smoke job must parse the Windows PowerShell uninstaller")

@@ -21,7 +21,7 @@
 - [ ] `bash tests/workflows.bash`
 - [ ] `bash tests/install-transaction.bash`
 - [ ] `bash tests/checksum.bash`
-- [ ] `bash tests/features.bash`
+- [ ] `scripts/run-tests.bash`
 - [ ] Other:
 
 ## Notes

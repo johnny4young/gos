@@ -79,7 +79,7 @@ Run the focused checks for your change:
 bash -n gos.sh install.sh
 bash tests/install-transaction.bash
 bash tests/checksum.bash
-bash tests/features.bash
+scripts/run-tests.bash            # every suite, in parallel; add a suite by adding a file
 bash tests/detection.bash
 ```
 

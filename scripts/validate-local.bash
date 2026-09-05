@@ -23,6 +23,9 @@ Options:
   --strict         fail when an optional tool is missing (CI parity)
   --help, -h       show this help
 
+Test suites run in parallel (scripts/run-tests.bash); set GOS_TEST_JOBS=1
+for serial output.
+
 Optional tools are run when installed unless --required-only is set:
   - shellcheck
   - shfmt
@@ -67,6 +70,7 @@ syntax_files=(
   install.sh
   completions/gos.bash
   scripts/build-windows-package.bash
+  scripts/run-tests.bash
   scripts/sync-bash-command-completions.bash
   scripts/sync-command-surfaces.bash
   scripts/sync-embedded-completions.bash
@@ -89,21 +93,6 @@ syntax_files=(
   tests/install-sh.bash
   tests/install-ps1.bash
   tests/lib.bash
-  tests/packaging.bash
-  tests/windows-extract.bash
-  tests/workflows.bash
-)
-
-test_scripts=(
-  tests/changelog.bash
-  tests/checksum.bash
-  tests/completions.bash
-  tests/detection.bash
-  tests/features.bash
-  tests/homebrew-tap.bash
-  tests/install-transaction.bash
-  tests/install-sh.bash
-  tests/install-ps1.bash
   tests/packaging.bash
   tests/windows-extract.bash
   tests/workflows.bash
@@ -229,9 +218,9 @@ run_optional shfmt -d -i 2 -ci -bn .
 run_optional shellcheck "${shellcheck_files[@]}"
 run bash -n "${syntax_files[@]}"
 
-for test_script in "${test_scripts[@]}"; do
-  run bash "$test_script"
-done
+# Every tracked tests/*.bash suite, discovered by the runner (see its header
+# for the per-OS rules); GOS_TEST_JOBS=1 runs them serially.
+run scripts/run-tests.bash --jobs "${GOS_TEST_JOBS:-auto}"
 
 run_optional zsh -n completions/gos.zsh
 run_optional fish --no-config --no-execute completions/gos.fish
