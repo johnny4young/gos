@@ -16,6 +16,10 @@ cat >"${fixture}/tests/pass.bash" <<'SUITE'
 set -euo pipefail
 printf 'PASS stdout\n'
 printf 'PASS stderr\n' >&2
+# A header inside an executable fixture is not this suite's OS metadata.
+cat <<'EMBEDDED'
+# gos-suite: only-os=windows
+EMBEDDED
 if IFS= read -r input; then
   echo 'unexpected stdin' >&2
   exit 19
@@ -105,7 +109,7 @@ pass 'runner preserves child status, all logs, stdin isolation, skips and litera
 mkdir -p "${test_root}/tools"
 cat >"${test_root}/tools/cat" <<'TOOL'
 #!/usr/bin/env bash
-case "$1" in
+case "${1:-}" in
   *."$GOS_TEST_RUNNER_FAIL_READ") exit 1 ;;
 esac
 exec "$GOS_TEST_RUNNER_REAL_CAT" "$@"

@@ -172,12 +172,17 @@ assert(tracked_shell_files.include?("scripts/run-tests.bash"), "the suite runner
 # and that the per-OS rules match what CI used to hard-code.
 tracked_test_scripts = tracked_files.select { |path| path.start_with?("tests/") && path.end_with?(".bash") && !File.basename(path).start_with?("lib") }.sort
 assert(validate_local.include?("scripts/run-tests.bash"), "validate-local must run the suites through scripts/run-tests.bash")
-listed_suites = `bash scripts/run-tests.bash --list --os linux`.lines.map { |line| line.split("\t").first.strip }.sort
+linux_listing = `bash scripts/run-tests.bash --list --os linux`
+assert($?.success?, "Linux suite discovery must succeed")
+assert(linux_listing.lines.include?("tests/runner.bash\n"), "runner regressions must run on Linux, not inherit fixture metadata")
+listed_suites = linux_listing.lines.map { |line| line.split("\t").first.strip }.sort
 assert($?.success?, "scripts/run-tests.bash --list must succeed")
 assert(listed_suites == tracked_test_scripts, "run-tests must discover every tracked suite: #{listed_suites.inspect} vs #{tracked_test_scripts.inspect}")
 windows_skips = `bash scripts/run-tests.bash --list --os windows`.lines.select { |line| line.include?("skipped") }.map { |line| line.split("\t").first.strip }
 assert($?.success?, "Windows suite discovery must succeed")
-assert(!windows_skips.include?("tests/workflows.bash"), "workflow invariants must run on Windows")
+%w[tests/workflows.bash tests/runner.bash].each do |suite|
+  assert(!windows_skips.include?(suite), "#{suite} must run on Windows")
+end
 %w[tests/side-by-side.bash tests/doctor-status.bash tests/packaging.bash tests/homebrew-tap.bash].each do |suite|
   next unless tracked_test_scripts.include?(suite)
   assert(windows_skips.include?(suite), "#{suite} must declare it does not run on Windows")

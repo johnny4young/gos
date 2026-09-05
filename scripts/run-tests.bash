@@ -116,7 +116,14 @@ discover_suites() {
 # Print the os rule that excludes the suite on the target os, or nothing.
 suite_skip_reason() {
   local path="$1" header key value token reason="" os_list os
-  header="$(sed -n 's/^# gos-suite:[[:space:]]*//p' "$path")" || return 2
+  # Only the initial comment/set preamble is metadata. Test fixtures may
+  # contain identical header text in heredocs later in the executable body.
+  header="$(awk '
+    /^# gos-suite:[[:space:]]*/ { sub(/^# gos-suite:[[:space:]]*/, ""); print; next }
+    /^[[:space:]]*($|#)/ { next }
+    /^set -[[:alpha:]]+([[:space:]]|$)/ { next }
+    { exit }
+  ' "$path")" || return 2
   [ -n "$header" ] || return 0
   for token in $header; do
     key="${token%%=*}"
