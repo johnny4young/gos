@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- Classified exit codes: `2` for invalid arguments or configuration, `3` for a failed download or feed fetch, `4` for a checksum or release that could not be verified, `5` when another gos holds the mutation lock; `1` stays the generic failure. With `--json` a failed command now prints one `{"error":{"code":...,"message":...}}` document on stdout instead of leaving it empty. Documented in `gos help`, the man page, and the README.
 - `gos --version` and `gos -V` print the gos version like `gos version`.
 - `docs/ARCHITECTURE.md` maps `gos.sh`, the command manifest and its generated surfaces, the install transaction and its crash-recovery trap, the trust boundaries, the on-disk state, and the bash 3.2 rules; CONTRIBUTING and the README point to it.
 

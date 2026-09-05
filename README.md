@@ -77,6 +77,7 @@ interaction is never a surprise.
   - [Manual Shell Config](#manual-shell-configuration)
 - [Usage](#usage)
 - [Shell Completions](#shell-completions)
+- [Exit codes](#exit-codes)
 - [Configuration](#configuration)
 - [How It Works](#how-it-works)
 - [Uninstallation](#uninstallation)
@@ -429,6 +430,21 @@ source "${XDG_CACHE_HOME:-$HOME/.cache}/gos/gos.bash"
 For Zsh and Fish setup, see [Manual Shell Configuration](#manual-shell-configuration).
 
 ---
+
+## Exit codes
+
+Every failure exits non-zero; the code tells scripts what kind:
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Generic failure (installation, activation, or an unexpected state) |
+| `2` | Invalid arguments or configuration (unknown option, bad version, unsafe `GOS_*` value) |
+| `3` | A download or feed fetch failed (network, go.dev, or the mirror unavailable) |
+| `4` | A checksum or release could not be verified (mismatch, missing metadata under `GOS_REQUIRE_CHECKSUM`, unverifiable self-update) |
+| `5` | Another gos holds the mutation lock |
+
+With `--json`, a failed command prints one `{"error":{"code":"usage|network|verification|lock|failure","message":"..."}}` document on stdout (the human message still goes to stderr), so a parser never sees an empty stdout. `gos doctor --json` keeps printing its own report and exits `1` when it finds problems.
 
 ## Configuration
 

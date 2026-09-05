@@ -1155,6 +1155,7 @@ mkdir -p "${case_dir}/cache"
 printf 'GOS-TEST-CORRUPT' >"${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
 GOS_TEST_DOWNLOAD_MODE="truncate-once" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -ne 0 ] || fail "a resumed-but-corrupt download should fail its checksum"
+assert_status 4 "$status" "checksum mismatch exit code" "$output"
 assert_contains "$output" "checksum mismatch" "corrupt resume fails verification"
 [ ! -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial" ] || fail "a checksum-mismatched partial must be discarded"
 pass "a corrupt resumable partial is discarded on a checksum mismatch"
@@ -1251,6 +1252,7 @@ mkdir -p "${case_dir}/go.gos-lock"
 printf '%s\n' "$$" >"${case_dir}/go.gos-lock/pid"
 run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -ne 0 ] || fail "install should fail when another gos lock is held"
+assert_status 5 "$status" "held lock exit code" "$output"
 assert_contains "$output" "another gos operation is running" "held lock error"
 assert_contains "$output" "${case_dir}/go.gos-lock" "held lock path"
 mkdir -p "${case_dir}/app"
@@ -1761,7 +1763,7 @@ GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" install 1.2
 assert_contains "$output" "download of go1.21.6.darwin-arm64.tar.gz failed" "offline install error"
 assert_contains "$output" "run 'gos list' to confirm the version exists" "offline install next step"
 GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" platforms 1.21.6
-[ "$status" -ne 0 ] || fail "offline platforms should fail"
+assert_status 3 "$status" "offline platforms exit code" "$output"
 assert_contains "$output" "could not fetch the Go downloads feed" "offline platforms"
 pass "network failures produce actionable errors and non-zero exits"
 
@@ -1912,6 +1914,27 @@ GOS_TEST_SHA256_FAIL=1 GOS_TEST_REQUIRE_CHECKSUM=1 run_gos "$case_dir" bash "$sc
 [ "$status" -ne 0 ] || fail "install with a failing sha256 tool must fail under GOS_REQUIRE_CHECKSUM=1: ${output}"
 assert_contains "$output" "checksum verification required but no SHA256 tool output was available" "failing sha256 tool fails closed when required"
 pass "a present-but-broken SHA256 tool is reported instead of aborting silently"
+
+# With --json a failed command gives parsers one error document on stdout,
+# carrying the exit-code class; a command that already printed its own JSON
+# (doctor reporting problems) is left alone.
+case_dir="${test_root}/json-errors"
+GOS_TEST_DOWNLOAD_MODE="fail-all" run_gos "$case_dir" bash "$script" check --json
+assert_status 3 "$status" "check --json offline exit code" "$output"
+json_error_line=$(printf '%s\n' "$output" | grep '^{"error"' | tail -n 1)
+assert_json "$json_error_line" "check --json offline error document"
+[ "$json_error_line" = '{"error":{"code":"network","message":"could not fetch latest version. Check your internet connection."}}' ] \
+  || fail "check --json offline must print the error document, got: ${output}"
+run_gos "$case_dir" bash "$script" --json list --bogus
+assert_status 2 "$status" "list --json unknown option exit code" "$output"
+assert_contains "$output" '{"error":{"code":"usage","message":"unknown option for gos list: --bogus"}}' "usage error document"
+GOS_TEST_FEED_TTL=forever run_gos "$case_dir" bash "$script" doctor --json
+[ "$status" -eq 1 ] || fail "doctor --json with problems keeps exit status 1: ${status}"
+assert_not_contains "$output" '"error":{' "doctor --json prints its own document, never the error one"
+GOS_TEST_FEED_TTL=forever run_gos "$case_dir" bash "$script" list --json
+assert_status 2 "$status" "invalid GOS_FEED_TTL is a configuration error" "$output"
+assert_contains "$output" '"code":"usage"' "configuration error document"
+pass "failures carry a classified exit code and one JSON error document"
 
 case_dir="${test_root}/check-feed-cache"
 GOS_TEST_GO_VERSION="1.20.0" run_gos "$case_dir" bash "$script" check --json
@@ -2395,6 +2418,7 @@ run_gos "$case_dir" bash "$script" platforms 1.21.6 extra
 assert_contains "$output" "unexpected argument for gos platforms" "platforms trailing argument"
 run_gos "$case_dir" bash "$script" platforms --bogus
 [ "$status" -ne 0 ] || fail "platforms with an unknown option should fail"
+assert_status 2 "$status" "platforms unknown option exit code" "$output"
 assert_contains "$output" "unknown option for gos platforms: --bogus" "platforms unknown option"
 assert_contains "$output" "Usage: gos platforms [version] [--json]" "platforms usage from the manifest"
 run_gos "$case_dir" bash "$script" which --bogus
