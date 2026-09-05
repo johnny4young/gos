@@ -51,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- Every environment variable gos, `install.sh`, and `install.ps1` read now lives in one manifest inside `gos.sh` (`gos __env`), which generates the README configuration table and the man page ENVIRONMENT section; the README gains the previously undocumented `GOS_HOME`, `GOS_WINDOWS_PACKAGE_PATH`, `GOS_WINDOWS_PACKAGE_SHA256`, `NO_COLOR`, `TERM`, and XDG variables, a Troubleshooting section, and an Uninstallation section that also covers the Go installs, cache, and completion files gos manages. SECURITY.md shows how to verify the release attestations with `gh attestation verify`.
 - `gos` with no arguments now prints a three-line status (active Go, the project's requested version, and where to go next) instead of the full help; `gos help` is unchanged. Scripts that relied on the bare command printing help should call `gos help`.
 - `gos help` groups the commands (Install & switch, Project, Inspect, Maintain, Meta); the manifest, and therefore the README table, the man page, and the completion lists, follow that order.
 - Shell completions: `gos pin` and `gos platforms` now complete versions, `gos run`/`gos each` complete the version slot, then command names, then files instead of offering Go versions for every word, and fish keeps offering commands after a leading `--json`. The test suite now checks that every flag in a command's usage is offered by all three shells.

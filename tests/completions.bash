@@ -34,6 +34,7 @@ sync_helpers=(
   scripts/sync-fish-command-completions.bash
   scripts/sync-zsh-command-completions.bash
   scripts/sync-readme-usage.bash
+  scripts/sync-readme-env.bash
   scripts/sync-man-page.bash
   scripts/sync-embedded-completions.bash
 )
@@ -193,7 +194,8 @@ shell_block() {
 # to include it: removing a JSON suffix must fail this test too.
 json_commands=$(sed -n 's/^GOS_JSON_COMMANDS="\(.*\)"$/\1/p' "$script")
 for command_name in $json_commands use; do
-  [ "$command_name" != __commands ] || continue
+  # Hidden helpers (__commands, __env, ...) have no manifest entry or help topic.
+  case "$command_name" in __*) continue ;; esac
   command_usage=$(bash "$script" help "$command_name")
   assert_contains "$command_usage" '--json' "effective ${command_name} JSON usage"
 done

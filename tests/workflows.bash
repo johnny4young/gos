@@ -727,6 +727,24 @@ map_sections = gos_sh.scan(/^#   (Helpers|Go downloads feed|Commands|Entrypoint)
 real_sections = gos_sh.scan(/^# [^A-Za-z\s]+ ([A-Za-z ]+?) [^A-Za-z\s]+$/).flatten.map(&:strip)
 assert(map_sections == real_sections, "gos.sh section map #{map_sections.inspect} must match the section headers #{real_sections.inspect}")
 
+# Every user-facing variable gos.sh reads must be in the environment manifest
+# (gos __env), which generates the README table and the man page ENVIRONMENT
+# section. Internal state variables are recognised by prefix.
+env_manifest = `bash gos.sh __env`.lines.map { |line| line.split("|").first }
+assert($?.success? && !env_manifest.empty?, "gos __env must print the environment manifest")
+internal_prefixes = %w[GOS_AUTO_ GOS_DOCTOR_ GOS_EXIT_ GOS_FEED_JSON GOS_FEED_PARSER GOS_LAST_ERROR GOS_OUTPUT_JSON GOS_PS_ GOS_SUDO_TARGET GOS_ACTIVATION_BACKUP GOS_COMPLETED_PARTIAL GOS_TMP_DIR GOS_LOCK_DIR GOS_RELEASE_BASE_URL GOS_VERSION GOS_JSON_COMMANDS GOS_PROGRESS_FD GOS_VERSIONS_MODE_EXAMPLE GOS_TEST_]
+gos_sh.scan(/\$\{(GOS_[A-Z_]+|NO_COLOR|TERM|XDG_[A-Z_]+|GOTOOLCHAIN)[:}-]/).flatten.uniq.each do |name|
+  next if internal_prefixes.any? { |prefix| name.start_with?(prefix) }
+  assert(env_manifest.include?(name), "gos.sh reads #{name} but _gos_env_manifest does not document it")
+end
+%w[GOS_BIN_DIR GOS_HOME GOS_WINDOWS_PACKAGE_PATH GOS_WINDOWS_PACKAGE_SHA256].each do |name|
+  assert(env_manifest.include?(name), "installer variable #{name} must be in _gos_env_manifest")
+end
+assert(readme.include?("<!-- gos-env:begin -->"), "README configuration table must be generated from gos __env")
+assert(readme.include?("## Troubleshooting"), "README must keep a Troubleshooting section")
+assert(readme.include?("gos prune --rollback                 # cached archives"), "README uninstall must cover what gos managed, not only the command")
+assert(security.include?("gh attestation verify gos.sh --repo johnny4young/gos"), "SECURITY.md must show how to verify the release attestations")
+
 assert(!gos_sh.include?("may not exist"),
   "download errors must give a next step (retry / gos list), not guess 'may not exist'")
 

@@ -85,6 +85,7 @@ scripts/sync-bash-command-completions.bash "$mode"
 scripts/sync-fish-command-completions.bash "$mode"
 scripts/sync-zsh-command-completions.bash "$mode"
 scripts/sync-readme-usage.bash "$mode"
+scripts/sync-readme-env.bash "$mode"
 scripts/sync-man-page.bash "$mode"
 scripts/sync-embedded-completions.bash "$mode"
 

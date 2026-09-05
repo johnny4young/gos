@@ -77,25 +77,43 @@ nothing but \fBcurl\fR (or \fBwget\fR) and \fBbash\fR.
 .SH ENVIRONMENT
 .TP
 .B GOS_INSTALL_DIR
-\&Where Go is installed (default /usr/local/go). Override to install without sudo.
+\&Where Go gets installed. Override to install without sudo. Path basename must contain "go". Default: /usr/local/go.
 .TP
 .B GOS_VERSIONS_DIR
-\&Opt-in side-by-side layout: each version installs under its own directory and the install dir becomes a symlink to the active one.
+\&Opt-in side-by-side layout (e.g. $HOME/.gos/versions). Each version installs to $GOS_VERSIONS_DIR/go<version> and GOS_INSTALL_DIR becomes a symlink to the active one, so switching is instant. The versions root must not be /, equal to, or inside GOS_INSTALL_DIR. Requires symlink support (macOS, Linux, WSL). Default: unset.
 .TP
 .B GOS_CACHE_DIR
-\&Where verified archives and the discovery feed cache are stored.
+\&Where verified Go archives, resumable partial downloads, and discovery-only feed metadata are cached. Must be an absolute path. Clear it with gos prune. Default: $XDG_CACHE_HOME/gos or $HOME/.cache/gos.
 .TP
 .B GOS_DOWNLOAD_MIRROR
-\&HTTPS base URL to download archives from; checksums are still verified against go.dev.
+\&HTTPS base URL to download Go archives from (e.g. https://golang.google.cn/dl behind restrictive networks). Checksums are still resolved from go.dev, and mirror downloads fail closed when they cannot be verified. Default: unset.
 .TP
 .B GOS_REQUIRE_CHECKSUM
-\&Set to 1 to fail closed when a checksum cannot be verified, or feed to additionally require the digest to come from the go.dev feed.
+\&Set to 1 to abort installs when checksum metadata or local SHA256 calculation is unavailable. Set to feed to additionally require the digest to come from the go.dev downloads feed (cross-origin), rejecting the same-origin .sha256 fallback. Honored by both gos and install.sh (install.sh treats feed like 1). Default: unset.
 .TP
 .B GOS_FEED_TTL
-\&Seconds to reuse the on-disk discovery feed cache (default 600; 0 disables it).
+\&Non-negative integer seconds that discovery commands (list, platforms, check, bare-minor resolution, shell completion suggestions) may reuse cached feed metadata. Set to 0 to disable. Invalid values fail before remote discovery and are reported by gos doctor; checksum verification always fetches fresh metadata. Default: 600.
+.TP
+.B GOS_NO_COLOR
+\&Set to 1 to disable interactive color and symbol styling. Default: unset.
 .TP
 .B NO_COLOR
-\&When set, disables colored and symbol output (also GOS_NO_COLOR=1).
+\&The standard no-color convention: when set to anything, color and symbols are disabled (same as GOS_NO_COLOR=1). Default: unset.
+.TP
+.B TERM
+\&TERM=dumb disables color and symbols; output is never colored when it is not a terminal or under \-\-json. Default: from the terminal.
+.TP
+.B GOTOOLCHAIN
+\&Read only by gos doctor, which explains how a per-module toolchain composes with the go gos manages on PATH. Default: unset.
+.TP
+.B XDG_CACHE_HOME
+\&Base of the default GOS_CACHE_DIR. Default: $HOME/.cache.
+.TP
+.B XDG_DATA_HOME
+\&Where gos completions bash \-\-install and zsh \-\-install write their files (bash-completion/completions/gos, zsh/site-functions/_gos). Default: $HOME/.local/share.
+.TP
+.B XDG_CONFIG_HOME
+\&Where gos completions fish \-\-install writes fish/completions/gos.fish. Default: $HOME/.config.
 .SH EXIT STATUS
 0 on success, 1 on a generic failure, 2 for invalid arguments or configuration, 3 when a download or feed fetch failed, 4 when a checksum or release could not be verified, and 5 when another gos holds the mutation lock. With \fB\-\-json\fR a failed command prints one {"error":{"code":...,"message":...}} document on standard output. The doctor command keeps its diagnostic report and exits 1 when it reports problems; invalid doctor arguments still produce a usage error document.
 .SH SEE ALSO

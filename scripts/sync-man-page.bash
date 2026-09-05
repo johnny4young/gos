@@ -72,18 +72,17 @@ commands.each do |command|
   lines << "\\&#{man(command.fetch(:description))}"
 end
 lines << ".SH ENVIRONMENT"
-[
-  ["GOS_INSTALL_DIR", "Where Go is installed (default /usr/local/go). Override to install without sudo."],
-  ["GOS_VERSIONS_DIR", "Opt-in side-by-side layout: each version installs under its own directory and the install dir becomes a symlink to the active one."],
-  ["GOS_CACHE_DIR", "Where verified archives and the discovery feed cache are stored."],
-  ["GOS_DOWNLOAD_MIRROR", "HTTPS base URL to download archives from; checksums are still verified against go.dev."],
-  ["GOS_REQUIRE_CHECKSUM", "Set to 1 to fail closed when a checksum cannot be verified, or feed to additionally require the digest to come from the go.dev feed."],
-  ["GOS_FEED_TTL", "Seconds to reuse the on-disk discovery feed cache (default 600; 0 disables it)."],
-  ["NO_COLOR", "When set, disables colored and symbol output (also GOS_NO_COLOR=1)."],
-].each do |name, description|
+env_details = `bash gos.sh __env 2>&1`
+fail!("gos __env failed:\n#{env_details}") unless $?.success?
+env_details.lines.each_with_index do |line, index|
+  fields = line.chomp.split("|", 4)
+  fail!("invalid environment manifest line #{index + 1}: #{line.inspect}") unless fields.length == 4
+  name, scope, default, description = fields
+  next unless scope == "gos"
+
   lines << ".TP"
   lines << ".B #{name}"
-  lines << "\\&#{man(description)}"
+  lines << "\\&#{man(description)} Default: #{man(default)}."
 end
 lines << ".SH EXIT STATUS"
 lines << "0 on success, 1 on a generic failure, 2 for invalid arguments or configuration, 3 when a download or feed fetch failed, 4 when a checksum or release could not be verified, and 5 when another gos holds the mutation lock. With \\fB\\-\\-json\\fR a failed command prints one {\"error\":{\"code\":...,\"message\":...}} document on standard output. The doctor command keeps its diagnostic report and exits 1 when it reports problems; invalid doctor arguments still produce a usage error document."
