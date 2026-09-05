@@ -65,38 +65,14 @@ esac
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-syntax_files=(
-  gos.sh
-  install.sh
-  completions/gos.bash
-  scripts/build-windows-package.bash
-  scripts/run-tests.bash
-  scripts/sync-bash-command-completions.bash
-  scripts/sync-command-surfaces.bash
-  scripts/sync-embedded-completions.bash
-  scripts/sync-fish-command-completions.bash
-  scripts/sync-man-page.bash
-  scripts/sync-readme-usage.bash
-  scripts/sync-zsh-command-completions.bash
-  scripts/update-aur.bash
-  scripts/update-changelog.bash
-  scripts/update-homebrew-tap.sh
-  scripts/update-packaging.bash
-  scripts/validate-local.bash
-  tests/changelog.bash
-  tests/checksum.bash
-  tests/completions.bash
-  tests/detection.bash
-  tests/features.bash
-  tests/homebrew-tap.bash
-  tests/install-transaction.bash
-  tests/install-sh.bash
-  tests/install-ps1.bash
-  tests/lib.bash
-  tests/packaging.bash
-  tests/windows-extract.bash
-  tests/workflows.bash
-)
+# Every tracked shell file, from git like CI's syntax gate, so a new script
+# or suite needs no registration here either.
+syntax_files=()
+while IFS= read -r tracked_shell_file; do
+  syntax_files=(${syntax_files[@]:+"${syntax_files[@]}"} "$tracked_shell_file")
+done <<EOF
+$(git ls-files '*.sh' '*.bash')
+EOF
 
 shellcheck_files=(
   gos.sh

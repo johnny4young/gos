@@ -109,7 +109,7 @@ jobs:
           ln -s /bin/bash "${RUNNER_TEMP}/bash32/bash"
           export PATH="${RUNNER_TEMP}/bash32:${PATH}"
           bash --version | head -n 1 | grep -F 'version 3.2'
-          bash scripts/run-tests.bash --jobs 2 features install-transaction checksum
+          bash scripts/run-tests.bash --jobs 2 unit-versions cli-readonly install-cache side-by-side install-transaction checksum
 
       - name: PowerShell syntax
         if: runner.os == 'Windows'
