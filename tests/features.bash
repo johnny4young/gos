@@ -1933,6 +1933,117 @@ GOS_TEST_SHA256_FAIL=1 GOS_TEST_REQUIRE_CHECKSUM=1 run_gos "$case_dir" bash "$sc
 assert_contains "$output" "checksum verification required but no SHA256 tool output was available" "failing sha256 tool fails closed when required"
 pass "a present-but-broken SHA256 tool is reported instead of aborting silently"
 
+# Check the whole stdout stream, not a grep-selected fragment: jq accepts
+# concatenated JSON documents, but the CLI contract permits exactly one line.
+assert_single_json() {
+  assert_json "$output" "$1"
+  [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 1 ] \
+    || fail "$1: expected one JSON document, got: ${output}"
+}
+
+case_dir="${test_root}/contract-regressions"
+mkdir -p "$case_dir"
+for args in 'list' 'list --minor' 'list --json' '--json list' 'list --minor --json' '--json list --minor'; do
+  # Intentional word splitting: all fixture arguments are fixed literal flags.
+  # shellcheck disable=SC2086
+  GOS_TEST_STDERR_FILE="${case_dir}/stderr" GOS_TEST_DOWNLOAD_MODE=fail-all run_gos "$case_dir" bash "$script" $args
+  assert_status 3 "$status" "offline ${args}" "$output"
+  assert_contains "$(cat "${case_dir}/stderr")" "could not fetch the Go version list" "offline list diagnostic"
+  case "$args" in
+    *--json*)
+      assert_single_json "offline ${args}"
+      assert_contains "$output" '"code":"network"' "offline list classification"
+      ;;
+    *) assert_not_contains "$output" '"error":' "plain list has no JSON" ;;
+  esac
+done
+pass "every offline list form preserves its network class and JSON stream"
+
+for args in 'list --bogus --json' 'version --bogus --json' '-V --bogus --json' '--version --bogus --json' 'doctor --bogus --json' 'use --bogus --print --json'; do
+  # shellcheck disable=SC2086
+  GOS_TEST_STDERR_FILE="${case_dir}/stderr" run_gos "$case_dir" bash "$script" $args
+  assert_status 2 "$status" "trailing JSON ${args}" "$output"
+  assert_single_json "trailing JSON ${args}"
+  assert_contains "$output" '"code":"usage"' "argument JSON classification"
+done
+for args in 'list --json' 'check --json' 'platforms --json' 'prune --json' 'use --print --json'; do
+  # shellcheck disable=SC2086
+  GOS_TEST_STDERR_FILE="${case_dir}/stderr" GOS_TEST_CACHE_DIR=relative/cache run_gos "$case_dir" bash "$script" $args
+  assert_status 2 "$status" "preflight JSON ${args}" "$output"
+  assert_single_json "preflight JSON ${args}"
+  assert_contains "$output" '"code":"usage"' "preflight JSON classification"
+  [ ! -s "${case_dir}/urls.log" ] || fail "invalid cache must not access the network"
+done
+GOS_TEST_STDERR_FILE="${case_dir}/stderr" GOS_TEST_INSTALL_DIR=relative/go run_gos "$case_dir" bash "$script" env --json
+assert_status 2 "$status" "env preflight JSON" "$output"
+assert_single_json "env preflight JSON"
+GOS_TEST_STDERR_FILE="${case_dir}/stderr" run_gos "$case_dir" bash "$script" which 1.21.6 --json
+assert_status 2 "$status" "missing versions mode JSON" "$output"
+assert_single_json "missing versions mode JSON"
+GOS_TEST_STDERR_FILE="${case_dir}/stderr" GOS_TEST_VERSIONS_DIR="${case_dir}/versions" run_gos "$case_dir" bash "$script" which 1.21.6 --json
+assert_status 1 "$status" "generic JSON failure" "$output"
+assert_single_json "generic JSON failure"
+assert_contains "$output" '"code":"failure"' "generic JSON class"
+# A raw rm failure has no _gos_error call. It must still produce one generic
+# JSON error instead of silent stdout, while preserving the archive.
+mkdir -p "${case_dir}/bin" "${case_dir}/cache"
+printf archive >"${case_dir}/cache/go1.21.6.test.tar.gz"
+cat >"${case_dir}/bin/rm" <<'FAKE_RM'
+#!/usr/bin/env bash
+printf 'rm: injected permission error\n' >&2
+exit 1
+FAKE_RM
+chmod +x "${case_dir}/bin/rm"
+GOS_TEST_STDERR_FILE="${case_dir}/stderr" run_gos "$case_dir" env PATH="${case_dir}/bin:${fake_bin}:${original_path}" bash "$script" prune --json
+assert_status 1 "$status" "raw external failure JSON" "$output"
+assert_single_json "raw external failure JSON"
+assert_contains "$output" '"code":"failure"' "raw external failure classification"
+assert_contains "$(cat "${case_dir}/stderr")" 'rm: injected permission error' "original external diagnostic"
+[ -f "${case_dir}/cache/go1.21.6.test.tar.gz" ] || fail "failing rm removed the archive"
+rm -r "${case_dir:?}/bin" "${case_dir:?}/cache"
+pass "JSON flags work before preflight and regardless of invalid argument order"
+
+for args in 'doctor --fix --json' '--json doctor --fix' 'doctor --json' 'doctor --fix'; do
+  # shellcheck disable=SC2086
+  GOS_TEST_STDERR_FILE="${case_dir}/stderr" GOS_TEST_INSTALL_DIR=relative/go run_gos "$case_dir" bash "$script" $args
+  assert_status 1 "$status" "invalid install ${args}" "$output"
+  assert_not_contains "$output" '"error":{' "doctor keeps its report"
+  case "$args" in
+    *--json*)
+      assert_single_json "invalid install ${args}"
+      assert_contains "$output" '"status":"problem"' "doctor diagnostic status"
+      ;;
+  esac
+done
+pass "doctor probes never leak classifications or append an error document"
+
+for args in 'install' 'run' 'run --' 'run 1.21.6' 'run 1.21.6 --' 'each' 'each 1.21.6' 'each 1.21.6 --' 'uninstall' 'uninstall --inactive 1.21.6' 'completions'; do
+  # shellcheck disable=SC2086
+  run_gos "$case_dir" bash "$script" $args
+  assert_status 2 "$status" "missing/conflicting operands ${args}" "$output"
+  [ ! -s "${case_dir}/urls.log" ] || fail "invalid arguments must not access the network"
+  [ ! -e "${case_dir}/go.gos-lock" ] || fail "invalid arguments left a lock behind"
+done
+# A file obstructs mkdir without representing another gos operation. This is
+# deterministic across hosts, unlike chmod-based permission tests as root.
+printf 'keep me' >"${case_dir}/go.gos-lock"
+run_gos "$case_dir" bash "$script" install 1.21.6
+assert_status 1 "$status" "lock creation failure" "$output"
+assert_contains "$output" "could not create gos lock" "lock creation diagnostic"
+[ "$(cat "${case_dir}/go.gos-lock")" = 'keep me' ] || fail "lock error modified the obstruction"
+rm "${case_dir}/go.gos-lock"
+pass "invalid operands are usage failures while lock creation errors stay generic"
+
+pushd "$case_dir" >/dev/null
+GOS_TEST_GO_BROKEN=1 run_gos "$case_dir" bash "$script"
+popd >/dev/null
+assert_status 0 "$status" "bare gos without project or active Go" "$output"
+assert_contains "$output" 'Active:  none' "bare gos no active version"
+assert_contains "$output" 'Project: none found from' "bare gos no project"
+[ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 3 ] || fail "bare gos must print three lines"
+[ ! -s "${case_dir}/urls.log" ] || fail "bare gos must remain offline"
+pass "bare gos without a project still prints the three-line offline status"
+
 # With --json a failed command gives parsers one error document on stdout,
 # carrying the exit-code class; a command that already printed its own JSON
 # (doctor reporting problems) is left alone.
@@ -2815,6 +2926,21 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
 
   GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 bash -c 'exit 7'
   [ "$status" -eq 7 ] || fail "run should propagate command exit status 7, got ${status}. Output: ${output}"
+  for child_status in 0 1 2 3 4 5 7 130 143; do
+    # shellcheck disable=SC2016 # Positional parameters belong to the child shell.
+    GOS_TEST_STDERR_FILE="${case_dir}/child.err" GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 -- bash -c 'printf "%s\n" "$1"; exit "$2"' _ --json "$child_status"
+    assert_status "$child_status" "$status" "run child exit ${child_status}" "$output"
+    [ "$output" = '--json' ] || fail "run consumed the child JSON flag or changed stdout: ${output}"
+  done
+  # shellcheck disable=SC2016 # Positional parameters belong to the child shell.
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each 1.20.0,1.21.6 -- bash -c 'printf "%s\n" "$1"; exit 4' _ --json
+  assert_status 1 "$status" "each child verification-like status" "$output"
+  assert_contains "$output" '--json' "each forwards child JSON argument"
+  assert_contains "$output" '2/2 version(s) failed.' "each runs all children after a failure"
+  assert_not_contains "$output" '"error":{' "each never appends JSON to child stdout"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" GOS_TEST_DOWNLOAD_MODE=fail-all run_gos "$case_dir" bash "$script" each 1.19.8,1.18.9 -- go version
+  assert_status 1 "$status" "each failed installs keep aggregate status" "$output"
+  assert_contains "$output" '2/2 version(s) failed.' "each continues after failed installations"
   pass "run uses installed side-by-side versions without switching and propagates exit codes"
 
   GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.21.6

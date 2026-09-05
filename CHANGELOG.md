@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Classified failures now survive all list output modes; doctor probes keep a single report, missing operands return usage errors, and lock creation failures remain generic. Trailing JSON flags are honored even for early argument/configuration failures without consuming child command flags. Bare status includes a Project line when no manifest exists.
+
 - Crash-residue enumeration preserves complete paths, including spaces, glob characters, backslashes and newline suffixes: `status`/`doctor` count each backup once, and `prune --rollback` cannot split a backup path into unrelated removal targets.
 - `run` completions offer bare `--` for project mode in all three shells; Fish and Zsh delegate the nested command and its arguments correctly with or without an explicit version/separator. Fish no longer treats nested command arguments as gos subcommands.
 - Help, argument-error usage, command metadata, README and man page share effective JSON option usage, including the conditional `use --print --json` form. Feed parser selection is initialized in the parent shell so subsequent queries reuse it.

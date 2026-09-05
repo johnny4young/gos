@@ -43,6 +43,7 @@ while [ -n "$GOS_VERSIONS_DIR" ] && [ "$GOS_VERSIONS_DIR" != "/" ] && [ "$GOS_VE
 done
 GOS_RELEASE_BASE_URL="https://github.com/johnny4young/gos/releases/latest/download"
 GOS_OUTPUT_JSON=0
+GOS_JSON_REPORT_EMITTED=0
 GOS_TMP_DIR=""
 GOS_COMPLETED_PARTIAL=""
 GOS_LOCK_DIR=""
@@ -103,9 +104,11 @@ _gos_finish_status() {
     status="$GOS_EXIT_CODE"
   fi
   if [ "$status" -ne 0 ] && [ "$status" -ne 130 ] && [ "$status" -ne 143 ] \
-    && _gos_json_enabled && [ -n "$GOS_LAST_ERROR" ]; then
+    && _gos_json_enabled && [ "$GOS_JSON_REPORT_EMITTED" -eq 0 ]; then
+    # External commands may fail without going through _gos_error. Keep the
+    # machine contract in that case too; their diagnostic remains on stderr.
     printf '{"error":{"code":%s,"message":%s}}\n' \
-      "$(_gos_json_string "${GOS_EXIT_CLASS:-failure}")" "$(_gos_json_string "$GOS_LAST_ERROR")"
+      "$(_gos_json_string "${GOS_EXIT_CLASS:-failure}")" "$(_gos_json_string "${GOS_LAST_ERROR:-command failed with exit status ${status}.}")"
   fi
   [ "$status" -eq "$1" ] || exit "$status"
 }
@@ -282,6 +285,14 @@ _gos_warning() {
   else
     printf 'Warning: %s\n' "$message" >&2
   fi
+}
+
+# Recognize output mode without validating or consuming the arguments.
+_gos_detect_json_args() {
+  local arg
+  for arg in "$@"; do
+    if [ "$arg" = "--json" ]; then GOS_OUTPUT_JSON=1; fi
+  done
 }
 
 # Parse the flags shared by commands that take only [--json]. Unknown arguments
@@ -1303,7 +1314,7 @@ _gos_acquire_lock() {
     _gos_report_existing_lock "$lock_dir"
     return 1
   else
-    _gos_fail lock "could not create gos lock at ${lock_dir}."
+    _gos_error "could not create gos lock at ${lock_dir}."
     return 1
   fi
 
@@ -2327,6 +2338,7 @@ cmd_check() {
 cmd_install() {
   local version="${1:-}"
   if [ -z "$version" ]; then
+    _gos_fail usage "gos install requires a version."
     _gos_usage install "e.g. gos install 1.26.1"
     return 1
   fi
@@ -2432,6 +2444,7 @@ cmd_run() {
   local version="${1:-}" project_resolved project_source
 
   if [ -z "$version" ]; then
+    _gos_fail usage "gos run requires a version or -- and a command."
     _gos_usage run
     return 1
   fi
@@ -2444,6 +2457,11 @@ cmd_run() {
   # surrounding project requests, resolved exactly like gos use. The notice
   # goes to stderr so the command's stdout stays clean for pipes.
   if [ "$version" = "--" ]; then
+    if [ "$#" -eq 0 ]; then
+      _gos_fail usage "gos run requires a command."
+      _gos_usage run
+      return 1
+    fi
     if ! project_resolved=$(_gos_resolve_project_version "$PWD"); then
       _gos_error "no version given and no .go-version or go.mod found from ${PWD} upward."
       _gos_usage run
@@ -2457,6 +2475,7 @@ cmd_run() {
     shift
   fi
   if [ "$#" -eq 0 ]; then
+    _gos_fail usage "gos run requires a command."
     _gos_usage run
     return 1
   fi
@@ -2507,10 +2526,12 @@ cmd_each() {
   done
 
   if [ -z "$versions_arg" ]; then
+    _gos_fail usage "gos each requires a comma-separated version list."
     _gos_usage each
     return 1
   fi
   if [ "${#command[@]}" -eq 0 ]; then
+    _gos_fail usage "gos each requires a command."
     _gos_usage each
     return 1
   fi
@@ -2799,6 +2820,14 @@ EOF
 
   _gos_validate_feed_ttl || return 1
 
+  # Classify fetch failures in the parent, before JSON command substitutions
+  # or the --minor pipeline. Their children reuse this memoized feed.
+  if ! _gos_json_enabled; then echo "Fetching available Go versions..."; fi
+  if ! _gos_feed_json true true >/dev/null; then
+    _gos_fail network "could not fetch the Go version list. Check your internet connection."
+    return 1
+  fi
+
   if _gos_json_enabled; then
     # Resolve the list before emitting JSON so failures never print a
     # truncated document.
@@ -2810,7 +2839,6 @@ EOF
     printf '%s\n' "$versions" | _gos_json_array_from_lines
     printf '}\n'
   else
-    echo "Fetching available Go versions..."
     if [ "$minor_only" = "true" ]; then
       _gos_list_versions | _gos_newest_per_minor
     else
@@ -3319,10 +3347,11 @@ cmd_uninstall() {
   done
 
   if [ "$inactive" = "true" ] && [ -n "$version" ]; then
-    _gos_error "--inactive removes every inactive version and cannot be combined with one."
+    _gos_fail usage "--inactive removes every inactive version and cannot be combined with one."
     return 1
   fi
   if [ -z "$version" ] && [ "$inactive" != "true" ]; then
+    _gos_fail usage "gos uninstall requires a version or --inactive."
     _gos_usage uninstall "e.g. gos uninstall 1.24.0"
     return 1
   fi
@@ -3938,7 +3967,9 @@ _gos_doctor_apply_fixes() {
   local cache_dir_valid="$1" install_parent path_setup
   install_parent=$(_gos_dirname "$GOS_INSTALL_DIR")
 
-  if ! _gos_validate_install_dir "$GOS_INSTALL_DIR" >/dev/null 2>&1; then
+  # This is a handled probe, not the command's failure. Isolate its error
+  # state just like the other doctor validators captured in substitutions.
+  if ! (_gos_validate_install_dir "$GOS_INSTALL_DIR") >/dev/null 2>&1; then
     _gos_warning "GOS_INSTALL_DIR is invalid; not creating its parent."
   elif [ ! -d "$install_parent" ]; then
     if _gos_ensure_dir "$install_parent"; then
@@ -4175,6 +4206,7 @@ cmd_doctor() {
       _gos_json_string "$GOS_DOCTOR_PATH_SETUP"
     fi
     printf '}\n'
+    GOS_JSON_REPORT_EMITTED=1
   elif [ "$doctor_fix" = "true" ]; then
     if [ -n "$GOS_DOCTOR_FIXED_LINES" ]; then
       while IFS= read -r arg; do
@@ -4607,6 +4639,7 @@ cmd_completions() {
   done
 
   if [ -z "$shell_name" ]; then
+    _gos_fail usage "gos completions requires a shell."
     _gos_usage completions
     return 1
   fi
@@ -4764,7 +4797,8 @@ EXIT CODES:
   0 success  1 failure  2 invalid arguments or configuration
   3 download or feed fetch failed  4 checksum or release not verifiable
   5 another gos holds the lock  (with --json, a failed command prints
-  {"error":{"code":...,"message":...}} on stdout)
+  {"error":{"code":...,"message":...}} on stdout; doctor --json keeps
+  its diagnostic report and exits 1 when it reports problems)
 
 EXAMPLES:
   gos latest
@@ -4978,6 +5012,8 @@ _gos_brief_status() {
     version="${version#go}"
     source="${resolved#*|}"
     printf 'Project: go%s (%s)\n' "$version" "$source"
+  else
+    printf 'Project: none found from %s upward\n' "$PWD"
   fi
   printf "Run 'gos help' for the commands and 'gos status' for the full dashboard.\n"
 }
@@ -5004,6 +5040,18 @@ main() {
 
   local cmd="${1:-help}"
   shift || true
+
+  # Detect JSON for supported commands before preflight or an earlier invalid
+  # argument can fail. Never scan run/each: their remaining arguments belong
+  # to the child command, whose --json must pass through unchanged.
+  case "$cmd" in
+    use | --version | -V) _gos_detect_json_args "$@" ;;
+    *)
+      case "$GOS_JSON_COMMANDS" in
+        *" ${cmd} "*) _gos_detect_json_args "$@" ;;
+      esac
+      ;;
+  esac
 
   if [ "$leading_json" = "true" ]; then
     if [ "$cmd" = "use" ]; then

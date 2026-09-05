@@ -153,6 +153,8 @@ commands_json="$(bash "$script" __commands --json)"
 assert_json "$commands_json" "__commands --json"
 assert_contains "$commands_json" '"commands":["latest","install","rollback","uninstall","use","pin","run","each","check","current","list","platforms","status","which","prune","doctor","env","completions","self-update","version","help"]' "__commands json"
 commands_details="$(bash "$script" __commands --details)"
+printf '%s\n' "$commands_details" | awk -F'|' 'NF != 3 { exit 1 }' \
+  || fail "__commands --details must retain exactly three fields for existing consumers"
 assert_contains "$commands_details" "latest|latest|Install the latest stable Go version" "__commands details latest"
 assert_contains "$commands_details" "self-update|self-update|Update gos itself to the latest verified release" "__commands details self-update"
 
@@ -220,6 +222,8 @@ assert_not_contains "$help_output" "__commands" "help hides internal command man
 # Group headers sit at column 0 between the indented entries.
 assert_contains "$help_output" $'\nInstall & switch\n  latest' "help groups commands"
 assert_contains "$help_output" $'\nMeta\n  version' "help last group"
+assert_contains "$help_output" 'doctor --json keeps' "help documents the doctor JSON exception"
+assert_file_contains "${repo_root}/docs/gos.1" 'The doctor command keeps its diagnostic report'
 help_commands="$(
   printf '%s\n' "$help_output" | awk '
     $0 == "COMMANDS:" { in_commands = 1; next }

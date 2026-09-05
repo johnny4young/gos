@@ -293,7 +293,7 @@ exec fish          # for Fish
 
 ## Usage
 
-Bare `gos` prints a three-line status (active Go, project version, next step); `gos help` lists every command by group and `gos help <command>` shows one usage line.
+Bare `gos` prints a three-line status (active Go, project version or no manifest found, next step); `gos help` lists every command by group and `gos help <command>` shows one usage line.
 
 <!-- gos-commands:begin -->
 | Command | Description |
@@ -446,7 +446,7 @@ Every failure exits non-zero; the code tells scripts what kind:
 | `4` | A checksum or release could not be verified (mismatch, missing metadata under `GOS_REQUIRE_CHECKSUM`, unverifiable self-update) |
 | `5` | Another gos holds the mutation lock |
 
-With `--json`, a failed command prints one `{"error":{"code":"usage|network|verification|lock|failure","message":"..."}}` document on stdout (the human message still goes to stderr), so a parser never sees an empty stdout. `gos doctor --json` keeps printing its own report and exits `1` when it finds problems.
+With `--json`, a failed command prints one `{"error":{"code":"usage|network|verification|lock|failure","message":"..."}}` document on stdout (the human message still goes to stderr), so a parser never sees an empty stdout. `gos doctor --json` keeps printing its own report and exits `1` when it finds problems; invalid doctor arguments still produce a usage error document. JSON flags on supported commands are recognized before argument/configuration validation regardless of flag order. `gos run` passes through its child command's exit status and arguments (including the child's `--json`); `gos each` keeps exit `1` when any version fails.
 
 ## Configuration
 
