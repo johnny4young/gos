@@ -114,6 +114,12 @@ function Assert-Sha256 {
   )
 
   if ([string]::IsNullOrWhiteSpace($ExpectedSha256) -or $ExpectedSha256 -eq 'UPDATE_ON_RELEASE') {
+    # Same policy knob as install.sh and gos: GOS_REQUIRE_CHECKSUM=1 (or feed)
+    # refuses to install anything that cannot be verified.
+    $policy = $env:GOS_REQUIRE_CHECKSUM
+    if ($policy -eq '1' -or $policy -eq 'feed') {
+      throw 'GOS_REQUIRE_CHECKSUM is set but no checksum is available for this package: use the GitHub release install.ps1 asset, or pass -ExpectedSha256 with -PackagePath.'
+    }
     Write-Warning 'No release checksum configured, skipping integrity check.'
     Write-Warning 'For a verified install use the GitHub release install.ps1 asset, or pass -ExpectedSha256 when installing from -PackagePath.'
     return

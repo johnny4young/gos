@@ -25,5 +25,19 @@ if (-not (Test-Path -LiteralPath $gosPath) -or -not (Test-Path -LiteralPath $cmd
 
 Install-BinFile -Name 'gos' -Path $cmdPath
 
+# gos runs through Git for Windows' bash. Warn now instead of letting the
+# first `gos` call fail; the WSL launcher in System32 does not count.
+$gitBash = @(
+  (Join-Path $env:ProgramFiles 'Git\bin\bash.exe'),
+  (Join-Path ${env:ProgramFiles(x86)} 'Git\bin\bash.exe'),
+  (Join-Path $env:LocalAppData 'Programs\Git\bin\bash.exe')
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+if (-not $gitBash) {
+  $onPath = Get-Command bash.exe -All -ErrorAction SilentlyContinue | Where-Object { $_.Source -and ($_.Source -notmatch '\\System32\\') } | Select-Object -First 1
+  if (-not $onPath) {
+    Write-Warning 'Git Bash was not found. Install Git for Windows (choco install git) or use WSL before running gos.'
+  }
+}
+
 Write-Host "gos installed to $gosPath"
 Write-Host "Run 'gos help' inside Git Bash, or use the Chocolatey shim when Git Bash is on PATH."

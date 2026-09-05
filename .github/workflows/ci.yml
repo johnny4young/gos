@@ -117,6 +117,14 @@ jobs:
           # shellcheck disable=SC2016 # PowerShell, not Bash, expands these variables.
           powershell -NoProfile -ExecutionPolicy Bypass -Command '$files = @("install.ps1", "packaging/chocolatey/tools/chocolateyInstall.ps1", "packaging/chocolatey/tools/chocolateyUninstall.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1"); foreach ($file in $files) { $errors = $null; $tokens = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { $errors | Format-List; exit 1 } }'
 
+      # Static analysis of the PowerShell files beyond the AST parse above;
+      # Error severity only, so style rules cannot turn the job red.
+      - name: PSScriptAnalyzer
+        if: runner.os == 'Windows'
+        run: |
+          # shellcheck disable=SC2016 # PowerShell, not Bash, expands these variables.
+          powershell -NoProfile -ExecutionPolicy Bypass -Command '$files = @("install.ps1", "packaging/chocolatey/tools/chocolateyInstall.ps1", "packaging/chocolatey/tools/chocolateyUninstall.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1"); Import-Module PSScriptAnalyzer -ErrorAction Stop; $findings = Invoke-ScriptAnalyzer -Path $files -Severity Error; if ($findings) { $findings | Format-List; exit 1 }'
+
       - name: PowerShell installer functional test
         if: runner.os == 'Windows'
         run: |
@@ -142,6 +150,29 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           fish --no-config --no-execute completions/gos.fish
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Pinned like shfmt and ShellCheck; actionlint checks expression and
+      # shell mistakes in the workflows that tests/workflows.bash's semantic
+      # invariants do not cover.
+      - name: Install actionlint
+        run: |
+          curl -fsSL -o /tmp/actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          sudo install -m 0755 /tmp/actionlint /usr/local/bin/actionlint
+          actionlint --version
+
+      - name: Run actionlint
+        run: |
+          actionlint
 
   workflow-validation:
     name: Workflow Validation
