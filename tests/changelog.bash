@@ -71,7 +71,10 @@ current_changelog_requires_unreleased_notes_when_ahead_of_latest_tag() {
     return 0
   fi
 
-  commit_count=$(git -C "$repo_root" rev-list --count "${latest_tag}..HEAD" 2>/dev/null || printf '0')
+  # The release workflow's post-tag AUR bump is automation, not a change that
+  # needs release notes; without this exclusion main fails this guard after
+  # every release until the next real change.
+  commit_count=$(git -C "$repo_root" rev-list --count --invert-grep --grep='^chore(aur): point the package at v' "${latest_tag}..HEAD" 2>/dev/null || printf '0')
   if [ "$commit_count" -eq 0 ]; then
     printf 'ok - current changelog Unreleased guard skipped: no post-tag commits\n'
     return 0
