@@ -43,7 +43,7 @@ body:
     id: gos-version
     attributes:
       label: gos version
-      placeholder: gos v1.4.3
+      placeholder: gos v1.10.0
     validations:
       required: true
   - type: input

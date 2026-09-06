@@ -4734,6 +4734,73 @@ _gos_usage() {
   fi
 }
 
+# Every environment variable a user can set, in one place: the README
+# configuration table and the man page ENVIRONMENT section are generated from
+# it (scripts/sync-readme-env.bash, scripts/sync-man-page.bash), and
+# tests/workflows.bash refuses a GOS_* variable read by gos.sh that is missing
+# here. Fields: name|readers|default|description; readers is a comma-separated
+# list of gos, install.sh, install.ps1, or packaging/windows/uninstall.ps1.
+# Descriptions must not contain "|".
+_gos_env_manifest() {
+  cat <<'GOS_ENV'
+GOS_INSTALL_DIR|gos|/usr/local/go|Where Go gets installed. Override to install without sudo. Path basename must contain "go".
+GOS_VERSIONS_DIR|gos|unset|Opt-in side-by-side layout (e.g. $HOME/.gos/versions). Each version installs to $GOS_VERSIONS_DIR/go<version> and GOS_INSTALL_DIR becomes a symlink to the active one, so switching is instant. The versions root must not be /, equal to, or inside GOS_INSTALL_DIR. Requires symlink support (macOS, Linux, WSL).
+GOS_CACHE_DIR|gos|$XDG_CACHE_HOME/gos or $HOME/.cache/gos|Where verified Go archives, resumable partial downloads, and discovery-only feed metadata are cached. Must be an absolute path. Clear it with gos prune.
+GOS_DOWNLOAD_MIRROR|gos|unset|HTTPS base URL to download Go archives from (e.g. https://golang.google.cn/dl behind restrictive networks). Checksums are still resolved from go.dev, and mirror downloads fail closed when they cannot be verified.
+GOS_REQUIRE_CHECKSUM|gos,install.sh|unset|Set to 1 to abort installs when checksum metadata or local SHA256 calculation is unavailable. Set to feed to additionally require the digest to come from the go.dev downloads feed (cross-origin), rejecting the same-origin .sha256 fallback. Honored by both gos and install.sh (install.sh treats feed like 1).
+GOS_FEED_TTL|gos|600|Non-negative integer seconds that discovery commands (list, platforms, check, bare-minor resolution, shell completion suggestions) may reuse cached feed metadata. Set to 0 to disable. Invalid values fail before remote discovery and are reported by gos doctor; checksum verification always fetches fresh metadata.
+GOS_NO_COLOR|gos|unset|Set to 1 to disable interactive color and symbol styling.
+NO_COLOR|gos|unset|The standard no-color convention: when set to a non-empty value, color and symbols are disabled (same as GOS_NO_COLOR=1).
+TERM|gos|from the terminal|TERM=dumb disables color and symbols; output is never colored when it is not a terminal or under --json.
+GOTOOLCHAIN|gos|unset|Read only by gos doctor, which explains how a per-module toolchain composes with the go gos manages on PATH.
+XDG_CACHE_HOME|gos|$HOME/.cache|Base of the default GOS_CACHE_DIR.
+XDG_DATA_HOME|gos|$HOME/.local/share|Where gos completions bash --install and zsh --install write their files (bash-completion/completions/gos, zsh/site-functions/_gos).
+XDG_CONFIG_HOME|gos|$HOME/.config|Where gos completions fish --install writes fish/completions/gos.fish.
+GOS_BIN_DIR|install.sh|/usr/local/bin|Where the gos command is installed by install.sh. Missing custom directories are created when possible.
+GOS_HOME|install.ps1,packaging/windows/uninstall.ps1|%LOCALAPPDATA%\Programs\gos|Where install.ps1 puts gos on Windows, and what uninstall.ps1 removes. The only way to choose the directory with the irm ... iex one-liner, which cannot pass parameters.
+GOS_WINDOWS_PACKAGE_PATH|install.ps1|unset|Install from a local gos-windows.zip instead of downloading it (same as -PackagePath).
+GOS_WINDOWS_PACKAGE_SHA256|install.ps1|unset|Expected SHA256 of a local package given with GOS_WINDOWS_PACKAGE_PATH (same as -ExpectedSha256); without it the local package is installed unverified with a warning.
+GOS_ENV
+}
+
+# Print the environment manifest for the surface generators; --json gives
+# {variables: [{name, readers: [...], default, description}]}.
+cmd___env() {
+  local arg first="true" name readers default description
+  for arg in "$@"; do
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      *)
+        _gos_fail usage "unknown option for gos __env: ${arg}"
+        echo "Usage: gos __env [--json]" >&2
+        return 1
+        ;;
+    esac
+  done
+  if ! _gos_json_enabled; then
+    _gos_env_manifest
+    return 0
+  fi
+  printf '{"variables":['
+  _gos_env_manifest | while IFS='|' read -r name readers default description; do
+    if [ "$first" = "true" ]; then
+      first="false"
+    else
+      printf ','
+    fi
+    printf '{"name":'
+    _gos_json_string "$name"
+    printf ',"readers":'
+    printf '%s\n' "$readers" | tr ',' '\n' | _gos_json_array_from_lines
+    printf ',"default":'
+    _gos_json_string "$default"
+    printf ',"description":'
+    _gos_json_string "$description"
+    printf '}'
+  done
+  printf ']}\n'
+}
+
 # The COMMANDS block of gos help: entries under their manifest group. Group
 # headers sit at column 0 so the two-space-indented entries stay the only
 # lines that look like commands (completions and tests parse them that way).
@@ -4975,7 +5042,7 @@ _gos_suggest_command() {
 # for the others it used to be swallowed silently (disabling color and
 # progress, then printing human text), and it bypassed run/each's own
 # rejection of the flag.
-GOS_JSON_COMMANDS=" check current list platforms status which env doctor prune version __commands "
+GOS_JSON_COMMANDS=" check current list platforms status which env doctor prune version __commands __env "
 
 # Preconditions a command needs before it runs, named so every dispatcher
 # line reads as a list. The mutation lock is not among them for commands
@@ -5125,6 +5192,7 @@ main() {
       cmd_env "$@"
       ;;
     __commands) cmd___commands "$@" ;;
+    __env) cmd___env "$@" ;;
     __project-version) cmd___project_version "$@" ;;
     completions) cmd_completions "$@" ;;
     current) cmd_current "$@" ;;

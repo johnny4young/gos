@@ -97,7 +97,7 @@ fish --no-config --no-execute completions/gos.fish
      helper-generated fallback notes when no bullets are present) into the
      release section, updates Chocolatey metadata and Winget metadata, then
      commits and tags the release.
-   - `smoke-test` checks the release tag on Linux and macOS.
+   - `smoke-test` checks the release tag on Linux, macOS, and Windows.
    - `release` patches installers, builds `gos-windows.zip`, creates checksums,
      publishes attestations, and uploads release assets.
    - `update-formula` regenerates `Formula/gos.rb` from the in-repo template

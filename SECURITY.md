@@ -106,6 +106,12 @@ For `gos` installer assets:
 - `checksums.txt` is published with `gos.sh`, `install.sh`, `install.ps1`, and
   `gos-windows.zip`.
 - Release assets and `checksums.txt` receive GitHub artifact attestations.
+  Verify one before trusting it, with the GitHub CLI:
+
+  ```bash
+  gh attestation verify gos.sh --repo johnny4young/gos
+  gh attestation verify checksums.txt --repo johnny4young/gos
+  ```
 - The Homebrew tap publish step pins GitHub's SSH host keys, fetched over
   TLS from the GitHub meta API (an independent trust channel), instead of
   trusting the first key the SSH connection presents.
