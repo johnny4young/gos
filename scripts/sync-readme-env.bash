@@ -37,24 +37,25 @@ def fail!(message)
 end
 
 
+# Descriptions are plain text, not Markdown. Escape once rather than running
+# overlapping code-span substitutions (whole commands can contain options).
 def markdown_cell(value)
-  value.gsub("|", "\\|")
+  value.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;")
+    .gsub(/[\\`*_{}\[\]|]/) { |char| "\\" + char }
+end
+
+
+def markdown_code(value)
+  delimiter = "`" * ([1] + value.scan(/`+/).map { |run| run.length + 1 }).max
+  padding = delimiter.length > 1 ? " " : ""
+  "#{delimiter}#{padding}#{value.gsub("|", "\\|")}#{padding}#{delimiter}"
 end
 
 
 def markdown_default(value)
-  return value if value == "unset" || value == "from the terminal"
+  return markdown_cell(value) if value == "unset" || value == "from the terminal"
 
-  value.split(" or ").map { |part| "`#{part}`" }.join(" or ")
-end
-
-
-def markdown_description(value)
-  markdown_cell(value)
-    .gsub(/(?<![\w`$])((?:GOS_|XDG_|NO_COLOR|TERM=|GOTOOLCHAIN)[A-Za-z0-9_=]*)/, '`\\1`')
-    .gsub(/(?<![\w`])(gos (?:prune|doctor|completions [a-z]+ --install))/, '`\\1`')
-    .gsub(/(?<![\w`])(--[A-Za-z0-9-]+)/, '`\\1`')
-    .gsub(/(?<![\w`])(install\.(?:sh|ps1)|uninstall\.ps1|gos-windows\.zip)/, '`\\1`')
+  value.split(" or ").map { |part| markdown_code(part) }.join(" or ")
 end
 
 details = `bash gos.sh __env 2>&1`
@@ -63,10 +64,10 @@ fail!("gos __env failed:\n#{details}") unless $?.success?
 variables = details.lines.map.with_index(1) do |line, index|
   fields = line.chomp.split("|", 4)
   fail!("invalid environment manifest line #{index}: #{line.inspect}") unless fields.length == 4
-  name, scope, default, description = fields
-  fail!("empty environment manifest field on line #{index}: #{line.inspect}") if [name, scope, default, description].any?(&:empty?)
+  name, readers, default, description = fields
+  fail!("empty environment manifest field on line #{index}: #{line.inspect}") if [name, readers, default, description].any?(&:empty?)
 
-  { name: name, scope: scope, default: default, description: description }
+  { name: name, readers: readers.split(","), default: default, description: description }
 end
 fail!("gos __env returned no variables") if variables.empty?
 
@@ -75,14 +76,17 @@ block = ([
   "| Variable | Read by | Default | Description |",
   "|---|---|---|---|"
 ] + variables.map do |variable|
-  "| `#{variable.fetch(:name)}` | `#{variable.fetch(:scope)}` | #{markdown_default(variable.fetch(:default))} | #{markdown_description(variable.fetch(:description))} |"
+  "| `#{variable.fetch(:name)}` | #{variable.fetch(:readers).map { |reader| markdown_code(reader) }.join(", ")} | #{markdown_default(variable.fetch(:default))} | #{markdown_cell(variable.fetch(:description))} |"
 end + [MARKER_END, ""]).join("\n")
 
 readme = File.read("README.md")
+[MARKER_BEGIN, MARKER_END].each do |marker|
+  fail!("README must contain exactly one #{marker}") unless readme.lines.count { |line| line.chomp == marker } == 1
+end
 pattern = /^#{Regexp.escape(MARKER_BEGIN)}\n.*?^#{Regexp.escape(MARKER_END)}\n/m
 fail!("README configuration table markers were not found") unless readme.match?(pattern)
 
-updated = readme.sub(pattern, block)
+updated = readme.sub(pattern) { block }
 if mode == "--check"
   if readme != updated
     warn "README configuration table is out of sync; run scripts/sync-readme-env.bash --write"

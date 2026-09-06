@@ -77,11 +77,10 @@ jobs:
           sudo apt-get install -y zsh fish
 
       # Every tracked shell file, derived from git so a new script can never be
-      # left out of the syntax gate (validate-local keeps the explicit list and an
-      # invariant asserts the two agree).
+      # left out of the syntax gate (validate-local uses the same discovery).
       - name: Bash syntax
         run: |
-          git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --
+          git ls-files -z '*.sh' '*.bash' | xargs -0 -n 1 bash -n --
 
       - name: Command surface sync
         run: |
@@ -109,7 +108,7 @@ jobs:
           ln -s /bin/bash "${RUNNER_TEMP}/bash32/bash"
           export PATH="${RUNNER_TEMP}/bash32:${PATH}"
           bash --version | head -n 1 | grep -F 'version 3.2'
-          bash scripts/run-tests.bash --jobs 2 unit-versions cli-readonly install-cache side-by-side install-transaction checksum
+          bash scripts/run-tests.bash --jobs 2
 
       - name: PowerShell syntax
         if: runner.os == 'Windows'
