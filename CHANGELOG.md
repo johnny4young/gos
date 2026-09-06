@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- A GitHub Action in this repository: `uses: johnny4young/gos@v1` installs the Go version a project requests (or an explicit `go-version`), verified against go.dev through the tagged `gos.sh` itself, caches the archive with `actions/cache`, optionally runs `gos verify`, and puts `go` and `gos` on `PATH`. CI exercises it on ubuntu, macos, and windows runners, and the release workflow moves the `v1` tag to each stable release.
+- The README shows the nightly canary badge next to the CI badge.
 - `gos verify [version]` re-verifies an installed Go tree against the official release: the archive for that version is obtained through the same trust path as an install (cache or download, checksum from the go.dev feed), extracted to a temporary directory, and every file it ships is compared byte for byte with the installed copy. Modified or missing files are listed and exit `4`; `--json` prints one report document. In side-by-side mode any installed version can be verified.
 - `gos self-verify` hashes the running script and compares it with the `checksums.txt` published for its own release tag, then, when the GitHub CLI is available and authenticated, runs `gh attestation verify` against `johnny4young/gos`. A mismatch or a failed attestation exits `4`; a missing, unsupported, or unauthenticated `gh` only reports the attestation as unavailable.
 - JSON Schemas for every `--json` output live in `docs/schema/` (one per command plus the error document, indexed by `docs/schema/README.md`); `tests/json-schema.bash` validates the real output of each command against its schema.

@@ -359,6 +359,26 @@ jobs:
             checksums.txt
           generate_release_notes: true
 
+      # uses: johnny4young/gos@v1 follows the newest stable release of that
+      # major. Pushes made with GITHUB_TOKEN never trigger workflows, so moving
+      # the tag cannot start a second release.
+      - name: Move the major version tag
+        if: needs.validate-release-ref.outputs.is_prerelease != 'true'
+        env:
+          TAG: ${{ needs.validate-release-ref.outputs.tag }}
+        run: |
+          : "${TAG:?missing release tag}"
+          major="${TAG%%.*}"
+          case "$major" in
+            v[0-9] | v[0-9][0-9]) ;;
+            *)
+              echo "unexpected release tag '${TAG}'" >&2
+              exit 1
+              ;;
+          esac
+          git tag -f "$major" "$TAG"
+          git push -f origin "refs/tags/${major}"
+
   update-formula:
     name: Update Homebrew Formula
     needs: [validate-release-ref, release]

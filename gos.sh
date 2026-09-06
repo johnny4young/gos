@@ -127,7 +127,19 @@ _gos_finish_status() {
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Memoized per process: doctor, sudo decisions, and the install pipeline ask
+# several times, and uname is a fork each time.
+_GOS_OS_CACHE=""
 _gos_os() {
+  if [ -n "$_GOS_OS_CACHE" ]; then
+    printf '%s\n' "$_GOS_OS_CACHE"
+    return 0
+  fi
+  _GOS_OS_CACHE=$(_gos_detect_os)
+  printf '%s\n' "$_GOS_OS_CACHE"
+}
+
+_gos_detect_os() {
   case "$(uname -s)" in
     Darwin) echo "darwin" ;;
     Linux) echo "linux" ;;

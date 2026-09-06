@@ -155,7 +155,10 @@ gos version
 bash tests/packaging.bash
 ```
 
-8. Confirm the `update-aur` job committed `chore(aur): point the package at
+8. Confirm the `v1` major tag now points at the release (`git ls-remote
+   origin refs/tags/v1`); `uses: johnny4young/gos@v1` follows it. The
+   `release` job moves it for stable releases only.
+9. Confirm the `update-aur` job committed `chore(aur): point the package at
    vX.Y.Z` to `main` (it runs `scripts/update-aur.bash` against the release
    tarball and `tests/packaging.bash`; `tests/packaging.bash` fails on `main`
    until `pkgver` matches `GOS_VERSION`). That keeps the AUR metadata in sync
@@ -172,9 +175,9 @@ scripts/update-aur.bash X.Y.Z
 bash tests/packaging.bash
 git commit -am "chore(aur): point the package at vX.Y.Z"
 ```
-9. Confirm README install commands still match published channels and do not
+10. Confirm README install commands still match published channels and do not
    advertise unreleased package-manager commands.
-10. Confirm the `[Unreleased]` compare link in `CHANGELOG.md` points from the new
+11. Confirm the `[Unreleased]` compare link in `CHANGELOG.md` points from the new
     tag to `HEAD`.
 
 ## Recovery Notes

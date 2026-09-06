@@ -780,4 +780,36 @@ assert(!gos_sh.include?("may not exist"),
   "download errors must give a next step (retry / gos list), not guess 'may not exist'")
 
 puts "ok - workflow YAML and invariants"
+# The GitHub Action (uses: johnny4young/gos@v1) is a composite action in this
+# repository: it runs the tagged gos.sh itself. Keep it pinned, bash-only,
+# injection-safe, documented, and exercised by CI on every OS.
+action = YAML.load_file("action.yml")
+assert(action.dig("runs", "using") == "composite", "action.yml must be a composite action")
+action_steps = action.dig("runs", "steps") || []
+assert(!action_steps.empty?, "action.yml must define steps")
+action_steps.each do |step|
+  label = step["name"] || step["id"] || step["uses"]
+  assert(step["uses"] || step["shell"] == "bash", "action.yml step #{label} must run under bash")
+  assert(!step["run"].to_s.include?("${{"), "action.yml step #{label} must pass expressions through env:, not into run:")
+  next unless step["uses"]
+  assert(step["uses"].match?(/\A[^@\s]+@[0-9a-f]{40}\z/), "action.yml must pin #{step['uses']} to a full commit SHA")
+end
+install_step = action_steps.find { |step| step["id"] == "install" }
+assert(install_step && install_step["run"].include?('gos="${GITHUB_ACTION_PATH}/gos.sh"') && install_step["run"].include?('bash "$gos" install "$GOS_VERSION_TO_INSTALL"'), "action.yml must install through the tagged gos.sh")
+action_inputs = action.fetch("inputs").keys
+action_inputs.each do |name|
+  assert(readme.include?("`#{name}`"), "README must document the action input #{name}")
+end
+action.fetch("outputs").each_key do |name|
+  assert(readme.include?("`#{name}`"), "README must document the action output #{name}")
+end
+assert(readme.include?("uses: johnny4young/gos@v1"), "README must show the action usage")
+ci_action_job = ci_jobs.fetch("action") { fail!("ci.yml must exercise the action") }
+assert(ci_action_job.dig("strategy", "matrix", "os") == ci_jobs.fetch("smoke").dig("strategy", "matrix", "os"), "the action job must run on the same OS matrix as the smoke job")
+assert(ci_action_job.dig("strategy", "fail-fast") == false, "the action job must not fail fast")
+assert((ci_action_job["steps"] || []).any? { |step| step["uses"] == "./" && step.dig("with", "verify") == "true" }, "the action job must use the local action with verify enabled")
+major_tag_step = release_jobs.fetch("release").fetch("steps").find { |step| step["name"] == "Move the major version tag" }
+assert(major_tag_step, "release job must move the major version tag for uses: johnny4young/gos@v1")
+assert(major_tag_step["if"].to_s.include?("is_prerelease != 'true'"), "the major tag must only follow stable releases")
+assert(major_tag_step["run"].include?('git push -f origin "refs/tags/${major}"'), "the major tag step must push the tag explicitly")
 RUBY
