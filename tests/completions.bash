@@ -29,32 +29,16 @@ set -e
 [ "$status" -eq 2 ] || fail "sync-command-surfaces should reject extra arguments with usage status. Output: ${output}"
 assert_contains "$output" "Usage: sync-command-surfaces.bash [--check|--write]" "sync-command-surfaces extra argument usage"
 
-sync_helpers=(
-  scripts/sync-bash-command-completions.bash
-  scripts/sync-fish-command-completions.bash
-  scripts/sync-zsh-command-completions.bash
-  scripts/sync-readme-usage.bash
-  scripts/sync-readme-env.bash
-  scripts/sync-man-page.bash
-  scripts/sync-embedded-completions.bash
-)
-for sync_helper in "${sync_helpers[@]}"; do
-  sync_helper_name="${sync_helper##*/}"
-
-  set +e
-  output="$(bash "${repo_root}/${sync_helper}" --bogus 2>&1)"
-  status=$?
-  set -e
-  [ "$status" -eq 2 ] || fail "${sync_helper_name} should reject unknown options with usage status. Output: ${output}"
-  assert_contains "$output" "Usage: ${sync_helper_name} [--check|--write]" "${sync_helper_name} unknown option usage"
-
-  set +e
-  output="$(bash "${repo_root}/${sync_helper}" --check extra 2>&1)"
-  status=$?
-  set -e
-  [ "$status" -eq 2 ] || fail "${sync_helper_name} should reject extra arguments with usage status. Output: ${output}"
-  assert_contains "$output" "Usage: ${sync_helper_name} [--check|--write]" "${sync_helper_name} extra argument usage"
-done
+# The target list comes from the orchestrator's own table, so this test can
+# never check a stale copy of it.
+sync_targets=()
+while IFS= read -r sync_target; do
+  [ -n "$sync_target" ] || continue
+  sync_targets=(${sync_targets[@]:+"${sync_targets[@]}"} "$sync_target")
+done <<EOF
+$(bash "$sync_script" --targets)
+EOF
+[ "${#sync_targets[@]}" -eq 6 ] || fail "sync-command-surfaces --targets should list the six generated files, got: ${sync_targets[*]}"
 
 write_fixture="${test_root}/write-fixture"
 mkdir -p "${write_fixture}/completions" "${write_fixture}/scripts" "${write_fixture}/docs"
@@ -93,7 +77,6 @@ RUBY
 
 rollback_snapshot="${test_root}/rollback-snapshot"
 mkdir -p "${rollback_snapshot}/completions" "${rollback_snapshot}/docs"
-sync_targets=(README.md gos.sh completions/gos.bash completions/gos.fish completions/gos.zsh docs/gos.1)
 for sync_target in "${sync_targets[@]}"; do
   cp -p "${write_fixture}/${sync_target}" "${rollback_snapshot}/${sync_target}"
 done

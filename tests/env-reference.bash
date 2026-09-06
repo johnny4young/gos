@@ -69,21 +69,27 @@ end
 puts "ok - environment JSON schema, text parity, reader coverage, escaping and man-page scope"
 
 Dir.mktmpdir("gos-env-reference") do |dir|
-  FileUtils.mkdir_p(File.join(dir, "scripts"))
-  FileUtils.cp("scripts/sync-readme-env.bash", File.join(dir, "scripts"))
+  # The orchestrator renders every surface, so the fixture carries them all;
+  # only the README environment block is replaced with a stale placeholder.
+  %w[scripts completions docs].each { |sub| FileUtils.mkdir_p(File.join(dir, sub)) }
+  FileUtils.cp("scripts/sync-command-surfaces.bash", File.join(dir, "scripts"))
+  FileUtils.cp(Dir["completions/gos.*"], File.join(dir, "completions"))
+  FileUtils.cp("docs/gos.1", File.join(dir, "docs"))
   source = File.read("gos.sh")
   fixture = 'GOS_TEST_DOCS|gos|a`b|go<version> & <script> *stars* [label] `ticks` gos completions bash --install'
   source.sub!("GOS_ENV\n}", "#{fixture}\nGOS_ENV\n}")
   File.write(File.join(dir, "gos.sh"), source)
   target = File.join(dir, "README.md")
-  File.write(target, "before\n<!-- gos-env:begin -->\nold\n<!-- gos-env:end -->\nafter\n")
-  generator = File.join(dir, "scripts/sync-readme-env.bash")
+  env_block = /<!-- gos-env:begin -->\n.*?<!-- gos-env:end -->\n/m
+  stale_readme = File.read("README.md").sub(env_block, "<!-- gos-env:begin -->\nold\n<!-- gos-env:end -->\n")
+  File.write(target, stale_readme)
+  generator = File.join(dir, "scripts/sync-command-surfaces.bash")
   run!("bash", generator, "--write")
   rendered = File.read(target)
   assert(rendered.include?('go&lt;version&gt; &amp; &lt;script&gt; \*stars\* \[label\] \`ticks\`'), "description Markdown/HTML escaping")
   assert(rendered.include?('`` a`b ``'), "code defaults containing backticks")
   assert(!rendered.include?('gos completions bash `--install`'), "no nested option code spans")
-  assert(rendered.start_with?("before\n") && rendered.end_with?("after\n"), "generator preserves surrounding content")
+  assert(rendered.sub(env_block, "") == stale_readme.sub(env_block, ""), "generator preserves surrounding content")
   run!("bash", generator, "--check")
   run!("bash", generator, "--write")
   assert(File.read(target) == rendered, "generator idempotence")
