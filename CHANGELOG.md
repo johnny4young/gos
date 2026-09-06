@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-06
+
 ### Added
 
 - Classified exit codes: `2` for invalid arguments or configuration, `3` for a failed download or feed fetch, `4` for a checksum or release that could not be verified, `5` when another gos holds the mutation lock; `1` stays the generic failure. With `--json` a failed command now prints one `{"error":{"code":...,"message":...}}` document on stdout instead of leaving it empty. Documented in `gos help`, the man page, and the README.
@@ -364,7 +366,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Homebrew formula
 
 
-[Unreleased]: https://github.com/johnny4young/gos/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/johnny4young/gos/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/johnny4young/gos/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/johnny4young/gos/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/johnny4young/gos/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/johnny4young/gos/compare/v1.6.0...v1.7.0
