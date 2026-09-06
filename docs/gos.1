@@ -89,7 +89,7 @@ nothing but \fBcurl\fR (or \fBwget\fR) and \fBbash\fR.
 \&HTTPS base URL to download Go archives from (e.g. https://golang.google.cn/dl behind restrictive networks). Checksums are still resolved from go.dev, and mirror downloads fail closed when they cannot be verified. Default: unset.
 .TP
 .B GOS_REQUIRE_CHECKSUM
-\&Set to 1 to abort installs when checksum metadata or local SHA256 calculation is unavailable. Set to feed to additionally require the digest to come from the go.dev downloads feed (cross-origin), rejecting the same-origin .sha256 fallback. Honored by both gos and install.sh (install.sh treats feed like 1). Default: unset.
+\&Set to 1 to abort installs when checksum metadata or local SHA256 calculation is unavailable. Set to feed to additionally require the digest to come from the go.dev downloads feed (cross-origin), rejecting the same-origin .sha256 fallback. Honored by gos, install.sh, and install.ps1. Both installers treat feed like 1; install.ps1 rejects unverified main installs under either strict policy. Default: unset.
 .TP
 .B GOS_FEED_TTL
 \&Non-negative integer seconds that discovery commands (list, platforms, check, bare-minor resolution, shell completion suggestions) may reuse cached feed metadata. Set to 0 to disable. Invalid values fail before remote discovery and are reported by gos doctor; checksum verification always fetches fresh metadata. Default: 600.
@@ -98,7 +98,7 @@ nothing but \fBcurl\fR (or \fBwget\fR) and \fBbash\fR.
 \&Set to 1 to disable interactive color and symbol styling. Default: unset.
 .TP
 .B NO_COLOR
-\&The standard no-color convention: when set to anything, color and symbols are disabled (same as GOS_NO_COLOR=1). Default: unset.
+\&The standard no-color convention: when set to a non-empty value, color and symbols are disabled (same as GOS_NO_COLOR=1). Default: unset.
 .TP
 .B TERM
 \&TERM=dumb disables color and symbols; output is never colored when it is not a terminal or under \-\-json. Default: from the terminal.

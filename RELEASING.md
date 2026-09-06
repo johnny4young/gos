@@ -162,8 +162,10 @@ bash tests/packaging.bash
    in the repository only. **The AUR package is not published yet**, so skip
    the push to `ssh://aur@aur.archlinux.org/gos.git` until the channel is
    launched (`packaging/README.md`); the same applies to Chocolatey and
-   Winget, whose metadata the release also updates without submitting it. If
-   the job did not run (a fork, or a pre-release), do the bump by hand:
+   Winget, whose metadata the release also updates without submitting it.
+   Pre-releases intentionally skip the AUR bump and must not be substituted
+   into the stable-only command below. For a stable release whose job failed
+   or was unavailable, repair the cause and rerun it, or bump manually:
 
 ```bash
 scripts/update-aur.bash X.Y.Z

@@ -77,8 +77,8 @@ fail!("gos __env failed:\n#{env_details}") unless $?.success?
 env_details.lines.each_with_index do |line, index|
   fields = line.chomp.split("|", 4)
   fail!("invalid environment manifest line #{index + 1}: #{line.inspect}") unless fields.length == 4
-  name, scope, default, description = fields
-  next unless scope == "gos"
+  name, readers, default, description = fields
+  next unless readers.split(",").include?("gos")
 
   lines << ".TP"
   lines << ".B #{name}"

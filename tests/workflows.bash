@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# gos-suite: skip-os=windows
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -165,7 +164,7 @@ end
 validate_powershell_files = script_array(validate_local, "powershell_files")
 
 tracked_shell_files = tracked_files.select { |path| path.end_with?(".bash", ".sh") }.sort
-assert(validate_local.include?("git ls-files '*.sh' '*.bash'"), "validate-local must derive its Bash syntax file list from git ls-files like CI")
+assert(validate_local.include?("git ls-files -z '*.sh' '*.bash'"), "validate-local must derive its Bash syntax file list from git ls-files like CI")
 assert(tracked_shell_files.include?("scripts/run-tests.bash"), "the suite runner must be tracked")
 
 # Suites are discovered by scripts/run-tests.bash from git, so the only
@@ -173,15 +172,23 @@ assert(tracked_shell_files.include?("scripts/run-tests.bash"), "the suite runner
 # and that the per-OS rules match what CI used to hard-code.
 tracked_test_scripts = tracked_files.select { |path| path.start_with?("tests/") && path.end_with?(".bash") && !File.basename(path).start_with?("lib") }.sort
 assert(validate_local.include?("scripts/run-tests.bash"), "validate-local must run the suites through scripts/run-tests.bash")
-listed_suites = `bash scripts/run-tests.bash --list --os linux`.lines.map { |line| line.split("\t").first.strip }.sort
+linux_listing = `bash scripts/run-tests.bash --list --os linux`
+assert($?.success?, "Linux suite discovery must succeed")
+assert(linux_listing.lines.include?("tests/runner.bash\n"), "runner regressions must run on Linux, not inherit fixture metadata")
+listed_suites = linux_listing.lines.map { |line| line.split("\t").first.strip }.sort
 assert($?.success?, "scripts/run-tests.bash --list must succeed")
 assert(listed_suites == tracked_test_scripts, "run-tests must discover every tracked suite: #{listed_suites.inspect} vs #{tracked_test_scripts.inspect}")
 windows_skips = `bash scripts/run-tests.bash --list --os windows`.lines.select { |line| line.include?("skipped") }.map { |line| line.split("\t").first.strip }
+assert($?.success?, "Windows suite discovery must succeed")
+%w[tests/workflows.bash tests/runner.bash].each do |suite|
+  assert(!windows_skips.include?(suite), "#{suite} must run on Windows")
+end
 %w[tests/side-by-side.bash tests/doctor-status.bash tests/packaging.bash tests/homebrew-tap.bash].each do |suite|
   next unless tracked_test_scripts.include?(suite)
   assert(windows_skips.include?(suite), "#{suite} must declare it does not run on Windows")
 end
 macos_skips = `bash scripts/run-tests.bash --list --os macos`.lines.select { |line| line.include?("skipped") }.map { |line| line.split("\t").first.strip }
+assert($?.success?, "macOS suite discovery must succeed")
 %w[tests/packaging.bash tests/homebrew-tap.bash].each do |suite|
   assert(macos_skips.include?(suite), "#{suite} must declare only-os=linux")
 end
@@ -363,6 +370,15 @@ update_aur = release_jobs.fetch("update-aur")
 assert(job_needs(update_aur).include?("release"), "update-aur must run after the release exists (its digest covers the tag tarball)")
 assert(update_aur["if"].to_s.include?("is_prerelease != 'true'"), "update-aur must skip pre-releases")
 assert(update_aur.dig("permissions", "contents") == "write", "update-aur commits the bumped PKGBUILD to main and needs contents: write")
+# Tag-push runs skip the manual-only ancestors. A status function prevents
+# that expected skip from silently suppressing successful-release updates.
+%w[update-formula update-aur].each do |job_name|
+  condition = release_jobs.fetch(job_name).fetch("if").to_s
+  assert(condition.include?("!cancelled()"), "#{job_name} must override implicit success and honor cancellation")
+  ["needs.validate-release-ref.result == 'success'", "needs.release.result == 'success'", "is_prerelease != 'true'"].each do |fragment|
+    assert(condition.include?(fragment), "#{job_name} must require a validated successful stable release: #{fragment}")
+  end
+end
 update_aur_runs = steps_for(release_jobs, "update-aur").map { |step| step["run"].to_s }.join("\n")
 assert(update_aur_runs.include?("scripts/update-aur.bash"), "update-aur must use scripts/update-aur.bash")
 assert(update_aur_runs.include?("bash tests/packaging.bash"), "update-aur must verify the bumped files before committing")
@@ -465,18 +481,19 @@ assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion synta
 
 command_surface_sync = step_named(smoke_steps, "Command surface sync")
 psscriptanalyzer = step_named(smoke_steps, "PSScriptAnalyzer")
+assert(psscriptanalyzer["run"].to_s.include?("-Severity Error -ErrorAction Stop"), "PowerShell analyzer invocation failures must terminate the gate")
 assert(psscriptanalyzer && psscriptanalyzer["if"] == "runner.os == 'Windows'" && psscriptanalyzer["run"].to_s.include?("Invoke-ScriptAnalyzer"), "smoke job must run PSScriptAnalyzer on Windows")
 bash32 = step_named(smoke_steps, "Bash 3.2 compatibility")
 assert(bash32, "smoke job must exercise the bash 3.2 floor")
 assert(bash32["if"] == "runner.os == 'macOS'", "bash 3.2 compatibility step must run on macOS, the only runner shipping bash 3.2")
-assert(bash32["run"].to_s.include?("grep -F 'version 3.2'") && bash32["run"].to_s.include?("bash scripts/run-tests.bash") && bash32["run"].to_s.include?("side-by-side") && bash32["run"].to_s.include?("install-transaction"), "bash 3.2 compatibility step must verify the interpreter and run the feature suites under it")
+assert(bash32["run"].to_s.include?("grep -F 'version 3.2'") && bash32["run"].to_s.include?("bash scripts/run-tests.bash") && bash32["run"].to_s.lines.any? { |line| line.strip == "bash scripts/run-tests.bash --jobs 2" }, "bash 3.2 compatibility step must verify the interpreter and run the feature suites under it")
 assert(command_surface_sync, "smoke job must check generated command surfaces")
 assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surfaces.bash --check"), "command surface sync must use the orchestrator")
 
 [
   "bash scripts/run-tests.bash",
   "bash scripts/sync-command-surfaces.bash --check",
-  "git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --",
+  "git ls-files -z '*.sh' '*.bash' | xargs -0 -n 1 bash -n --",
   "./gos.sh version",
   "./gos.sh help",
   "zsh -n completions/gos.zsh",
@@ -489,7 +506,7 @@ end
 # the set-equality assertion above keeps the two in agreement.
 bash_syntax = step_named(smoke_steps, "Bash syntax")
 assert(bash_syntax, "smoke job must define Bash syntax step")
-assert(bash_syntax["run"].to_s.include?("git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --"), "smoke job Bash syntax must derive a NUL-delimited file list from git ls-files")
+assert(bash_syntax["run"].to_s.include?("git ls-files -z '*.sh' '*.bash' | xargs -0 -n 1 bash -n --"), "smoke job Bash syntax must derive a NUL-delimited file list from git ls-files")
 tracked_powershell_files.each do |path|
   assert(smoke_runs.include?(path), "smoke job PowerShell syntax must cover tracked PowerShell file #{path}")
 end
@@ -750,8 +767,8 @@ assert(map_sections == real_sections, "gos.sh section map #{map_sections.inspect
 env_manifest = `bash gos.sh __env`.lines.map { |line| line.split("|").first }
 assert($?.success? && !env_manifest.empty?, "gos __env must print the environment manifest")
 internal_prefixes = %w[GOS_AUTO_ GOS_DOCTOR_ GOS_EXIT_ GOS_FEED_JSON GOS_FEED_PARSER GOS_LAST_ERROR GOS_OUTPUT_JSON GOS_PS_ GOS_SUDO_TARGET GOS_ACTIVATION_BACKUP GOS_COMPLETED_PARTIAL GOS_TMP_DIR GOS_LOCK_DIR GOS_RELEASE_BASE_URL GOS_VERSION GOS_JSON_COMMANDS GOS_PROGRESS_FD GOS_VERSIONS_MODE_EXAMPLE GOS_TEST_]
-gos_sh.scan(/\$\{(GOS_[A-Z_]+|NO_COLOR|TERM|XDG_[A-Z_]+|GOTOOLCHAIN)[:}-]/).flatten.uniq.each do |name|
-  next if internal_prefixes.any? { |prefix| name.start_with?(prefix) }
+gos_sh.scan(/\$\{(GOS_[A-Z0-9_]+|NO_COLOR|TERM|XDG_[A-Z0-9_]+|GOTOOLCHAIN)[:}-]/).flatten.uniq.each do |name|
+  next if internal_prefixes.any? { |prefix| prefix.end_with?("_") ? name.start_with?(prefix) : name == prefix }
   assert(env_manifest.include?(name), "gos.sh reads #{name} but _gos_env_manifest does not document it")
 end
 %w[GOS_BIN_DIR GOS_HOME GOS_WINDOWS_PACKAGE_PATH GOS_WINDOWS_PACKAGE_SHA256].each do |name|
@@ -759,7 +776,7 @@ end
 end
 assert(readme.include?("<!-- gos-env:begin -->"), "README configuration table must be generated from gos __env")
 assert(readme.include?("## Troubleshooting"), "README must keep a Troubleshooting section")
-assert(readme.include?("gos prune --rollback                 # cached archives"), "README uninstall must cover what gos managed, not only the command")
+assert(readme.include?("gos prune --rollback   # remove known cached archives"), "README uninstall must cover what gos managed, not only the command")
 assert(security.include?("gh attestation verify gos.sh --repo johnny4young/gos"), "SECURITY.md must show how to verify the release attestations")
 
 assert(!gos_sh.include?("may not exist"),

@@ -365,7 +365,7 @@ Layout:       flat
 Project:      go1.24.1 (/path/to/project/.go-version, matches active)
 Rollback:     available
 Cache:        1 archive(s), 73400320 byte(s) in /Users/alice/.cache/gos
-gos:          v1.6.0
+gos:          v1.9.0
 
 $ gos which
 /usr/local/go/bin/go
@@ -392,18 +392,18 @@ Update available. Install it with: gos latest
 gos v1.10.0 is available. Update with: gos self-update
 
 $ gos check --json
-{"current":"go1.24.0","latest":"go1.24.1","up_to_date":false,"gos":{"current":"v1.7.0","latest":"v1.7.1","up_to_date":false}}
+{"current":"go1.24.0","latest":"go1.24.1","up_to_date":false,"gos":{"current":"v1.9.0","latest":"v1.10.0","up_to_date":false}}
 
 $ gos current --json
 {"found":true,"version":"1.24.1","current":"go1.24.1"}
 
 $ gos status --json
-{"active":"go1.24.1","source":"managed","go_path":"/usr/local/go/bin/go","install_dir":"/usr/local/go","layout":"flat","layout_target":null,"project":{"version":"go1.24.1","source":"/path/to/project/.go-version","matches_active":true},"rollback_available":true,"cache":{"dir":"/Users/alice/.cache/gos","archives":1,"bytes":73400320},"gos_version":"1.6.0"}
+{"active":"go1.24.1","source":"managed","go_path":"/usr/local/go/bin/go","install_dir":"/usr/local/go","layout":"flat","layout_target":null,"project":{"version":"go1.24.1","source":"/path/to/project/.go-version","matches_active":true},"rollback_available":true,"cache":{"dir":"/Users/alice/.cache/gos","archives":1,"bytes":73400320},"gos_version":"1.9.0"}
 
 $ gos self-update
 Checking for the latest gos release...
 Checksum verified.
-gos updated: v1.5.0 -> v1.6.0
+gos updated: v1.9.0 -> v1.10.0
 ```
 
 ### Project-aware versions
@@ -456,22 +456,22 @@ With `--json`, a failed command prints one `{"error":{"code":"usage|network|veri
 | Variable | Read by | Default | Description |
 |---|---|---|---|
 | `GOS_INSTALL_DIR` | `gos` | `/usr/local/go` | Where Go gets installed. Override to install without sudo. Path basename must contain "go". |
-| `GOS_VERSIONS_DIR` | `gos` | unset | Opt-in side-by-side layout (e.g. $HOME/.gos/versions). Each version installs to $GOS_VERSIONS_DIR/go<version> and `GOS_INSTALL_DIR` becomes a symlink to the active one, so switching is instant. The versions root must not be /, equal to, or inside `GOS_INSTALL_DIR`. Requires symlink support (macOS, Linux, WSL). |
-| `GOS_CACHE_DIR` | `gos` | `$XDG_CACHE_HOME/gos` or `$HOME/.cache/gos` | Where verified Go archives, resumable partial downloads, and discovery-only feed metadata are cached. Must be an absolute path. Clear it with `gos prune`. |
+| `GOS_VERSIONS_DIR` | `gos` | unset | Opt-in side-by-side layout (e.g. $HOME/.gos/versions). Each version installs to $GOS\_VERSIONS\_DIR/go&lt;version&gt; and GOS\_INSTALL\_DIR becomes a symlink to the active one, so switching is instant. The versions root must not be /, equal to, or inside GOS\_INSTALL\_DIR. Requires symlink support (macOS, Linux, WSL). |
+| `GOS_CACHE_DIR` | `gos` | `$XDG_CACHE_HOME/gos` or `$HOME/.cache/gos` | Where verified Go archives, resumable partial downloads, and discovery-only feed metadata are cached. Must be an absolute path. Clear it with gos prune. |
 | `GOS_DOWNLOAD_MIRROR` | `gos` | unset | HTTPS base URL to download Go archives from (e.g. https://golang.google.cn/dl behind restrictive networks). Checksums are still resolved from go.dev, and mirror downloads fail closed when they cannot be verified. |
-| `GOS_REQUIRE_CHECKSUM` | `gos` | unset | Set to 1 to abort installs when checksum metadata or local SHA256 calculation is unavailable. Set to feed to additionally require the digest to come from the go.dev downloads feed (cross-origin), rejecting the same-origin .sha256 fallback. Honored by both gos and `install.sh` (`install.sh` treats feed like 1). |
-| `GOS_FEED_TTL` | `gos` | `600` | Non-negative integer seconds that discovery commands (list, platforms, check, bare-minor resolution, shell completion suggestions) may reuse cached feed metadata. Set to 0 to disable. Invalid values fail before remote discovery and are reported by `gos doctor`; checksum verification always fetches fresh metadata. |
+| `GOS_REQUIRE_CHECKSUM` | `gos`, `install.sh`, `install.ps1` | unset | Set to 1 to abort installs when checksum metadata or local SHA256 calculation is unavailable. Set to feed to additionally require the digest to come from the go.dev downloads feed (cross-origin), rejecting the same-origin .sha256 fallback. Honored by gos, install.sh, and install.ps1. Both installers treat feed like 1; install.ps1 rejects unverified main installs under either strict policy. |
+| `GOS_FEED_TTL` | `gos` | `600` | Non-negative integer seconds that discovery commands (list, platforms, check, bare-minor resolution, shell completion suggestions) may reuse cached feed metadata. Set to 0 to disable. Invalid values fail before remote discovery and are reported by gos doctor; checksum verification always fetches fresh metadata. |
 | `GOS_NO_COLOR` | `gos` | unset | Set to 1 to disable interactive color and symbol styling. |
-| `NO_COLOR` | `gos` | unset | The standard no-color convention: when set to anything, color and symbols are disabled (same as `GOS_NO_COLOR=1`). |
-| `TERM` | `gos` | from the terminal | `TERM=dumb` disables color and symbols; output is never colored when it is not a terminal or under `--json`. |
-| `GOTOOLCHAIN` | `gos` | unset | Read only by `gos doctor`, which explains how a per-module toolchain composes with the go gos manages on PATH. |
-| `XDG_CACHE_HOME` | `gos` | `$HOME/.cache` | Base of the default `GOS_CACHE_DIR`. |
-| `XDG_DATA_HOME` | `gos` | `$HOME/.local/share` | Where `gos completions bash `--install`` and zsh `--install` write their files (bash-completion/completions/gos, zsh/site-functions/_gos). |
-| `XDG_CONFIG_HOME` | `gos` | `$HOME/.config` | Where `gos completions fish `--install`` writes fish/completions/gos.fish. |
-| `GOS_BIN_DIR` | `install.sh` | `/usr/local/bin` | Where the gos command is installed by `install.sh`. Missing custom directories are created when possible. |
-| `GOS_HOME` | `install.ps1` | `%LOCALAPPDATA%\Programs\gos` | Where `install.ps1` puts gos on Windows, and what `uninstall.ps1` removes. The only way to choose the directory with the irm ... iex one-liner, which cannot pass parameters. |
-| `GOS_WINDOWS_PACKAGE_PATH` | `install.ps1` | unset | Install from a local `gos-windows.zip` instead of downloading it (same as -PackagePath). |
-| `GOS_WINDOWS_PACKAGE_SHA256` | `install.ps1` | unset | Expected SHA256 of a local package given with `GOS_WINDOWS_PACKAGE_PATH` (same as -ExpectedSha256); without it the local package is installed unverified with a warning. |
+| `NO_COLOR` | `gos` | unset | The standard no-color convention: when set to a non-empty value, color and symbols are disabled (same as GOS\_NO\_COLOR=1). |
+| `TERM` | `gos` | from the terminal | TERM=dumb disables color and symbols; output is never colored when it is not a terminal or under --json. |
+| `GOTOOLCHAIN` | `gos` | unset | Read only by gos doctor, which explains how a per-module toolchain composes with the go gos manages on PATH. |
+| `XDG_CACHE_HOME` | `gos` | `$HOME/.cache` | Base of the default GOS\_CACHE\_DIR. |
+| `XDG_DATA_HOME` | `gos` | `$HOME/.local/share` | Where gos completions bash --install and zsh --install write their files (bash-completion/completions/gos, zsh/site-functions/\_gos). |
+| `XDG_CONFIG_HOME` | `gos` | `$HOME/.config` | Where gos completions fish --install writes fish/completions/gos.fish. |
+| `GOS_BIN_DIR` | `install.sh` | `/usr/local/bin` | Where the gos command is installed by install.sh. Missing custom directories are created when possible. |
+| `GOS_HOME` | `install.ps1`, `packaging/windows/uninstall.ps1` | `%LOCALAPPDATA%\Programs\gos` | Where install.ps1 puts gos on Windows, and what uninstall.ps1 removes. The only way to choose the directory with the irm ... iex one-liner, which cannot pass parameters. |
+| `GOS_WINDOWS_PACKAGE_PATH` | `install.ps1` | unset | Install from a local gos-windows.zip instead of downloading it (same as -PackagePath). |
+| `GOS_WINDOWS_PACKAGE_SHA256` | `install.ps1` | unset | Expected SHA256 of a local package given with GOS\_WINDOWS\_PACKAGE\_PATH (same as -ExpectedSha256); without it the local package is installed unverified with a warning. |
 <!-- gos-env:end -->
 
 Example — install Go in your home directory (no sudo needed):
@@ -547,16 +547,70 @@ inside the active install slot, because activation moves that slot atomically.
 9. Keeps the previous install available for `gos rollback`
 10. Confirms with `go version`
 
-No symlinks, no shims, no magic. Just a clean install of the official Go binary.
+The default layout uses a real Go directory; opt-in side-by-side mode uses an
+activation symlink. Neither mode uses shims.
 
 ---
 
 ## Uninstallation
 
+### Optional: remove managed Go data first
+
+Removing the `gos` command does **not** remove Go or its cache. If you want
+those removed too, do this **before** uninstalling the command. Restore the
+same `GOS_*` and XDG overrides used for installation; an unset variable cannot
+recover an old custom location. Stop running Go/gos processes first.
+
+In Bash or Zsh, inspect the effective locations and preview the cleanup:
+
+```bash
+# gos-uninstall:preview
+# Strip trailing slashes so rm removes an activation symlink, not its target.
+gos_install_dir="${GOS_INSTALL_DIR:-/usr/local/go}"
+gos_install_dir="${gos_install_dir%/}"
+gos_versions_dir="${GOS_VERSIONS_DIR:-}"
+gos_versions_dir="${gos_versions_dir%/}"
+gos_cache_dir="${GOS_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/gos}"
+printf 'Active Go: %s\nVersions (empty = disabled): %s\nCache: %s\n' \
+  "$gos_install_dir" "$gos_versions_dir" "$gos_cache_dir"
+gos status
+gos prune --rollback --dry-run
+```
+
+**Stop if a command fails or any path is unexpected.** Only continue after
+confirming these are the Go-specific locations you want to delete, not shared
+data directories. The following commands prompt before deleting installations;
+use `sudo` only for a confirmed root-owned Go path if permission is denied.
+
+```bash
+# gos-uninstall:data
+gos prune --rollback   # remove known cached archives, feed metadata and rollback/residue
+rm -ri -- "$gos_install_dir"
+if [ -n "$gos_versions_dir" ]; then
+  rm -ri -- "$gos_versions_dir"
+fi
+# Remove only an empty cache directory; leave any unrelated contents intact.
+if [ -d "$gos_cache_dir" ]; then
+  rmdir -- "$gos_cache_dir"
+fi
+# Remove only the three files written by gos completions --install.
+rm -i -- "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/gos" \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_gos" \
+  "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/gos.fish"
+```
+
+Missing completion files need no cleanup. A non-empty cache directory is left
+for manual inspection rather than recursively deleting unrelated files.
+
+### Remove the gos command
+
+Choose the method you originally used:
+
 **If installed via curl | bash:**
 
 ```bash
-sudo rm /usr/local/bin/gos
+rm -i -- "${GOS_BIN_DIR:-/usr/local/bin}/gos"
+# If this confirmed command path is root-owned, repeat with sudo.
 ```
 
 **If installed via Homebrew:**
@@ -569,44 +623,38 @@ brew untap johnny4young/tap
 **If installed via PowerShell on Windows:**
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\gos\uninstall.ps1"
+$gosHome = $env:GOS_HOME
+if ([string]::IsNullOrWhiteSpace($gosHome)) {
+  $gosHome = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\gos'
+}
+# If you installed with -InstallDir, set $gosHome to that original directory.
+& (Join-Path $gosHome 'uninstall.ps1') -InstallDir $gosHome
 ```
 
-**If installed via git clone:**
+**If installed via git clone:** inspect your original clone location and any
+uncommitted work before removing it (the quick-start example uses `$HOME/.gos`).
+Do not remove that directory wholesale if you keep unrelated files there.
 
-```bash
-rm -rf ~/.gos
-```
-
-Then remove the `PATH` and `source` lines from your shell config file.
-
-Removing the `gos` command leaves what it managed in place. To remove that too:
-
-```bash
-gos prune --rollback                 # cached archives and the rollback copy
-sudo rm -rf /usr/local/go            # the active Go (GOS_INSTALL_DIR)
-rm -rf "$HOME/.gos/versions"         # side-by-side versions (GOS_VERSIONS_DIR), if used
-rm -rf "$HOME/.cache/gos"            # GOS_CACHE_DIR, if prune was not run
-rm -f "$HOME/.local/share/bash-completion/completions/gos" \
-      "$HOME/.local/share/zsh/site-functions/_gos" \
-      "$HOME/.config/fish/completions/gos.fish"   # completions --install targets
-```
+Finally, remove the gos-related `PATH`, `source`, and auto-switch hook lines
+from your shell config and open a new terminal.
 
 ---
 
 ## Troubleshooting
 
-`gos doctor` checks every item below and prints a fix for each problem it
-finds; `gos doctor --json` is the same report for scripts.
+`gos doctor` checks local platform, paths, tools, checksum policy and install
+state, with suggested fixes; `gos doctor --json` exposes those diagnostics to
+scripts. It does not test network reachability, project-manifest resolution or
+the Windows launcher. Use the symptom-specific checks below for those cases.
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `go version` still shows the old Go after `gos install` | Another Go is earlier on `PATH` (Homebrew, a manual install) | `gos which` shows which binary wins; put `$GOS_INSTALL_DIR/bin` first, or `eval "$(gos env)"` |
-| `Error: another gos operation is running` | A previous gos was interrupted, or one is running | `gos status` shows the lock and its pid; remove `GOS_INSTALL_DIR.gos-lock` only when nothing is running |
+| `Error: another gos operation is running` | A previous gos was interrupted, or one is running | `gos status` shows the lock and its pid; remove `${GOS_INSTALL_DIR:-/usr/local/go}.gos-lock` only after verifying no gos operation is running (strip any trailing slash from the install path first) |
 | `Residue:` or `Orphaned backup found` in `gos status` | An install was interrupted between renames | `gos prune --rollback` removes the residue once the active Go works |
 | `Rollback: broken link` | The side-by-side version the rollback pointed at was uninstalled | `gos prune --rollback`; the next install creates a new rollback |
 | Password prompt on every install | `GOS_INSTALL_DIR` is root-owned (`/usr/local/go`) | Set `GOS_INSTALL_DIR` under your home directory; gos only escalates for the directory it writes |
-| `checksum verification required but ...` (exit 4) | `GOS_REQUIRE_CHECKSUM` is set and `jq`/`python3` or a SHA256 tool is missing | Install `jq` or `python3` plus `sha256sum`/`shasum`, or unset the policy |
+| `checksum verification required but ...` (exit 4) | `GOS_REQUIRE_CHECKSUM` is set and `jq`/`python3` or a SHA256 tool is missing | Install `jq` or `python3` plus `sha256sum`/`shasum`, then retry; check feed availability and the diagnostic before changing verification policy |
 | `could not fetch ...` (exit 3) | go.dev, the mirror, or a proxy is unreachable | Check `HTTPS_PROXY`; `GOS_DOWNLOAD_MIRROR` moves only archive downloads, metadata always comes from go.dev |
 | `gos requires Git Bash` on Windows | Only the WSL launcher `bash.exe` is installed | Install Git for Windows, or run gos inside WSL |
 | `go 1.24` in `go.mod` but the hook says it is not installed | No `go1.24.x` is installed, or several are | `gos use` installs one; with several installed, pin an exact version with `gos pin` |

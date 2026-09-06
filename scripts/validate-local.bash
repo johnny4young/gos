@@ -65,15 +65,6 @@ esac
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-# Every tracked shell file, from git like CI's syntax gate, so a new script
-# or suite needs no registration here either.
-syntax_files=()
-while IFS= read -r tracked_shell_file; do
-  syntax_files=(${syntax_files[@]:+"${syntax_files[@]}"} "$tracked_shell_file")
-done <<EOF
-$(git ls-files '*.sh' '*.bash')
-EOF
-
 shellcheck_files=(
   gos.sh
   install.sh
@@ -192,7 +183,13 @@ require_tool ruby "workflow YAML syntax validation"
 run scripts/sync-command-surfaces.bash --check
 run_optional shfmt -d -i 2 -ci -bn .
 run_optional shellcheck "${shellcheck_files[@]}"
-run bash -n "${syntax_files[@]}"
+# Check each file separately: bash -n accepts only one script, not a file list.
+syntax_list="$(mktemp)"
+trap 'rm -f "$syntax_list"' EXIT
+git ls-files -z '*.sh' '*.bash' >"$syntax_list"
+while IFS= read -r -d '' tracked_shell_file; do
+  run bash -n -- "$tracked_shell_file"
+done <"$syntax_list"
 
 # Every tracked tests/*.bash suite, discovered by the runner (see its header
 # for the per-OS rules); GOS_TEST_JOBS=1 runs them serially.

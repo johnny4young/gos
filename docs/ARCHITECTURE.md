@@ -199,7 +199,8 @@ through the CLI. `scripts/run-tests.bash` discovers every tracked
 each suite's `# gos-suite:` header for its per-OS rules, and runs them in
 parallel; adding a suite is adding a file. The CLI feature suites (`cli-*`,
 `install-cache`, `lock-rollback`, `doctor-status`, `project-env`,
-`feed-check`, `self-update`, `side-by-side`, `unit-versions`) share
+`feed-check`, `self-update`, `side-by-side`, `unit-versions`, `downloaders`,
+`property-versions`) share
 `tests/lib-features.bash`, whose `run_gos` also runs cases with a restricted
 `PATH` exposing only `jq`, only `python3`, or neither. CI requires both
 parsers; local runs report unavailable parser cases explicitly.

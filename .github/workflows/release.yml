@@ -363,7 +363,10 @@ jobs:
     name: Update Homebrew Formula
     needs: [validate-release-ref, release]
     # Pre-releases must not reach the Homebrew tap; brew serves one version.
-    if: ${{ needs.validate-release-ref.outputs.is_prerelease != 'true' }}
+    # Tag pushes intentionally skip the manual preflight/bump ancestors.
+    # Override implicit success(), but still require a successful release and
+    # never continue package updates after cancellation.
+    if: ${{ !cancelled() && needs.validate-release-ref.result == 'success' && needs.release.result == 'success' && needs.validate-release-ref.outputs.is_prerelease != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -425,7 +428,10 @@ jobs:
     # so this can only run once the release exists. It commits the bumped
     # PKGBUILD/.SRCINFO to main; publishing to aur.archlinux.org stays a
     # maintainer step (packaging/README.md), so no AUR credential lives here.
-    if: ${{ needs.validate-release-ref.outputs.is_prerelease != 'true' }}
+    # Tag pushes intentionally skip the manual preflight/bump ancestors.
+    # Override implicit success(), but still require a successful release and
+    # never continue package updates after cancellation.
+    if: ${{ !cancelled() && needs.validate-release-ref.result == 'success' && needs.release.result == 'success' && needs.validate-release-ref.outputs.is_prerelease != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

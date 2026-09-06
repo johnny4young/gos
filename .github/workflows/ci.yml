@@ -77,11 +77,10 @@ jobs:
           sudo apt-get install -y zsh fish
 
       # Every tracked shell file, derived from git so a new script can never be
-      # left out of the syntax gate (validate-local keeps the explicit list and an
-      # invariant asserts the two agree).
+      # left out of the syntax gate (validate-local uses the same discovery).
       - name: Bash syntax
         run: |
-          git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --
+          git ls-files -z '*.sh' '*.bash' | xargs -0 -n 1 bash -n --
 
       - name: Command surface sync
         run: |
@@ -109,7 +108,7 @@ jobs:
           ln -s /bin/bash "${RUNNER_TEMP}/bash32/bash"
           export PATH="${RUNNER_TEMP}/bash32:${PATH}"
           bash --version | head -n 1 | grep -F 'version 3.2'
-          bash scripts/run-tests.bash --jobs 2 unit-versions cli-readonly install-cache side-by-side install-transaction checksum
+          bash scripts/run-tests.bash --jobs 2
 
       - name: PowerShell syntax
         if: runner.os == 'Windows'
@@ -123,7 +122,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           # shellcheck disable=SC2016 # PowerShell, not Bash, expands these variables.
-          powershell -NoProfile -ExecutionPolicy Bypass -Command '$files = @("install.ps1", "packaging/chocolatey/tools/chocolateyInstall.ps1", "packaging/chocolatey/tools/chocolateyUninstall.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1"); Import-Module PSScriptAnalyzer -ErrorAction Stop; $findings = @(); foreach ($file in $files) { $findings += @(Invoke-ScriptAnalyzer -Path $file -Severity Error) }; if ($findings.Count) { $findings | Format-List; exit 1 }'
+          powershell -NoProfile -ExecutionPolicy Bypass -Command '$files = @("install.ps1", "packaging/chocolatey/tools/chocolateyInstall.ps1", "packaging/chocolatey/tools/chocolateyUninstall.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1"); Import-Module PSScriptAnalyzer -ErrorAction Stop; $findings = @(); foreach ($file in $files) { $findings += @(Invoke-ScriptAnalyzer -Path $file -Severity Error -ErrorAction Stop) }; if ($findings.Count) { $findings | Format-List; exit 1 }'
 
       - name: PowerShell installer functional test
         if: runner.os == 'Windows'
