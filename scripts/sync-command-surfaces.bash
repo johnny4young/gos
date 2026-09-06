@@ -269,6 +269,8 @@ transaction_dir=""
 transaction_committed=0
 transaction_targets=()
 while IFS= read -r target; do
+  # Ruby on Windows writes CRLF; the paths must not carry the CR.
+  target="${target%$'\r'}"
   [ -n "$target" ] || continue
   transaction_targets=(${transaction_targets[@]:+"${transaction_targets[@]}"} "$target")
 done <<EOF_TARGETS

@@ -33,6 +33,7 @@ assert_contains "$output" "Usage: sync-command-surfaces.bash [--check|--write]" 
 # never check a stale copy of it.
 sync_targets=()
 while IFS= read -r sync_target; do
+  sync_target="${sync_target%$'\r'}"
   [ -n "$sync_target" ] || continue
   sync_targets=(${sync_targets[@]:+"${sync_targets[@]}"} "$sync_target")
 done <<EOF
