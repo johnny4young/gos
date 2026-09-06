@@ -268,14 +268,24 @@ fi
 transaction_dir=""
 transaction_committed=0
 transaction_targets=()
+# A substitution inside the read loop's heredoc hides the producer's status.
+# Capture first, and never write from a partial or empty snapshot target list.
+if ! target_list="$(run_sync --targets)"; then
+  printf 'could not discover command surface targets; refusing to sync\n' >&2
+  exit 1
+fi
 while IFS= read -r target; do
   # Ruby on Windows writes CRLF; the paths must not carry the CR.
   target="${target%$'\r'}"
   [ -n "$target" ] || continue
   transaction_targets=(${transaction_targets[@]:+"${transaction_targets[@]}"} "$target")
 done <<EOF_TARGETS
-$(run_sync --targets)
+$target_list
 EOF_TARGETS
+if [ "${#transaction_targets[@]}" -eq 0 ]; then
+  printf 'command surface target list is empty; refusing to sync\n' >&2
+  exit 1
+fi
 
 finish_transaction() {
   transaction_committed=1

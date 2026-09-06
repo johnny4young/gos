@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Command-surface synchronization rejects failed or empty target discovery before writing; regression tests exercise restoration of every target's bytes and modes after a real partial write, independently of render preflight failures.
+
 - PowerShell installs reject invalid checksum policies and unverified `main` payloads in strict mode; Chocolatey Git detection tolerates missing installation roots. Native regressions cover checksum enforcement and custom-directory uninstall from a fresh shell. Release package updates explicitly handle skipped manual-only ancestors, and PowerShell analyzer invocation errors fail CI.
 
 - Classified failures now survive all list output modes; doctor probes keep a single report, missing operands return usage errors, and lock creation failures remain generic. Trailing JSON flags are honored even for early argument/configuration failures without consuming child command flags. Bare status includes a Project line when no manifest exists.
