@@ -109,6 +109,9 @@ BASH
 Dir.mktmpdir("gos-uninstall-docs") do |dir|
   home = File.join(dir, "home with spaces")
   FileUtils.mkdir_p(home)
+  # Ruby is native on Windows, while Bash interprets HOME in its POSIX path
+  # namespace. Derive expectations and create fixtures through that same shell.
+  home = run!("bash", "-c", 'cd "$1" && pwd', "bash", home).strip
   empty = %w[GOS_INSTALL_DIR GOS_VERSIONS_DIR GOS_CACHE_DIR XDG_CACHE_HOME XDG_DATA_HOME XDG_CONFIG_HOME].to_h { |name| [name, nil] }
   cases = [
     [empty.merge("HOME" => home), "/usr/local/go", nil, "#{home}/.cache/gos", "#{home}/.local/share", "#{home}/.config"],
@@ -116,12 +119,12 @@ Dir.mktmpdir("gos-uninstall-docs") do |dir|
     [empty.merge("HOME" => home, "XDG_CACHE_HOME" => "#{home}/xdg cache"), "/usr/local/go", nil, "#{home}/xdg cache/gos", "#{home}/.local/share", "#{home}/.config"]
   ]
   cases.each do |env, install, versions, cache, data, config|
-    FileUtils.mkdir_p(cache)
+    run!("bash", "-c", 'mkdir -p -- "$1"', "bash", cache)
     output = run!(env, "bash", "-c", doubles + preview + "\n" + cleanup)
     assert(output.include?("<rm><-ri><--><#{install}>"), "uninstall uses exact install path without trailing slash")
     assert(versions.nil? || output.include?("<rm><-ri><--><#{versions}>"), "uninstall uses configured versions path")
     assert(!versions.nil? || !output.include?("<rm><-ri><--><#{home}/.gos/versions>"), "no guessed versions directory")
-    assert(output.include?("<rmdir><--><#{cache}>"), "uninstall only removes empty effective cache")
+    assert(output.include?("<rmdir><--><#{cache}>"), "uninstall only removes empty effective cache #{cache.inspect}: #{output.inspect}")
     assert(output.include?("<#{data}/bash-completion/completions/gos><#{data}/zsh/site-functions/_gos><#{config}/fish/completions/gos.fish>"), "completion cleanup honors XDG overrides")
     assert(output.index("<gos><prune><--rollback>\n") < output.index("<rm>"), "prune executes before installation removal")
     assert(!output.include?("<-rf>"), "documentation must not recursively force-delete custom directories")
