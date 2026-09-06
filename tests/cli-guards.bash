@@ -354,3 +354,13 @@ GOS_TEST_GO_BROKEN=1 run_gos "$case_dir" bash "$script" current --json
 assert_json "$output" "current --json none"
 assert_contains "$output" '{"found":false,"version":null,"current":null}' "current json none"
 pass "current --json reports found:false when no working Go exists"
+
+# completions --install must report a directory it cannot create instead of
+# failing inside mkdir with a bare shell error.
+case_dir="${test_root}/completions-install-failure"
+mkdir -p "$case_dir"
+: >"${case_dir}/not-a-directory"
+XDG_DATA_HOME="${case_dir}/not-a-directory" run_gos "$case_dir" bash "$script" completions bash --install
+[ "$status" -ne 0 ] || fail "completions --install into an unusable XDG_DATA_HOME should fail"
+assert_contains "$output" "could not create completion directory: ${case_dir}/not-a-directory/bash-completion/completions" "completions --install directory error"
+pass "completions --install explains an uncreatable target directory"

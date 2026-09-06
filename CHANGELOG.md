@@ -53,6 +53,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- New test coverage for migrating a flat install into side-by-side mode, ambiguous bare-minor uninstalls, `run --json`, `each --` without a version list, and an uncreatable `completions --install` directory.
 - The seven command-surface generators are now one `scripts/sync-command-surfaces.bash` driven by a declarative target table: every surface is rendered in memory first, `--check` reports all stale files at once, and the write transaction snapshots exactly the files the table names (`--targets`). No generated file changes.
 - Windows: `uninstall.ps1` removes the directory it lives in, so a `GOS_HOME` install is removable from a fresh shell; the Chocolatey package warns when Git Bash is missing (the WSL launcher does not count); `install.ps1` honours `GOS_REQUIRE_CHECKSUM=1`/`feed` and refuses an unverifiable local package like `install.sh` does.
 - Release automation: an `update-aur` job commits the bumped `PKGBUILD`/`.SRCINFO` to `main` after each release (publishing to the AUR stays a maintainer step), and the Homebrew update fails instead of silently skipping when the tap deploy key is missing on the canonical repository. CI gains a pinned `actionlint` job and a PSScriptAnalyzer (error severity) step on Windows.

@@ -247,3 +247,48 @@ else
   rm -f "$orphan_probe"
   pass "orphaned versions link test skipped (filesystem lacks symlink support)"
 fi
+
+# Coverage the audit found missing: migrating a flat install into side-by-side
+# mode (a real directory is backed up before the first symlink), an ambiguous
+# bare-minor uninstall, and the two argument errors run/each reserve for their
+# own parsers.
+coverage_probe="${test_root}/coverage-probe"
+if ln -s "$script" "$coverage_probe" 2>/dev/null && [ -L "$coverage_probe" ]; then
+  rm -f "$coverage_probe"
+  case_dir="${test_root}/flat-to-side-by-side"
+  versions_dir="${case_dir}/versions"
+  create_old_install "${case_dir}/go"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" install 1.21.6
+  [ "$status" -eq 0 ] || fail "migrating a flat install into side-by-side mode failed: ${output}"
+  assert_contains "$output" "Backing up existing Go installation..." "flat install is backed up before the first link"
+  [ -L "${case_dir}/go" ] || fail "the install slot must become a symlink"
+  [ "$(readlink "${case_dir}/go")" = "${versions_dir}/go1.21.6" ] || fail "the symlink must point at the new version"
+  [ -d "${case_dir}/go.gos-rollback" ] && [ ! -L "${case_dir}/go.gos-rollback" ] || fail "the flat install must become the rollback directory"
+  [ "$(cat "${case_dir}/go.gos-rollback/VERSION_MARKER")" = "old" ] || fail "the rollback must be the previous flat install"
+  pass "a flat install migrates into side-by-side mode with the old Go as rollback"
+
+  case_dir="${test_root}/uninstall-ambiguous"
+  versions_dir="${case_dir}/versions"
+  for fixture_version in 1.20.0 1.20.5 1.21.6; do
+    mkdir -p "${versions_dir}/go${fixture_version}/bin"
+    printf '#!/usr/bin/env bash\necho "go version go%s darwin/arm64"\n' "$fixture_version" >"${versions_dir}/go${fixture_version}/bin/go"
+    chmod +x "${versions_dir}/go${fixture_version}/bin/go"
+  done
+  ln -s "${versions_dir}/go1.21.6" "${case_dir}/go"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.20
+  [ "$status" -ne 0 ] || fail "an ambiguous bare-minor uninstall must fail"
+  assert_contains "$output" "'1.20' matches multiple installed Go versions; re-run with an exact version:" "ambiguous uninstall error"
+  assert_contains "$output" "  go1.20.0" "ambiguous uninstall lists the first candidate"
+  assert_contains "$output" "  go1.20.5" "ambiguous uninstall lists the second candidate"
+  [ -d "${versions_dir}/go1.20.0" ] && [ -d "${versions_dir}/go1.20.5" ] || fail "an ambiguous uninstall must remove nothing"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run --json 1.21.6 go version
+  assert_status 2 "$status" "run --json is a usage error" "$output"
+  assert_contains "$output" "gos run does not support --json" "run rejects --json"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each -- go version
+  assert_status 2 "$status" "each without a version list is a usage error" "$output"
+  assert_contains "$output" "gos each needs a comma-separated version list before --." "each requires the version list"
+  pass "ambiguous uninstalls remove nothing and run/each keep their own argument errors"
+else
+  rm -f "$coverage_probe"
+  pass "side-by-side coverage cases skipped (filesystem lacks symlink support)"
+fi
