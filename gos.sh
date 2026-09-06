@@ -3251,6 +3251,16 @@ cmd_verify() {
     _gos_fail verification "could not enumerate the official archive files."
     return 1
   fi
+  # Existence and symlink tests stay builtin; the byte comparison hashes both
+  # trees in bulk (one hasher process per xargs batch) instead of one cmp per
+  # file, which is what keeps 15k files under a minute on Git Bash for Windows.
+  local hash_tool existing_count=0 stage_hash target_hash
+  if command -v sha256sum &>/dev/null; then
+    hash_tool="sha256sum"
+  else
+    hash_tool="shasum -a 256"
+  fi
+  exec 4>"${tmp_dir}/existing"
   while IFS= read -r -d '' rel; do
     rel="${rel#./}"
     [ -n "$rel" ] || continue
@@ -3259,12 +3269,61 @@ cmd_verify() {
       missing="${missing}${rel}"$'\n'
       missing_json="${missing_json}${missing_json:+,}$(_gos_json_string "$rel")"
       missing_count=$((missing_count + 1))
-    elif [ -L "${target_dir}/${rel}" ] || ! cmp -s "${staged_go_dir}/${rel}" "${target_dir}/${rel}"; then
+    elif [ -L "${target_dir}/${rel}" ]; then
+      # The archive ships a regular file; a symlink in its place is a change.
       modified="${modified}${rel}"$'\n'
       modified_json="${modified_json}${modified_json:+,}$(_gos_json_string "$rel")"
       modified_count=$((modified_count + 1))
+    else
+      case "$rel" in
+        *$'\n'*)
+          # Hashers disagree on how to print such names (GNU escapes them,
+          # BSD does not), so hash these few through stdin, one at a time.
+          # shellcheck disable=SC2086
+          stage_hash=$($hash_tool <"${staged_go_dir}/${rel}" | awk '{ print $1 }') || stage_hash=""
+          # shellcheck disable=SC2086
+          target_hash=$($hash_tool <"${target_dir}/${rel}" | awk '{ print $1 }') || target_hash=""
+          if [ -z "$stage_hash" ] || [ "$stage_hash" != "$target_hash" ]; then
+            modified="${modified}${rel}"$'\n'
+            modified_json="${modified_json}${modified_json:+,}$(_gos_json_string "$rel")"
+            modified_count=$((modified_count + 1))
+          fi
+          ;;
+        *)
+          printf '%s\0' "$rel" >&4
+          existing_count=$((existing_count + 1))
+          ;;
+      esac
     fi
   done <"${tmp_dir}/files"
+  exec 4>&-
+  if [ "$existing_count" -gt 0 ]; then
+    # shellcheck disable=SC2086 # hash_tool is a command plus its flags
+    if ! (cd "$staged_go_dir" && xargs -0 $hash_tool <"${tmp_dir}/existing" | awk '{ sub(/^\\/, "", $1); print $1 }') >"${tmp_dir}/stage-hashes" \
+      || [ "$(grep -c . "${tmp_dir}/stage-hashes")" -ne "$existing_count" ]; then
+      _gos_error "could not hash every file of the official go${version} archive."
+      return 1
+    fi
+    # shellcheck disable=SC2086
+    if ! (cd "$target_dir" && xargs -0 $hash_tool <"${tmp_dir}/existing" | awk '{ sub(/^\\/, "", $1); print $1 }') >"${tmp_dir}/target-hashes" \
+      || [ "$(grep -c . "${tmp_dir}/target-hashes")" -ne "$existing_count" ]; then
+      _gos_error "could not hash every file of go${version} at ${target_dir}."
+      return 1
+    fi
+    # Pair each NUL-separated name with its hash line by position: names may
+    # contain newlines (the hashers escape those into one line per file).
+    exec 5<"${tmp_dir}/stage-hashes" 6<"${tmp_dir}/target-hashes"
+    while IFS= read -r -d '' rel; do
+      IFS= read -r stage_hash <&5 || stage_hash=""
+      IFS= read -r target_hash <&6 || target_hash=""
+      if [ -z "$stage_hash" ] || [ "$stage_hash" != "$target_hash" ]; then
+        modified="${modified}${rel}"$'\n'
+        modified_json="${modified_json}${modified_json:+,}$(_gos_json_string "$rel")"
+        modified_count=$((modified_count + 1))
+      fi
+    done <"${tmp_dir}/existing"
+    exec 5<&- 6<&-
+  fi
   rm -rf "$tmp_dir"
   GOS_TMP_DIR=""
 

@@ -237,31 +237,38 @@ if [ "${GOS_TEST_SHA256_FAIL:-0}" = "1" ]; then
   exit 1
 fi
 
-if grep -q GOS-TEST-CORRUPT "$1" 2>/dev/null; then
-  printf 'corruptsha  %s\n' "$1"
-  exit 0
-fi
-
-# Digest reported for every file when set; --sha256 needs real 64-hex values.
-if [ -n "${GOS_TEST_SHA256_VALUE:-}" ]; then
-  printf '%s  %s\n' "$GOS_TEST_SHA256_VALUE" "$1"
-  exit 0
-fi
-
-# A resumable download hashes the .partial file, which once complete is the
-# archive itself, so match on the archive name regardless of that suffix.
-probe="${1%.partial}"
-case "$probe" in
-  */gos.sh)
-    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  %s\n' "$1"
-    ;;
-  *go1.20.0.darwin-arm64.tar.gz)
-    printf 'oldsha  %s\n' "$1"
-    ;;
-  *)
-    printf 'expectedsha  %s\n' "$1"
-    ;;
-esac
+# Like the real tool, hash every argument: gos verify hashes whole trees in
+# one invocation per xargs batch.
+for file in "$@"; do
+  if grep -q GOS-TEST-CORRUPT "$file" 2>/dev/null; then
+    printf 'corruptsha  %s\n' "$file"
+    continue
+  fi
+  # Digest reported for every file when set; --sha256 needs real 64-hex values.
+  if [ -n "${GOS_TEST_SHA256_VALUE:-}" ]; then
+    printf '%s  %s\n' "$GOS_TEST_SHA256_VALUE" "$file"
+    continue
+  fi
+  # A resumable download hashes the .partial file, which once complete is the
+  # archive itself, so match on the archive name regardless of that suffix.
+  probe="${file%.partial}"
+  case "$probe" in
+    */gos.sh)
+      printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  %s\n' "$file"
+      ;;
+    *go1.20.0.darwin-arm64.tar.gz)
+      printf 'oldsha  %s\n' "$file"
+      ;;
+    *.tar.gz | *.zip)
+      # Archives hash to the digest the fake feed publishes.
+      printf 'expectedsha  %s\n' "$file"
+      ;;
+    *)
+      # Extracted files hash by content so tree comparisons notice edits.
+      printf 'tree%s  %s\n' "$(cksum <"$file" | cut -d' ' -f1)" "$file"
+      ;;
+  esac
+done
 FAKE_SHA256SUM
 
 cat >"${fake_bin}/tar" <<'FAKE_TAR'
