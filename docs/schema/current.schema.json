@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/current.schema.json",
+  "title": "gos current --json",
+  "description": "The active Go version.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "found": {
+      "type": "boolean",
+      "description": "False when no go binary is on PATH."
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bare version (1.26.1), null when not found."
+    },
+    "current": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+      "description": "go-prefixed version (go1.26.1), null when not found."
+    }
+  },
+  "required": [
+    "found",
+    "version",
+    "current"
+  ]
+}

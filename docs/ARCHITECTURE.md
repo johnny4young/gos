@@ -185,7 +185,9 @@ Invariant, enforced by `tests/workflows.bash`: every function that writes under
   failure, and 5 a blocking mutation lock. `gos each` keeps exit 1 when any
   version fails; `gos run` passes through its child command's exit status.
 - `--json` (leading or per command) is the stable machine contract for the
-  commands listed in `gos help`; fields are only ever added. Failures print
+  commands listed in `gos help`; fields are only ever added. Every document is
+  described by a JSON Schema in `docs/schema/` and `tests/json-schema.bash`
+  validates the real outputs against them. Failures print
   one `{"error":{"code":"usage|network|verification|lock|failure","message":"..."}}`
   document. Doctor retains its diagnostic report and exit 1 for problems;
   invalid doctor arguments still produce a usage error document.

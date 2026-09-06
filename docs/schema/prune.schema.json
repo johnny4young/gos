@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/prune.schema.json",
+  "title": "gos prune [--rollback] [--dry-run] --json",
+  "description": "Cache cleanup report.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "dry_run": {
+      "type": "boolean",
+      "description": "True when nothing was deleted."
+    },
+    "removed_archives": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cached archives removed (or that would be)."
+    },
+    "removed_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Bytes freed by archives."
+    },
+    "removed_feed_files": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cached feed metadata files removed."
+    },
+    "removed_feed_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Bytes freed by feed metadata."
+    },
+    "cache_dir": {
+      "type": "string",
+      "description": "GOS_CACHE_DIR."
+    },
+    "rollback": {
+      "type": "string",
+      "description": "What happened to the rollback installation: kept, removed, or none.",
+      "enum": [
+        "kept",
+        "removed",
+        "none"
+      ]
+    },
+    "orphaned_backups_found": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Leftover backups from interrupted installs found."
+    },
+    "orphaned_backups_removed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Of those, removed (only with --rollback)."
+    }
+  },
+  "required": [
+    "dry_run",
+    "removed_archives",
+    "removed_bytes",
+    "removed_feed_files",
+    "removed_feed_bytes",
+    "cache_dir",
+    "rollback",
+    "orphaned_backups_found",
+    "orphaned_backups_removed"
+  ]
+}

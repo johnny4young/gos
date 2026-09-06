@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/verify.schema.json",
+  "title": "gos verify [version] --json",
+  "description": "Result of re-verifying an installed Go tree against the official archive. ok=false exits 4.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+      "description": "Verified version."
+    },
+    "install_dir": {
+      "type": "string",
+      "description": "Directory that was verified."
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filename",
+        "sha256",
+        "source"
+      ],
+      "properties": {
+        "filename": {
+          "type": "string",
+          "description": "Official archive name."
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Official digest the archive was verified against."
+        },
+        "source": {
+          "type": "string",
+          "description": "Where the digest came from.",
+          "enum": [
+            "feed",
+            "file",
+            "explicit"
+          ]
+        }
+      }
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checked",
+        "modified",
+        "missing"
+      ],
+      "properties": {
+        "checked": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files the archive ships."
+        },
+        "modified": {
+          "type": "array",
+          "description": "Shipped files whose installed copy differs (paths relative to install_dir).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing": {
+          "type": "array",
+          "description": "Shipped files absent from the install.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "True when no file is modified or missing."
+    }
+  },
+  "required": [
+    "version",
+    "install_dir",
+    "archive",
+    "files",
+    "ok"
+  ]
+}

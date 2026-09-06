@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/use-print.schema.json",
+  "title": "gos use --print --json",
+  "description": "The Go version a project requests, without installing it.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+      "description": "Requested version, go-prefixed (may be a bare minor)."
+    },
+    "source": {
+      "type": "string",
+      "description": "File the version was read from."
+    }
+  },
+  "required": [
+    "version",
+    "source"
+  ]
+}

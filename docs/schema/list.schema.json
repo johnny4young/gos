@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/list.schema.json",
+  "title": "gos list --json (with or without --minor)",
+  "description": "Available Go versions from the go.dev feed, oldest first.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "versions": {
+      "type": "array",
+      "description": "Versions, go-prefixed, sorted ascending; --minor keeps the newest per minor.",
+      "items": {
+        "type": "string",
+        "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$"
+      }
+    }
+  },
+  "required": [
+    "versions"
+  ]
+}

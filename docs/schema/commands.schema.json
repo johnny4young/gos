@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/commands.schema.json",
+  "title": "gos __commands --json",
+  "description": "Visible command names in manifest order (used by the shell completions).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "commands": {
+      "type": "array",
+      "description": "Command names.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "commands"
+  ]
+}

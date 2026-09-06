@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/which.schema.json",
+  "title": "gos which [version] --json",
+  "description": "Path of the active or a side-by-side Go binary.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Path of the go binary."
+    },
+    "managed": {
+      "type": "boolean",
+      "description": "True when the binary lives under GOS_INSTALL_DIR or GOS_VERSIONS_DIR."
+    },
+    "install_dir": {
+      "type": "string",
+      "description": "GOS_INSTALL_DIR."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+      "description": "Requested side-by-side version; present only when one was given."
+    }
+  },
+  "required": [
+    "path",
+    "managed",
+    "install_dir"
+  ]
+}

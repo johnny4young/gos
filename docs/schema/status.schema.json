@@ -1,0 +1,194 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/status.schema.json",
+  "title": "gos status --json",
+  "description": "Offline dashboard for gos and the active Go.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "active": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+      "description": "Active Go version, or null when no go binary is on PATH."
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "managed",
+        "path",
+        "none"
+      ],
+      "description": "Where the active go comes from: managed (GOS_INSTALL_DIR), path (another go on PATH), or none."
+    },
+    "go_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Path of the active go binary, or null."
+    },
+    "install_dir": {
+      "type": "string",
+      "description": "GOS_INSTALL_DIR."
+    },
+    "layout": {
+      "type": "string",
+      "enum": [
+        "flat",
+        "side-by-side",
+        "symlink"
+      ],
+      "description": "flat when GOS_INSTALL_DIR is a plain directory, side-by-side when it links into GOS_VERSIONS_DIR, symlink when it links elsewhere."
+    },
+    "layout_target": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Symlink target in side-by-side mode, otherwise null."
+    },
+    "project": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Go version requested by the nearest .go-version, .tool-versions, or go.mod; null when none.",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "source",
+        "resolved",
+        "matches_active"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+          "description": "Requested version as written (may be a bare minor such as go1.24)."
+        },
+        "source": {
+          "type": "string",
+          "description": "File that requested it."
+        },
+        "resolved": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+          "description": "Installed version that satisfies a bare minor, or null."
+        },
+        "matches_active": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the active Go satisfies the request; null when it cannot be decided."
+        }
+      }
+    },
+    "rollback_available": {
+      "type": "boolean",
+      "description": "True when a usable rollback installation exists."
+    },
+    "rollback_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+      "description": "Version of the rollback installation, or null."
+    },
+    "rollback_state": {
+      "type": "string",
+      "description": "none, ok, or broken (dangling rollback symlink).",
+      "enum": [
+        "none",
+        "ok",
+        "broken"
+      ]
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dir",
+        "archives",
+        "bytes"
+      ],
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "GOS_CACHE_DIR."
+        },
+        "archives": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cached Go archives."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes used by cached archives."
+        }
+      }
+    },
+    "orphaned_backups": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Leftover .gos-backup.* directories from interrupted installs."
+    },
+    "lock": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Mutation lock, or null when none is held.",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "pid"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "description": "held when the owning process is alive (or unknown), stale otherwise.",
+          "enum": [
+            "held",
+            "stale"
+          ]
+        },
+        "pid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Owning process id, or null when unknown."
+        }
+      }
+    },
+    "gos_version": {
+      "type": "string",
+      "description": "Running gos version, without v prefix."
+    }
+  },
+  "required": [
+    "active",
+    "source",
+    "go_path",
+    "install_dir",
+    "layout",
+    "layout_target",
+    "project",
+    "rollback_available",
+    "rollback_version",
+    "rollback_state",
+    "cache",
+    "orphaned_backups",
+    "lock",
+    "gos_version"
+  ]
+}

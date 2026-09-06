@@ -124,7 +124,7 @@ Done. That's the whole setup.
 - **Resumable downloads** — an interrupted archive download resumes from where it stopped instead of restarting the whole transfer
 - **Test across versions** — `gos each 1.22,1.23,1.24 -- go test ./...` runs a command against several side-by-side versions and prints a pass/fail summary
 - **TTY diagnostics styling** — interactive `gos doctor` plus stderr `Error:`/`Warning:` lines use color and symbols; pipes, `NO_COLOR`, `GOS_NO_COLOR=1`, and JSON stay plain
-- **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `env`, `doctor`, `prune`, `version`, and `use --print`
+- **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `verify`, `self-verify`, `env`, `doctor`, `prune`, `version`, and `use --print`; every document has a [JSON Schema](docs/schema/README.md)
 - **Helpful when you mistype** — unknown commands suggest close matches (`gos isntall` → `install`), and `gos help <command>` shows a single command's usage
 - **Auto-detects everything** — OS (`darwin`, `linux`, `windows`, plus FreeBSD/OpenBSD/NetBSD/DragonFly) and architecture (`amd64`, `arm64`, `armv6l`, `386`, `riscv64`, `loong64`, `ppc64le`, `ppc64`, `s390x`)
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)
