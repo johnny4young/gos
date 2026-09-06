@@ -314,11 +314,13 @@ Bare `gos` prints a three-line status (active Go, project version or no manifest
 | `gos platforms [version] [--json]` | List supported OS/arch archives for a Go version |
 | `gos status [--json]` | Show an offline dashboard for gos and the active Go |
 | `gos which [version] [--json]` | Show the active or side-by-side Go binary path |
+| `gos verify [version] [--json]` | Re-verify an installed Go file by file against the official go.dev archive and its checksum |
 | `gos prune [--rollback] [--dry-run] [--json]` | Remove cached Go archives; `--rollback` also removes the rollback copy, `--dry-run` only previews |
 | `gos doctor [--fix] [--json]` | Diagnose gos, Go, PATH, and local tool dependencies; `--fix` creates safe missing directories and prints the shell setup line |
 | `gos env [--fish] [--auto] [--json]` | Print the PATH setup line or an opt-in per-shell auto-switch hook |
 | `gos completions <shell> [--install]` | Print a Bash, Zsh, or Fish completion script (or install it with `--install`) |
 | `gos self-update` | Update gos itself to the latest verified release |
+| `gos self-verify [--json]` | Verify the running gos script against its release checksums and build attestation |
 | `gos version [--json]` | Show gos version |
 | `gos help [command]` | Show this help message, or usage for one command |
 <!-- gos-commands:end -->
@@ -687,6 +689,21 @@ the Windows launcher. Use the symptom-specific checks below for those cases.
 Security reporting instructions, supported versions, and installer trust
 assumptions are documented in [SECURITY.md](SECURITY.md). Do not open public
 issues for sensitive vulnerability details.
+
+### Verifying what you run
+
+Two commands re-check what is already on disk against the published sources of truth:
+
+```bash
+# Compare every file the official go1.26.1 archive ships with the installed copy
+gos verify            # the managed Go
+gos verify 1.25.3     # any side-by-side version
+
+# Compare the running gos script with the checksums (and build attestation) of its release
+gos self-verify
+```
+
+`gos verify` obtains the archive the same way an install does (cache first, checksum from the go.dev feed), extracts it to a temporary directory, and lists every shipped file that is modified or missing; extra files the install gained (build caches) are ignored. `gos self-verify` fetches the `checksums.txt` of the release matching the running version, and, when the GitHub CLI is installed and authenticated, also runs `gh attestation verify`. Both exit `4` when something does not match and support `--json`.
 
 ---
 

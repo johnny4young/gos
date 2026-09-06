@@ -230,11 +230,13 @@ list
 platforms
 status
 which
+verify
 prune
 doctor
 env
 completions
 self-update
+self-verify
 version
 help
 COMMANDS
@@ -244,7 +246,7 @@ assert_not_contains "$commands_output" "__commands" "__commands public list"
 
 commands_json="$(bash "$script" __commands --json)"
 assert_json "$commands_json" "__commands --json"
-assert_contains "$commands_json" '"commands":["latest","install","rollback","uninstall","use","pin","run","each","check","current","list","platforms","status","which","prune","doctor","env","completions","self-update","version","help"]' "__commands json"
+assert_contains "$commands_json" '"commands":["latest","install","rollback","uninstall","use","pin","run","each","check","current","list","platforms","status","which","verify","prune","doctor","env","completions","self-update","self-verify","version","help"]' "__commands json"
 commands_details="$(bash "$script" __commands --details)"
 printf '%s\n' "$commands_details" | awk -F'|' 'NF != 3 { exit 1 }' \
   || fail "__commands --details must retain exactly three fields for existing consumers"

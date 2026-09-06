@@ -3069,6 +3069,313 @@ cmd_which() {
   printf '%s\n' "$go_path"
 }
 
+# Re-verify an installed Go tree against the official release: obtain the
+# archive for that version through the same trust path as an install (cache
+# or download, checksum from the go.dev feed), extract it to a temp dir, and
+# compare every file the archive ships with the installed copy. Files the
+# install has gained since (build caches, editor droppings) are ignored; a
+# modified or missing shipped file is a verification failure (exit 4).
+cmd_verify() {
+  local version="" arg target_dir installed tmp_dir stage_dir staged_go_dir
+  local checked=0 modified_count=0 missing_count=0 modified="" missing="" rel
+
+  for arg in "$@"; do
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      -*)
+        _gos_fail usage "unknown option for gos verify: ${arg}"
+        _gos_usage verify
+        return 1
+        ;;
+      *)
+        if [ -z "$version" ]; then
+          version="${arg#go}"
+        else
+          _gos_fail usage "unexpected argument for gos verify: ${arg}"
+          _gos_usage verify
+          return 1
+        fi
+        ;;
+    esac
+  done
+  # Progress lines belong to the human report; a JSON consumer gets one document.
+  if _gos_json_enabled; then
+    GOS_PROGRESS_FD=2
+  fi
+
+  if [ -n "$version" ]; then
+    _gos_validate_version "$version" || return 1
+    version=$(_gos_resolve_installed_version "$version")
+    if _gos_versions_mode; then
+      _gos_validate_versions_dir || return 1
+      target_dir=$(_gos_version_dir_for "$version")
+      if [ ! -x "${target_dir}/bin/go" ]; then
+        _gos_error "go${version} is not installed under ${GOS_VERSIONS_DIR}."
+        echo "Run 'gos list --installed' to see the installed versions." >&2
+        return 1
+      fi
+    else
+      target_dir="$GOS_INSTALL_DIR"
+      installed=$(_gos_go_version_of "${target_dir}/bin/go" 2>/dev/null) || installed=""
+      if [ "$installed" != "$version" ]; then
+        _gos_error "go${version} is not the managed Go at ${GOS_INSTALL_DIR} (found go${installed:-none})."
+        echo "Set GOS_VERSIONS_DIR to keep several versions and verify any of them." >&2
+        return 1
+      fi
+    fi
+  else
+    target_dir="$GOS_INSTALL_DIR"
+    if [ ! -x "${target_dir}/bin/go" ]; then
+      _gos_error "no managed Go installation at ${GOS_INSTALL_DIR}."
+      echo "Run 'gos latest' or 'gos install <version>' first." >&2
+      return 1
+    fi
+    version=$(_gos_go_version_of "${target_dir}/bin/go" 2>/dev/null) || version=""
+    if [ -z "$version" ]; then
+      _gos_error "could not read the Go version reported by ${target_dir}/bin/go."
+      return 1
+    fi
+  fi
+
+  _gos_progress "Verifying go${version} at ${target_dir}..."
+  tmp_dir=$(mktemp -d) || {
+    _gos_error "failed to create temp directory."
+    return 1
+  }
+  GOS_TMP_DIR="$tmp_dir"
+  stage_dir="${tmp_dir}/stage"
+  staged_go_dir="${stage_dir}/go"
+
+  _gos_obtain_archive "$version" true "$tmp_dir" || return 1
+  if [ -z "$_gos_obtained_sha" ]; then
+    _gos_fail verification "no official checksum is available for ${_gos_obtained_pkg}, so go${version} cannot be verified."
+    echo "Install jq or python3 so the go.dev downloads feed can be parsed." >&2
+    return 1
+  fi
+
+  _gos_progress "Extracting..."
+  if ! mkdir -p "$stage_dir" || ! _gos_extract_archive "$_gos_obtained_ext" "$_gos_obtained_archive" "$stage_dir"; then
+    _gos_discard_completed_partial
+    _gos_error "extraction failed."
+    return 1
+  fi
+  _gos_discard_completed_partial
+  if [ ! -d "$staged_go_dir" ]; then
+    _gos_error "the archive ${_gos_obtained_pkg} does not contain a go/ directory."
+    return 1
+  fi
+
+  _gos_progress "Comparing files..."
+  while IFS= read -r rel; do
+    rel="${rel#./}"
+    [ -n "$rel" ] || continue
+    checked=$((checked + 1))
+    if [ ! -f "${target_dir}/${rel}" ]; then
+      missing="${missing}${rel}"$'\n'
+      missing_count=$((missing_count + 1))
+    elif ! cmp -s "${staged_go_dir}/${rel}" "${target_dir}/${rel}"; then
+      modified="${modified}${rel}"$'\n'
+      modified_count=$((modified_count + 1))
+    fi
+  done <<EOF
+$(cd "$staged_go_dir" && find . -type f | LC_ALL=C sort)
+EOF
+  rm -rf "$tmp_dir"
+  GOS_TMP_DIR=""
+
+  local ok="true"
+  if [ "$modified_count" -ne 0 ] || [ "$missing_count" -ne 0 ]; then
+    ok="false"
+  fi
+
+  if _gos_json_enabled; then
+    printf '{"version":'
+    _gos_json_string "go${version}"
+    printf ',"install_dir":'
+    _gos_json_string "$target_dir"
+    printf ',"archive":{"filename":'
+    _gos_json_string "$_gos_obtained_pkg"
+    printf ',"sha256":'
+    _gos_json_string "$_gos_obtained_sha"
+    printf ',"source":'
+    _gos_json_string "$_gos_obtained_sha_source"
+    printf '},"files":{"checked":%s,"modified":' "$checked"
+    printf '%s' "$modified" | _gos_json_array_from_lines
+    printf ',"missing":'
+    printf '%s' "$missing" | _gos_json_array_from_lines
+    printf '},"ok":%s}\n' "$ok"
+    GOS_JSON_REPORT_EMITTED=1
+    if [ "$ok" != "true" ]; then
+      GOS_EXIT_CODE="$GOS_EXIT_VERIFICATION"
+      GOS_EXIT_CLASS="verification"
+      return 1
+    fi
+    return 0
+  fi
+
+  printf '%s files checked, %s modified, %s missing (archive %s, sha256 from %s).\n' \
+    "$checked" "$modified_count" "$missing_count" "$_gos_obtained_pkg" "$_gos_obtained_sha_source"
+  if [ "$ok" = "true" ]; then
+    if _gos_fd_color_enabled 1; then
+      printf '%s %s\n' "$(_gos_color_text 32 '✓')" "$(_gos_color_text 32 "go${version} at ${target_dir} matches the official release.")"
+    else
+      printf 'go%s at %s matches the official release.\n' "$version" "$target_dir"
+    fi
+    return 0
+  fi
+  [ -z "$modified" ] || printf '%s\n' "$modified" | sed '/^$/d; s/^/  modified: /'
+  [ -z "$missing" ] || printf '%s\n' "$missing" | sed '/^$/d; s/^/  missing:  /'
+  _gos_fail verification "go${version} at ${target_dir} differs from the official release (${modified_count} modified, ${missing_count} missing)."
+  echo "Reinstall it with 'gos install ${version}'." >&2
+  return 1
+}
+
+# URL of an asset published with a specific gos release tag.
+_gos_release_asset_url() {
+  local tag="$1" asset="$2"
+  printf '%s/download/%s/%s\n' "${GOS_RELEASE_BASE_URL%/latest/download}" "$tag" "$asset"
+}
+
+# Verify the running script against the checksums published with its own
+# release, and, when the GitHub CLI can do it, against the release's build
+# attestation. A checksum mismatch or a failed attestation exits 4; a missing
+# or unauthenticated gh only downgrades the attestation to "unavailable".
+cmd_self_verify() {
+  local arg script_path tmp_dir checksums release_url expected_candidates expected_count expected actual
+  local checksum_state attestation="unavailable" attestation_detail="" gh_output ok="true"
+
+  for arg in "$@"; do
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      *)
+        _gos_fail usage "unexpected argument for gos self-verify: ${arg}"
+        _gos_usage self-verify
+        return 1
+        ;;
+    esac
+  done
+
+  script_path=$(_gos_self_path) || {
+    _gos_error "could not resolve the path of the running gos script."
+    return 1
+  }
+  actual=$(_gos_sha256 "$script_path") || actual=""
+  if [ -z "$actual" ]; then
+    _gos_fail verification "no SHA256 tool is available to hash ${script_path}."
+    echo "Install sha256sum or shasum." >&2
+    return 1
+  fi
+
+  tmp_dir=$(mktemp -d) || {
+    _gos_error "failed to create temp directory."
+    return 1
+  }
+  GOS_TMP_DIR="$tmp_dir"
+  checksums="${tmp_dir}/checksums.txt"
+  release_url=$(_gos_release_asset_url "v${GOS_VERSION}" checksums.txt)
+  _gos_json_enabled || echo "Fetching the checksums of gos v${GOS_VERSION}..."
+  if ! _gos_download "$release_url" "$checksums" 2>/dev/null; then
+    _gos_fail network "could not download the checksums of gos v${GOS_VERSION} from ${release_url}."
+    echo "A git checkout or an unreleased build has no release to compare against." >&2
+    return 1
+  fi
+  expected_candidates=$(awk '{ f=$2; sub(/^\*/, "", f); if (f == "gos.sh") print $1 }' "$checksums")
+  expected_count=$(printf '%s\n' "$expected_candidates" | grep -c . || true)
+  if [ "$expected_count" -ne 1 ] || ! printf '%s\n' "$expected_candidates" \
+    | LC_ALL=C grep -qE '^[0-9a-fA-F]{64}$'; then
+    _gos_fail verification "checksums.txt of gos v${GOS_VERSION} must contain exactly one valid SHA256 entry for gos.sh."
+    return 1
+  fi
+  expected=$(printf '%s' "$expected_candidates" | tr '[:upper:]' '[:lower:]')
+  rm -rf "$tmp_dir"
+  GOS_TMP_DIR=""
+
+  if [ "$actual" = "$expected" ]; then
+    checksum_state="match"
+  else
+    checksum_state="mismatch"
+    ok="false"
+  fi
+
+  # Provenance: only meaningful once the bytes are the released ones.
+  if [ "$checksum_state" = "match" ] && command -v gh &>/dev/null; then
+    if gh_output=$(gh attestation verify "$script_path" --repo johnny4young/gos 2>&1); then
+      attestation="verified"
+    else
+      attestation_detail=$(printf '%s\n' "$gh_output" | sed '/^$/d' | tail -1)
+      case "$gh_output" in
+        *"auth login"* | *"GH_TOKEN"* | *"not logged in"* | *"authentication"* | *"could not resolve host"* | *"connect"*)
+          attestation="unavailable"
+          ;;
+        *)
+          attestation="failed"
+          ok="false"
+          ;;
+      esac
+    fi
+  fi
+
+  if _gos_json_enabled; then
+    printf '{"version":'
+    _gos_json_string "$GOS_VERSION"
+    printf ',"path":'
+    _gos_json_string "$script_path"
+    printf ',"sha256":'
+    _gos_json_string "$actual"
+    printf ',"expected_sha256":'
+    _gos_json_string "$expected"
+    printf ',"checksum":'
+    _gos_json_string "$checksum_state"
+    printf ',"attestation":'
+    _gos_json_string "$attestation"
+    printf ',"attestation_detail":'
+    _gos_json_string "$attestation_detail"
+    printf ',"ok":%s}\n' "$ok"
+    GOS_JSON_REPORT_EMITTED=1
+    if [ "$ok" != "true" ]; then
+      GOS_EXIT_CODE="$GOS_EXIT_VERIFICATION"
+      GOS_EXIT_CLASS="verification"
+      return 1
+    fi
+    return 0
+  fi
+
+  printf 'gos v%s at %s\n' "$GOS_VERSION" "$script_path"
+  if [ "$checksum_state" = "match" ]; then
+    printf 'Checksum:    matches release v%s (%s)\n' "$GOS_VERSION" "$actual"
+  else
+    printf 'Checksum:    MISMATCH (expected %s, got %s)\n' "$expected" "$actual"
+  fi
+  case "$attestation" in
+    verified) printf 'Attestation: verified by gh attestation (johnny4young/gos)\n' ;;
+    failed) printf 'Attestation: FAILED (%s)\n' "$attestation_detail" ;;
+    *)
+      if [ "$checksum_state" != "match" ]; then
+        printf 'Attestation: not checked (checksum mismatch)\n'
+      elif command -v gh &>/dev/null; then
+        printf 'Attestation: not checked (%s)\n' "${attestation_detail:-gh could not verify}"
+      else
+        printf 'Attestation: not checked (install the GitHub CLI and run: gh attestation verify %s --repo johnny4young/gos)\n' "$script_path"
+      fi
+      ;;
+  esac
+  if [ "$ok" = "true" ]; then
+    if _gos_fd_color_enabled 1; then
+      printf '%s %s\n' "$(_gos_color_text 32 '✓')" "$(_gos_color_text 32 "gos v${GOS_VERSION} is the released script.")"
+    else
+      printf 'gos v%s is the released script.\n' "$GOS_VERSION"
+    fi
+    return 0
+  fi
+  if [ "$checksum_state" != "match" ]; then
+    _gos_fail verification "the running gos does not match release v${GOS_VERSION}."
+    echo "A git checkout or a locally edited script differs on purpose; otherwise reinstall with the installer or 'gos self-update'." >&2
+  else
+    _gos_fail verification "the build attestation of gos v${GOS_VERSION} could not be verified."
+  fi
+  return 1
+}
+
 cmd_status() {
   local active go_path source layout layout_target resolved project_version project_source project_resolved
   local project_matches="null" rollback_available="false" rollback_version="" rollback_state rollback_target stats cache_count cache_bytes
@@ -4357,7 +4664,7 @@ _gos_completion_bash() {
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   # gos-commands:bash:begin
-  local fallback_commands="latest install rollback uninstall use pin run each check current list platforms status which prune doctor env completions self-update version help"
+  local fallback_commands="latest install rollback uninstall use pin run each check current list platforms status which verify prune doctor env completions self-update self-verify version help"
   # gos-commands:bash:end
   local commands="$fallback_commands"
   local cmd_index=1 cmd words="" line slot
@@ -4429,11 +4736,14 @@ _gos_completions() {
         fi
         words="--inactive --dry-run $versions"
         ;;
-      which)
+      which | verify)
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions 2>/dev/null || true)
         fi
         words="--json $versions"
+        ;;
+      self-verify)
+        words="--json"
         ;;
       list)
         words="--installed --minor --json"
@@ -4508,11 +4818,13 @@ _gos() {
     'platforms:List supported OS/arch archives for a Go version'
     'status:Show an offline dashboard for gos and the active Go'
     'which:Show the active or side-by-side Go binary path'
+    'verify:Re-verify an installed Go file by file against the official go.dev archive and its checksum'
     'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
     'doctor:Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
     'env:Print the PATH setup line or an opt-in per-shell auto-switch hook'
     'completions:Print a Bash, Zsh, or Fish completion script (or install it with --install)'
     'self-update:Update gos itself to the latest verified release'
+    'self-verify:Verify the running gos script against its release checksums and build attestation'
     'version:Show gos version'
     'help:Show this help message, or usage for one command'
   )
@@ -4579,11 +4891,14 @@ _gos() {
             _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
           fi
           ;;
-        which)
+        which | verify)
           _arguments '--json[Output machine-readable JSON]'
           if command -v gos >/dev/null 2>&1; then
             _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
           fi
+          ;;
+        self-verify)
+          _arguments '--json[Output machine-readable JSON]'
           ;;
         list)
           _arguments '--installed[List locally installed versions]' '--minor[Keep only the newest version per minor]' '--json[Output machine-readable JSON]'
@@ -4687,17 +5002,19 @@ complete -c gos -n '__gos_needs_command' -a 'list' -d 'List available Go version
 complete -c gos -n '__gos_needs_command' -a 'platforms' -d 'List supported OS/arch archives for a Go version'
 complete -c gos -n '__gos_needs_command' -a 'status' -d 'Show an offline dashboard for gos and the active Go'
 complete -c gos -n '__gos_needs_command' -a 'which' -d 'Show the active or side-by-side Go binary path'
+complete -c gos -n '__gos_needs_command' -a 'verify' -d 'Re-verify an installed Go file by file against the official go.dev archive and its checksum'
 complete -c gos -n '__gos_needs_command' -a 'prune' -d 'Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
 complete -c gos -n '__gos_needs_command' -a 'doctor' -d 'Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
 complete -c gos -n '__gos_needs_command' -a 'env' -d 'Print the PATH setup line or an opt-in per-shell auto-switch hook'
 complete -c gos -n '__gos_needs_command' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script (or install it with --install)'
 complete -c gos -n '__gos_needs_command' -a 'self-update' -d 'Update gos itself to the latest verified release'
+complete -c gos -n '__gos_needs_command' -a 'self-verify' -d 'Verify the running gos script against its release checksums and build attestation'
 complete -c gos -n '__gos_needs_command' -a 'version' -d 'Show gos version'
 complete -c gos -n '__gos_needs_command' -a 'help' -d 'Show this help message, or usage for one command'
 # gos-commands:fish:end
 # --json only where gos actually supports it (leading flag or per command).
 complete -c gos -n '__gos_needs_command' -l json -d 'Output machine-readable JSON where supported'
-complete -c gos -n '__gos_using_command check current list platforms status which doctor prune env version use' -l json -d 'Output machine-readable JSON'
+complete -c gos -n '__gos_using_command check current list platforms status which verify self-verify doctor prune env version use' -l json -d 'Output machine-readable JSON'
 complete -c gos -n '__gos_using_command prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__gos_using_command prune' -l dry-run -d 'Preview removals without deleting'
 complete -c gos -n '__gos_using_command rollback' -l dry-run -d 'Preview the rollback without switching'
@@ -4713,7 +5030,7 @@ complete -c gos -n '__gos_using_command run each; and __gos_wants_version' -a '(
 complete -c gos -n '__gos_using_command run; and __gos_wants_version' -a -- -d 'Use the project Go version'
 complete -c gos -n '__gos_using_command run each; and not __gos_wants_version' -a '(__gos_complete_command)'
 complete -c gos -n '__gos_using_command pin' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
-complete -c gos -n '__gos_using_command uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
+complete -c gos -n '__gos_using_command uninstall which verify' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
 complete -c gos -n '__gos_using_command uninstall' -l inactive -d 'Remove all inactive versions'
 complete -c gos -n '__gos_using_command uninstall' -l dry-run -d 'Preview removals without deleting'
 complete -c gos -n '__gos_using_command env' -l fish -d 'Emit fish shell syntax'
@@ -4824,11 +5141,13 @@ list|list [--installed] [--minor]|List available Go versions (or locally install
 platforms|platforms [version]|List supported OS/arch archives for a Go version|Inspect
 status|status|Show an offline dashboard for gos and the active Go|Inspect
 which|which [version]|Show the active or side-by-side Go binary path|Inspect
+verify|verify [version]|Re-verify an installed Go file by file against the official go.dev archive and its checksum|Inspect
 prune|prune [--rollback] [--dry-run]|Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews|Maintain
 doctor|doctor [--fix]|Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line|Maintain
 env|env [--fish] [--auto]|Print the PATH setup line or an opt-in per-shell auto-switch hook|Maintain
 completions|completions <shell> [--install]|Print a Bash, Zsh, or Fish completion script (or install it with --install)|Maintain
 self-update|self-update|Update gos itself to the latest verified release|Maintain
+self-verify|self-verify|Verify the running gos script against its release checksums and build attestation|Maintain
 version|version|Show gos version|Meta
 help|help [command]|Show this help message, or usage for one command|Meta
 GOS_COMMANDS
@@ -5161,7 +5480,7 @@ _gos_suggest_command() {
 # for the others it used to be swallowed silently (disabling color and
 # progress, then printing human text), and it bypassed run/each's own
 # rejection of the flag.
-GOS_JSON_COMMANDS=" check current list platforms status which env doctor prune version __commands __env "
+GOS_JSON_COMMANDS=" check current list platforms status which verify self-verify env doctor prune version __commands __env "
 
 # Preconditions a command needs before it runs, named so every dispatcher
 # line reads as a list. The mutation lock is not among them for commands
@@ -5325,6 +5644,12 @@ main() {
       ;;
     status) cmd_status "$@" ;;
     which) cmd_which "$@" ;;
+    verify)
+      # Read-only for the install; the verified archive may land in the cache.
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir || return 1
+      cmd_verify "$@"
+      ;;
+    self-verify | selfverify) cmd_self_verify "$@" ;;
     __versions) cmd___versions "$@" ;;
     doctor) cmd_doctor "$@" ;;
     version | --version | -V) cmd_version "$@" ;;

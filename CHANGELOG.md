@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- `gos verify [version]` re-verifies an installed Go tree against the official release: the archive for that version is obtained through the same trust path as an install (cache or download, checksum from the go.dev feed), extracted to a temporary directory, and every file it ships is compared byte for byte with the installed copy. Modified or missing files are listed and exit `4`; `--json` prints one report document. In side-by-side mode any installed version can be verified.
+- `gos self-verify` hashes the running script and compares it with the `checksums.txt` published for its own release tag, then, when the GitHub CLI is available and authenticated, runs `gh attestation verify` against `johnny4young/gos`. A mismatch or a failed attestation exits `4`; a missing or unauthenticated `gh` only reports the attestation as unavailable.
 - `gos install <version> --from-file <archive> [--sha256 <hex>]` installs from a local Go archive for air-gapped hosts. The digest is verified against `--sha256` when given (no network at all), otherwise against the go.dev feed; without either, the install follows `GOS_REQUIRE_CHECKSUM`. Verified archives are copied into the cache. Completions offer both flags.
 - `gos doctor` reports the proxy in use when `HTTPS_PROXY`, `https_proxy`, `HTTP_PROXY`, or `http_proxy` is set, and the README documents how downloads honor the proxy variables.
 

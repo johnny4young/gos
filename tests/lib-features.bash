@@ -123,7 +123,11 @@ case "$url" in
     fi
     cat "$GOS_TEST_SELFUPDATE_SCRIPT" >"$output"
     ;;
-  https://github.com/johnny4young/gos/releases/latest/download/checksums.txt)
+  https://github.com/johnny4young/gos/releases/latest/download/checksums.txt | https://github.com/johnny4young/gos/releases/download/v*/checksums.txt)
+    if [ "${GOS_TEST_DOWNLOAD_MODE:-ok}" = "fail-checksums" ]; then
+      echo "checksums download disabled" >&2
+      exit 22
+    fi
     if [ -n "${GOS_TEST_SELFUPDATE_CHECKSUMS_FILE:-}" ]; then
       cat "$GOS_TEST_SELFUPDATE_CHECKSUMS_FILE" >"$output"
     else

@@ -54,6 +54,9 @@ nothing but \fBcurl\fR (or \fBwget\fR) and \fBbash\fR.
 .B gos which [version] [\-\-json]
 \&Show the active or side-by-side Go binary path
 .TP
+.B gos verify [version] [\-\-json]
+\&Re-verify an installed Go file by file against the official go.dev archive and its checksum
+.TP
 .B gos prune [\-\-rollback] [\-\-dry-run] [\-\-json]
 \&Remove cached Go archives; \-\-rollback also removes the rollback copy, \-\-dry-run only previews
 .TP
@@ -68,6 +71,9 @@ nothing but \fBcurl\fR (or \fBwget\fR) and \fBbash\fR.
 .TP
 .B gos self-update
 \&Update gos itself to the latest verified release
+.TP
+.B gos self-verify [\-\-json]
+\&Verify the running gos script against its release checksums and build attestation
 .TP
 .B gos version [\-\-json]
 \&Show gos version

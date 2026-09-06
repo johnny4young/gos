@@ -32,7 +32,7 @@ Sections, in file order, with the functions that matter:
 | Go downloads feed | `_gos_feed_json` (memoized per run, optional on-disk TTL cache), the jq → python3 → grep parser cascade (`_gos_feed_versions`, `_gos_fetch_checksum`, `_gos_platforms_for_version`), `_gos_resolve_bare_minor`. |
 | Checksums and cache | `_gos_sha256`, `_gos_try_cache`, `_gos_store_cache`, checksum policy (`GOS_REQUIRE_CHECKSUM`), the `.sha256` companion fallback. |
 | Privilege and locking | `_gos_needs_sudo` / `_gos_sudo` / `_gos_sudo_for` (escalation decided per target path), `_gos_acquire_lock` / `_gos_release_lock` / `_gos_lock_state`. |
-| Activation | `_gos_activate_install` (move or link), `_gos_activate_rollback`, `_gos_restore_backup`, `_gos_rollback_state`, `_gos_install_version` (the whole install pipeline). |
+| Activation | `_gos_activate_install` (move or link), `_gos_activate_rollback`, `_gos_restore_backup`, `_gos_rollback_state`, `_gos_obtain_archive` (package name, checksum, cache/download/local file, verification; shared with `gos verify`), `_gos_install_version` (the whole install pipeline). |
 | Project resolution | `.go-version` / `.tool-versions` / `go.mod` readers, `_gos_resolve_project_version`, `_gos_resolve_installed_version`. |
 | Version ordering | `_gos_sort_versions` (awk, semantic: beta < rc < release), `_gos_go_version_is_newer`, `_gos_newest_per_minor`, `_gos_semver_is_newer` for gos's own version. |
 | Commands | one `cmd_<name>` per command in the manifest, plus hidden `cmd___commands`, `cmd___versions`, `cmd___project_version` used by completions and the auto-switch hook. |
@@ -147,6 +147,14 @@ into a `sudo sh -c`.
   contain exactly one digest for `gos.sh`, the download must hash to it, parse
   with `bash -n`, carry exactly one `GOS_VERSION`, and be newer than the running
   script.
+- `gos install --from-file <archive>` skips the download but not the rules:
+  an explicit `--sha256` is verified offline and counts as a trusted source for
+  every `GOS_REQUIRE_CHECKSUM` policy; otherwise the feed is consulted as usual.
+- `gos verify` re-runs `_gos_obtain_archive` for the installed version and
+  compares every file the archive ships with the installed tree (`cmp`); it
+  refuses to report success without an official checksum. `gos self-verify`
+  fetches the `checksums.txt` of the running version's own release tag and,
+  when `gh` can, its build attestation.
 - All downloads are HTTPS-only across redirects with a TLS 1.2 floor and are
   bounded (`--max-time` for metadata, stall detection for archives).
 
