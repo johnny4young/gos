@@ -301,7 +301,7 @@ Bare `gos` prints a three-line status (active Go, project version or no manifest
 | Command | Description |
 |---|---|
 | `gos latest` | Install the latest stable Go version |
-| `gos install <version>` | Install a specific Go version |
+| `gos install <version> [--from-file <archive> [--sha256 <hex>]]` | Install a specific Go version, optionally from a local archive (air-gapped) verified by an explicit digest |
 | `gos rollback [--dry-run]` | Restore the previous Go installation, if available; `--dry-run` only previews the swap |
 | `gos uninstall <version or --inactive> [--dry-run]` | Remove an installed version (side-by-side mode); `--inactive` removes all but the active and rollback |
 | `gos use [--print [--json]] [path]` | Install the Go version requested by `.go-version`, `.tool-versions`, or `go.mod`; `--print` only resolves it |
@@ -534,6 +534,27 @@ inside the active install slot, because activation moves that slot atomically.
 
 ---
 
+### Air-gapped installs
+
+Hosts without access to go.dev can install from an archive copied over by hand. `gos install` takes the same version plus the archive, and applies the same trust rules as a download:
+
+```bash
+# On a connected machine: fetch the archive and its official digest
+curl -fsSLO https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
+curl -fsSL https://go.dev/dl/go1.26.1.linux-amd64.tar.gz.sha256
+
+# On the air-gapped host
+gos install 1.26.1 --from-file ./go1.26.1.linux-amd64.tar.gz --sha256 <digest>
+```
+
+- `--sha256` is the digest gos verifies the file against; with it, nothing is fetched from the network.
+- Without `--sha256`, gos looks the digest up in the go.dev feed like a normal install. If that fails, the install follows `GOS_REQUIRE_CHECKSUM`: a warning by default, a refusal (exit `4`) under `GOS_REQUIRE_CHECKSUM=1`.
+- The exact version must be given (`1.26.1`, not `1.26`), the archive must match the running OS and architecture, and a verified archive is copied into `GOS_CACHE_DIR` for later reuse.
+
+### Proxies
+
+gos does not open connections itself: `curl` (or `wget`) does, and both honor the standard `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` variables. Export them in the shell that runs gos and every download (feed, checksums, archives, self-update) goes through the proxy. `gos doctor` reports the proxy in use so a failing download is diagnosed in one look. A proxy that rewrites responses is caught by the checksum verification, not silently accepted.
+
 ## How It Works
 
 1. Queries the [official Go downloads API](https://go.dev/dl/?mode=json) for available versions
@@ -656,6 +677,7 @@ the Windows launcher. Use the symptom-specific checks below for those cases.
 | Password prompt on every install | `GOS_INSTALL_DIR` is root-owned (`/usr/local/go`) | Set `GOS_INSTALL_DIR` under your home directory; gos only escalates for the directory it writes |
 | `checksum verification required but ...` (exit 4) | `GOS_REQUIRE_CHECKSUM` is set and `jq`/`python3` or a SHA256 tool is missing | Install `jq` or `python3` plus `sha256sum`/`shasum`, then retry; check feed availability and the diagnostic before changing verification policy |
 | `could not fetch ...` (exit 3) | go.dev, the mirror, or a proxy is unreachable | Check `HTTPS_PROXY`; `GOS_DOWNLOAD_MIRROR` moves only archive downloads, metadata always comes from go.dev |
+| No network at all | Air-gapped host | Copy the archive over and run `gos install <version> --from-file <archive> --sha256 <digest>` (see [Air-gapped installs](#air-gapped-installs)) |
 | `gos requires Git Bash` on Windows | Only the WSL launcher `bash.exe` is installed | Install Git for Windows, or run gos inside WSL |
 | `go 1.24` in `go.mod` but the hook says it is not installed | No `go1.24.x` is installed, or several are | `gos use` installs one; with several installed, pin an exact version with `gos pin` |
 | `GOTOOLCHAIN` warning in `gos doctor` | The Go toolchain may run a per-module version instead of the one on `PATH` | Expected; set `GOTOOLCHAIN=local` to always use the managed Go |

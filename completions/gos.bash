@@ -35,7 +35,7 @@ _gos_completions() {
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions --remote-cached 2>/dev/null || true)
         fi
-        words="$versions"
+        words="--from-file --sha256 $versions"
         [ "$cmd" = "platforms" ] && words="--json $versions"
         ;;
       run | each)

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- `gos install <version> --from-file <archive> [--sha256 <hex>]` installs from a local Go archive for air-gapped hosts. The digest is verified against `--sha256` when given (no network at all), otherwise against the go.dev feed; without either, the install follows `GOS_REQUIRE_CHECKSUM`. Verified archives are copied into the cache. Completions offer both flags.
+- `gos doctor` reports the proxy in use when `HTTPS_PROXY`, `https_proxy`, `HTTP_PROXY`, or `http_proxy` is set, and the README documents how downloads honor the proxy variables.
+
 ### Changed
 
 - The changelog guard and the fallback note generator ignore the release workflow's post-tag `chore(aur)` bump commit, so `main` no longer fails `tests/changelog.bash` right after every release.

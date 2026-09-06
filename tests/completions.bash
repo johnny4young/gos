@@ -293,7 +293,7 @@ for command_name in $json_commands use; do
 done
 parity_failures=""
 while IFS='|' read -r command_name command_usage _command_description; do
-  for flag in $(printf '%s\n' "$command_usage" | grep -oE -- '--[a-z][a-z-]*' || true); do
+  for flag in $(printf '%s\n' "$command_usage" | grep -oE -- '--[a-z][a-z0-9-]*' || true); do
     case "$(shell_block "$bash_completion_text" "$command_name")" in
       *"$flag"*) ;;
       *) parity_failures="${parity_failures}bash:${command_name}:${flag} " ;;

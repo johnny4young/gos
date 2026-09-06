@@ -50,7 +50,7 @@ end
 
 # gos-commands:fish:begin
 complete -c gos -n '__gos_needs_command' -a 'latest' -d 'Install the latest stable Go version'
-complete -c gos -n '__gos_needs_command' -a 'install' -d 'Install a specific Go version'
+complete -c gos -n '__gos_needs_command' -a 'install' -d 'Install a specific Go version, optionally from a local archive (air-gapped) verified by an explicit digest'
 complete -c gos -n '__gos_needs_command' -a 'rollback' -d 'Restore the previous Go installation, if available; --dry-run only previews the swap'
 complete -c gos -n '__gos_needs_command' -a 'uninstall' -d 'Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
 complete -c gos -n '__gos_needs_command' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
@@ -83,6 +83,8 @@ complete -c gos -n '__gos_using_command help' -a '(gos __commands 2>/dev/null)' 
 complete -c gos -n '__gos_using_command list' -l installed -d 'List locally installed versions'
 complete -c gos -n '__gos_using_command list' -l minor -d 'Keep only the newest version per minor'
 complete -c gos -n '__gos_using_command install platforms' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
+complete -c gos -n '__gos_using_command install' -l from-file -r -F -d 'Install from a local Go archive instead of downloading'
+complete -c gos -n '__gos_using_command install' -l sha256 -r -d 'Expected SHA256 digest of the local archive'
 complete -c gos -n '__gos_using_command run each; and __gos_wants_version' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
 complete -c gos -n '__gos_using_command run; and __gos_wants_version' -a -- -d 'Use the project Go version'
 complete -c gos -n '__gos_using_command run each; and not __gos_wants_version' -a '(__gos_complete_command)'

@@ -19,6 +19,13 @@ assert_contains "$output" '"name":"checksum-hash"' "doctor json checks"
 assert_contains "$output" '"name":"residue","status":"ok"' "doctor json residue check"
 assert_contains "$output" '"name":"lock","status":"ok"' "doctor json lock check"
 assert_contains "$output" '"name":"gotoolchain","status":"ok"' "doctor gotoolchain ok without override"
+assert_not_contains "$output" '"name":"proxy"' "doctor omits the proxy check without proxy variables"
+HTTPS_PROXY="http://proxy.corp.test:3128" run_gos "$case_dir" bash "$script" doctor --json
+[ "$status" -eq 0 ] || fail "doctor with HTTPS_PROXY set must not fail: ${output}"
+assert_contains "$output" '"name":"proxy","status":"ok"' "doctor proxy check"
+assert_contains "$output" 'http://proxy.corp.test:3128' "doctor proxy value"
+https_proxy="http://lower.corp.test:3128" run_gos "$case_dir" bash "$script" doctor
+assert_contains "$output" 'downloads go through http://lower.corp.test:3128' "doctor lowercase proxy variable"
 GOTOOLCHAIN="auto" run_gos "$case_dir" bash "$script" doctor
 [ "$status" -eq 0 ] || fail "doctor with GOTOOLCHAIN set must not fail: ${output}"
 assert_contains "$output" "warn - gotoolchain: GOTOOLCHAIN=auto may run a per-module toolchain" "doctor warns on GOTOOLCHAIN override"

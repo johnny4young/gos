@@ -9,7 +9,7 @@ _gos() {
   # gos-commands:zsh:begin
   commands=(
     'latest:Install the latest stable Go version'
-    'install:Install a specific Go version'
+    'install:Install a specific Go version, optionally from a local archive (air-gapped) verified by an explicit digest'
     'rollback:Restore the previous Go installation, if available; --dry-run only previews the swap'
     'uninstall:Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
@@ -44,9 +44,13 @@ _gos() {
           _arguments '--rollback[Also remove the rollback installation]' '--dry-run[Preview removals without deleting]' '--json[Output machine-readable JSON]'
           ;;
         install)
+          versions=()
           if command -v gos >/dev/null 2>&1; then
-            _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
+            versions=(${(f)"$(gos __versions --remote-cached 2>/dev/null)"})
           fi
+          _arguments '--from-file[Install from a local Go archive instead of downloading]:archive:_files' \
+            '--sha256[Expected SHA256 digest of the local archive]:digest:' \
+            "1:Go version:(${versions[*]})"
           ;;
         run | each)
           # _arguments shifts words to start with run/each for the args

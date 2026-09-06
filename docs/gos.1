@@ -15,8 +15,8 @@ nothing but \fBcurl\fR (or \fBwget\fR) and \fBbash\fR.
 .B gos latest
 \&Install the latest stable Go version
 .TP
-.B gos install <version>
-\&Install a specific Go version
+.B gos install <version> [\-\-from-file <archive> [\-\-sha256 <hex>]]
+\&Install a specific Go version, optionally from a local archive (air-gapped) verified by an explicit digest
 .TP
 .B gos rollback [\-\-dry-run]
 \&Restore the previous Go installation, if available; \-\-dry-run only previews the swap

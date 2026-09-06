@@ -238,6 +238,12 @@ if grep -q GOS-TEST-CORRUPT "$1" 2>/dev/null; then
   exit 0
 fi
 
+# Digest reported for every file when set; --sha256 needs real 64-hex values.
+if [ -n "${GOS_TEST_SHA256_VALUE:-}" ]; then
+  printf '%s  %s\n' "$GOS_TEST_SHA256_VALUE" "$1"
+  exit 0
+fi
+
 # A resumable download hashes the .partial file, which once complete is the
 # archive itself, so match on the archive name regardless of that suffix.
 probe="${1%.partial}"
@@ -471,6 +477,7 @@ run_gos() {
       GOS_TEST_GOS_RELEASE_EFFECTIVE_URL="${GOS_TEST_GOS_RELEASE_EFFECTIVE_URL:-}" \
       GOS_TEST_MV_FAIL_DEST="${GOS_TEST_MV_FAIL_DEST:-}" \
       GOS_TEST_SHA256_FAIL="${GOS_TEST_SHA256_FAIL:-0}" \
+      GOS_TEST_SHA256_VALUE="${GOS_TEST_SHA256_VALUE:-}" \
       GOS_TEST_REAL_MV="$real_mv" \
       GOS_TEST_REAL_CP="$real_cp" \
       GOS_TEST_CP_FAIL_DEST="${GOS_TEST_CP_FAIL_DEST:-}" \
