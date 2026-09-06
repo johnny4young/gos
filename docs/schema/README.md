@@ -24,6 +24,6 @@ Every `--json` output of gos is described by a [JSON Schema](https://json-schema
 
 Compatibility rules:
 
-- Fields are only added, never renamed or removed, within a major version of gos. New fields may appear without a schema bump; consumers should ignore unknown keys even though the schemas say `additionalProperties: false` (that strictness is for the tests, which must notice every new field).
+- Fields are only added, never renamed or removed, within a major version of gos. These strict schemas use `additionalProperties: false`: adding a field is validation-breaking for an older schema even within the same major version. Consumers doing schema validation must pin the schema from the same gos release tag as their executable; the `main` schemas are development snapshots. Consumers not validating against a schema should ignore unknown keys.
 - A field that can be absent today is listed without `required`; a field that can be `null` says so in its `type`.
 - Failures print exactly one document, either the command's report (`verify`, `self-verify`, `doctor` keep their report and signal the failure through `ok`/`status` and the exit code) or an error document.

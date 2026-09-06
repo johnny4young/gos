@@ -53,7 +53,7 @@ assert_status 4 "$status" "verify modified file" "$output"
 assert_contains "$output" "2 files checked, 1 modified, 0 missing" "verify modified summary"
 assert_contains "$output" "  modified: VERSION_MARKER" "verify modified listing"
 assert_contains "$output" "differs from the official release (1 modified, 0 missing)" "verify modified verdict"
-assert_contains "$output" "Reinstall it with 'gos install 1.21.6'." "verify modified hint"
+assert_contains "$output" "gos install 1.21.6 --from-file <archive> --sha256 <official-digest>." "verify modified hint"
 GOS_TEST_STDERR_FILE="${case_dir}/stderr" run_gos "$case_dir" bash "$script" verify --json
 assert_status 4 "$status" "verify --json modified file" "$output"
 assert_json "$output" "verify --json modified"
@@ -172,6 +172,7 @@ cat >"${gh_dir}/gh" <<'FAKE_GH'
 printf '%s\n' "$*" >>"$GOS_TEST_GH_LOG"
 case "${GOS_TEST_GH_MODE:-verified}" in
   verified) echo "Loaded digest sha256:aaaa for file://gos.sh"; echo "✓ Verification succeeded!"; exit 0 ;;
+  unsupported) echo 'unknown command "attestation" for "gh"' >&2; exit 1 ;;
   unauthenticated) echo "To get started with GitHub CLI, please run:  gh auth login" >&2; exit 4 ;;
   failed) echo "✗ Verification failed: no attestations found for subject" >&2; exit 1 ;;
 esac
@@ -208,3 +209,92 @@ run_self_verify_with_gh failed --json
 assert_status 4 "$status" "self-verify --json failed attestation" "$output"
 assert_contains "$output" '"checksum":"match","attestation":"failed"' "self-verify json failed attestation"
 pass "self-verify distinguishes verified, unavailable, and failed attestations"
+
+run_self_verify_with_gh unsupported --json
+assert_status 0 "$status" "self-verify old gh" "$output"
+assert_contains "$output" '"attestation":"unavailable"' "old gh is unavailable, not failed"
+run_self_verify_with_gh unsupported
+assert_status 0 "$status" "self-verify old gh text" "$output"
+assert_contains "$output" 'Attestation: not checked' "old gh text"
+pass "self-verify treats unsupported attestation as unavailable in text and JSON"
+
+case_dir="${test_root}/verify-fail-closed"
+run_gos "$case_dir" bash "$script" install 1.21.6
+assert_status 0 "$status" "install before fail-closed verify" "$output"
+GOS_TEST_SHA256_FAIL=1 GOS_TEST_STDERR_FILE="${case_dir}/stderr" run_gos "$case_dir" bash "$script" verify --json
+assert_status 4 "$status" "verify requires actual hash verification" "$output"
+assert_contains "$output" '"error":{"code":"verification"' "broken hasher JSON error"
+assert_not_contains "$output" '"ok":true' "no false verified success"
+pass "verify refuses success when checksum metadata exists but hashing failed"
+
+cat >"${fake_bin}/find" <<'FIND'
+#!/usr/bin/env bash
+printf './bin/go\0'
+exit 23
+FIND
+chmod +x "${fake_bin}/find"
+GOS_TEST_STDERR_FILE="${case_dir}/stderr" run_gos "$case_dir" bash "$script" verify --json
+assert_status 4 "$status" "verify rejects partial failed enumeration" "$output"
+assert_contains "$output" 'could not enumerate' "enumeration failure diagnostic"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${fake_bin}/find"
+run_gos "$case_dir" bash "$script" verify
+assert_status 4 "$status" "verify rejects empty enumeration" "$output"
+rm "${fake_bin}/find"
+pass "verify fails closed on partial failed or empty file enumeration"
+
+# Newline-bearing file names must remain one JSON entry, not several paths.
+real_fake_tar="${test_root}/original-tar"
+mv "${fake_bin}/tar" "$real_fake_tar"
+cat >"${fake_bin}/tar" <<TAR
+#!/usr/bin/env bash
+set -euo pipefail
+"$real_fake_tar" "\$@"
+printf official >"\$2/go/line
+break"
+TAR
+chmod +x "${fake_bin}/tar"
+printf modified >"${case_dir}/go/line
+break"
+GOS_TEST_STDERR_FILE="${case_dir}/stderr" run_gos "$case_dir" bash "$script" verify --json
+assert_status 4 "$status" "verify newline path" "$output"
+assert_contains "$output" '"modified":["line\nbreak"]' "newline file is one JSON path"
+pass "verify compares newline-bearing paths and reports one escaped JSON entry"
+
+# The read-only verifier must not touch an install's resumable partial/cache.
+mv "$real_fake_tar" "${fake_bin}/tar"
+case_dir="${test_root}/verify-private-download"
+run_gos "$case_dir" bash "$script" install 1.21.6
+assert_status 0 "$status" "install before private verify" "$output"
+rm "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+printf in-progress >"${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
+run_gos "$case_dir" bash "$script" verify
+assert_status 0 "$status" "private verify download" "$output"
+[ "$(cat "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial")" = in-progress ] || fail "verify modified another install's partial"
+[ ! -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "verify wrote a shared cache entry"
+pass "verify downloads privately without mutating shared cache or resumable partials"
+
+# A concurrent cache replacement after hashing must not change extraction.
+case_dir="${test_root}/verify-cache-snapshot"
+run_gos "$case_dir" bash "$script" install 1.21.6
+assert_status 0 "$status" "install before cache snapshot test" "$output"
+mv "${fake_bin}/sha256sum" "${test_root}/original-hash"
+cat >"${fake_bin}/sha256sum" <<HASH
+#!/usr/bin/env bash
+set -euo pipefail
+"${test_root}/original-hash" "\$@"
+printf replaced >"${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+printf '%s\\n' "\$1" >"${case_dir}/hash-path"
+HASH
+mv "${fake_bin}/tar" "${test_root}/snapshot-tar"
+cat >"${fake_bin}/tar" <<TAR
+#!/usr/bin/env bash
+set -euo pipefail
+[ "\$4" = "\$(cat "${case_dir}/hash-path")" ] || exit 1
+[ "\$4" != "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || exit 1
+if grep -q replaced "\$4"; then exit 1; fi
+exec "${test_root}/snapshot-tar" "\$@"
+TAR
+chmod +x "${fake_bin}/sha256sum" "${fake_bin}/tar"
+run_gos "$case_dir" bash "$script" verify
+assert_status 0 "$status" "cache replaced after hash" "$output"
+pass "verify hashes and extracts the same private snapshot despite concurrent cache replacement"

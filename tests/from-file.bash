@@ -16,8 +16,8 @@ archive_dir="${test_root}/archives"
 mkdir -p "$archive_dir"
 archive="${archive_dir}/go1.21.6.darwin-arm64.tar.gz"
 printf 'fake archive shipped on a USB stick\n' >"$archive"
-digest_b="$(printf 'b%.0s' $(seq 1 64))"
-digest_c="$(printf 'c%.0s' $(seq 1 64))"
+digest_b="$(printf '%064d' 0 | tr 0 b)"
+digest_c="$(printf '%064d' 0 | tr 0 c)"
 
 # Online: the official feed still supplies the checksum, only the bytes are local.
 case_dir="${test_root}/from-file-feed"
@@ -91,3 +91,125 @@ usage_case sha-without-file "--sha256 only applies together with --from-file" 1.
 usage_case bare-minor "needs the exact version" 1.21 --from-file "$archive"
 usage_case unknown-flag "unexpected argument for gos install" 1.21.6 --from-file "$archive" --bogus
 pass "install --from-file and --sha256 validate their arguments with exit 2"
+
+case_dir="${test_root}/from-file-no-hasher"
+GOS_TEST_SHA256_FAIL=1 run_gos "$case_dir" bash "$script" install 1.21.6 --from-file "$archive" --sha256 "$digest_b"
+assert_status 4 "$status" "explicit digest requires working hasher" "$output"
+[ ! -e "${case_dir}/go" ] || fail "a requested digest must never be skipped"
+pass "an explicit digest fails closed when hashing fails"
+
+# Real tar and SHA256 fixtures, not the synthetic extractor/hash above. The
+# tiny executable models Go's version output without requiring a Go download.
+real_tar=$(command -v tar)
+real_shasum=$(command -v shasum)
+rm "${fake_bin}/tar"
+ln -s "$real_tar" "${fake_bin}/tar"
+cat >"${fake_bin}/sha256sum" <<SHASH
+#!/usr/bin/env bash
+set -euo pipefail
+result=\$("$real_shasum" -a 256 "\$1")
+if [ -n "\${GOS_TEST_SWAP_INPUT:-}" ]; then
+  "$real_cp" "\$GOS_TEST_SWAP_REPLACEMENT" "\$GOS_TEST_SWAP_INPUT"
+  printf '%s\\n' "\$1" >"\$GOS_TEST_SNAPSHOT_TRACE"
+fi
+printf '%s\\n' "\$result"
+SHASH
+chmod +x "${fake_bin}/sha256sum"
+make_archive() {
+  local destination="$1" version="$2" platform="$3"
+  mkdir -p "${test_root}/payload/go/bin"
+  printf '#!/usr/bin/env bash\nprintf "go version go%s %s\\n"\n' "$version" "$platform" >"${test_root}/payload/go/bin/go"
+  chmod +x "${test_root}/payload/go/bin/go"
+  printf 'release-%s-%s\n' "$version" "$platform" >"${test_root}/payload/go/VERSION_MARKER"
+  "$real_tar" -czf "$destination" -C "${test_root}/payload" go
+}
+archive="${archive_dir}/arbitrary name.tar.gz"
+make_archive "$archive" 1.21.6 darwin/arm64
+digest=$("$real_shasum" -a 256 "$archive" | cut -d' ' -f1)
+for wrong in version platform; do
+  wrong_archive="${archive_dir}/${wrong}.tar.gz"
+  if [ "$wrong" = version ]; then
+    make_archive "$wrong_archive" 1.20.0 darwin/arm64
+  else make_archive "$wrong_archive" 1.21.6 linux/amd64; fi
+  wrong_digest=$("$real_shasum" -a 256 "$wrong_archive" | cut -d' ' -f1)
+  case_dir="${test_root}/wrong-${wrong}"
+  GOS_TEST_DOWNLOAD_MODE=fail-all run_gos "$case_dir" bash "$script" install 1.21.6 --from-file "$wrong_archive" --sha256 "$wrong_digest"
+  assert_status 4 "$status" "real archive ${wrong} binding" "$output"
+  assert_contains "$output" "local archive does not provide go1.21.6 for darwin/arm64" "binding diagnostic"
+  [ ! -e "${case_dir}/go" ] || fail "wrong package must not be activated"
+  [ ! -f "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" ] || fail "wrong package must not poison cache"
+done
+pass "real archives with valid digests but wrong version or platform are rejected before caching"
+
+# Mutate the original path immediately after its snapshot is hashed.
+case_dir="${test_root}/snapshot"
+GOS_TEST_SWAP_INPUT="$archive" GOS_TEST_SWAP_REPLACEMENT="$wrong_archive" GOS_TEST_SNAPSHOT_TRACE="${test_root}/snapshot-path" \
+  GOS_TEST_DOWNLOAD_MODE=fail-all run_gos "$case_dir" bash "$script" install 1.21.6 --from-file "$archive" --sha256 "$digest"
+assert_status 0 "$status" "local input swap after hashing" "$output"
+[ "$(cat "${test_root}/snapshot-path")" != "$archive" ] || fail "hash must read the private snapshot"
+[ "$(cat "${case_dir}/go/VERSION_MARKER")" = release-1.21.6-darwin/arm64 ] || fail "input swap changed installed bytes"
+[ "$("$real_shasum" -a 256 "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz" | cut -d' ' -f1)" = "$digest" ] || fail "cache must contain verified snapshot"
+pass "real hashing followed by input replacement cannot alter installed or cached snapshot bytes"
+
+make_archive "$archive" 1.21.6 darwin/arm64
+digest=$("$real_shasum" -a 256 "$archive" | cut -d' ' -f1)
+for layout in flat versions; do
+  case_dir="${test_root}/repair-${layout}"
+  versions_dir=""
+  [ "$layout" != versions ] || versions_dir="${case_dir}/versions"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" GOS_TEST_DOWNLOAD_MODE=fail-all \
+    run_gos "$case_dir" bash "$script" install 1.21.6 --from-file "$archive" --sha256 "$digest"
+  assert_status 0 "$status" "real ${layout} initial install" "$output"
+  printf damaged >"${case_dir}/go/VERSION_MARKER"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" GOS_TEST_GO_VERSION=1.21.6 GOS_TEST_DOWNLOAD_MODE=fail-all \
+    run_gos "$case_dir" bash "$script" install 1.21.6 --from-file "$archive" --sha256 "$digest_c"
+  assert_status 4 "$status" "${layout} installed digest still checked" "$output"
+  [ "$(cat "${case_dir}/go/VERSION_MARKER")" = damaged ] || fail "bad repair must preserve old tree"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" GOS_TEST_GO_VERSION=1.21.6 GOS_TEST_DOWNLOAD_MODE=fail-all \
+    run_gos "$case_dir" bash "$script" install 1.21.6 --from-file "$archive" --sha256 "$digest"
+  assert_status 0 "$status" "${layout} real local repair" "$output"
+  [ "$(cat "${case_dir}/go/VERSION_MARKER")" = release-1.21.6-darwin/arm64 ] || fail "local repair did not replace corrupted tree"
+  [ ! -s "${case_dir}/urls.log" ] || fail "explicit repair contacted network"
+done
+pass "local archives revalidate and repair active flat and side-by-side installations offline"
+
+# Fail the first move into an existing version slot; restoration must keep it.
+cat >"${fake_bin}/mv" <<SHMV
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "\${2:-}" = "${case_dir}/versions/go1.21.6" ] && [ ! -f "${case_dir}/move-failed" ]; then
+  touch "${case_dir}/move-failed"
+  exit 1
+fi
+exec "$real_mv" "\$@"
+SHMV
+printf preserved >"${case_dir}/go/VERSION_MARKER"
+GOS_TEST_VERSIONS_DIR="$versions_dir" GOS_TEST_GO_VERSION=1.21.6 GOS_TEST_DOWNLOAD_MODE=fail-all \
+  run_gos "$case_dir" bash "$script" install 1.21.6 --from-file "$archive" --sha256 "$digest"
+assert_status 1 "$status" "side-by-side failed repair" "$output"
+[ "$(cat "${case_dir}/go/VERSION_MARKER")" = preserved ] || fail "failed repair lost previous version tree"
+pass "side-by-side repair restores the previous tree after replacement move failure"
+
+# Cleanup is after the commit point. Partial deletion of the old backup must
+# not cause the trap to discard the successfully repaired new installation.
+real_rm=$(command -v rm)
+cat >"${fake_bin}/rm" <<SHRM
+#!/usr/bin/env bash
+set -euo pipefail
+for path in "\$@"; do
+  case "\$path" in
+    "${case_dir}/versions/go1.21.6.gos-backup."*)
+      "$real_rm" -f "\$path/VERSION_MARKER"
+      exit 1
+      ;;
+  esac
+done
+exec "$real_rm" "\$@"
+SHRM
+chmod +x "${fake_bin}/rm"
+GOS_TEST_VERSIONS_DIR="$versions_dir" GOS_TEST_GO_VERSION=1.21.6 GOS_TEST_DOWNLOAD_MODE=fail-all \
+  run_gos "$case_dir" bash "$script" install 1.21.6 --from-file "$archive" --sha256 "$digest"
+assert_status 0 "$status" "repair backup cleanup failure" "$output"
+assert_contains "$output" 'could not remove replaced Go backup' "repair cleanup warning"
+[ "$(cat "${case_dir}/go/VERSION_MARKER")" = release-1.21.6-darwin/arm64 ] || fail "backup cleanup failure discarded the repaired tree"
+pass "failed backup cleanup preserves the committed repaired installation"

@@ -150,9 +150,14 @@ into a `sudo sh -c`.
 - `gos install --from-file <archive>` skips the download but not the rules:
   an explicit `--sha256` is verified offline and counts as a trusted source for
   every `GOS_REQUIRE_CHECKSUM` policy; otherwise the feed is consulted as usual.
+  Local bytes are copied to private staging before hashing, and the staged
+  binary must report the requested version/platform before cache promotion.
+  An explicit local archive bypasses already-installed shortcuts to allow repair.
 - `gos verify` re-runs `_gos_obtain_archive` for the installed version and
   compares every file the archive ships with the installed tree (`cmp`); it
-  refuses to report success without an official checksum. `gos self-verify`
+  refuses to report success without an actually verified official checksum.
+  It snapshots cached archives and downloads privately without writing shared
+  cache entries or resumable partials (verification takes no mutation lock). `gos self-verify`
   fetches the `checksums.txt` of the running version's own release tag and,
   when `gh` can, its build attestation.
 - All downloads are HTTPS-only across redirects with a TLS 1.2 floor and are

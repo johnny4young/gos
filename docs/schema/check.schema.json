@@ -35,7 +35,7 @@
         "current": {
           "type": "string",
           "description": "Running gos version, v-prefixed.",
-          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+"
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
         },
         "latest": {
           "type": [
@@ -43,7 +43,7 @@
             "null"
           ],
           "description": "Latest gos release tag, or null when the lookup failed.",
-          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+"
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
         },
         "up_to_date": {
           "type": [

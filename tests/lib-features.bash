@@ -36,7 +36,7 @@ tools_bin="${test_root}/tools-bin"
 parser_jq_bin="${test_root}/parser-jq"
 parser_python3_bin="${test_root}/parser-python3"
 mkdir -p "$tools_bin" "$parser_jq_bin" "$parser_python3_bin"
-for tool in bash sh env uname grep sed awk sort cut tr head tail wc mktemp tar mkdir rm mv cp ln readlink dirname basename date stat cat du uniq realpath chmod touch id; do
+for tool in bash sh env uname grep sed awk sort cut tr head tail wc mktemp tar mkdir rm mv cp ln readlink dirname basename date stat cat du uniq realpath chmod touch id find cmp; do
   tool_path="$(command -v "$tool" 2>/dev/null)" || continue
   case "$tool_path" in /*) ln -s "$tool_path" "${tools_bin}/${tool}" ;; esac
 done

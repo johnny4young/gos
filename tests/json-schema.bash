@@ -222,3 +222,25 @@ for schema_file in "${schema_dir}"/*.schema.json; do
   esac
 done
 pass "the validator rejects drift and every schema was exercised"
+
+# Canonical gos versions cannot have arbitrary suffixes in any nested field.
+for bad in 1.10.0-corrupt 1.10.0suffix; do
+  if printf '{"gos_version":"%s"}\n' "$bad" | python3 "$validator" "${schema_dir}/version.schema.json" >/dev/null 2>&1; then
+    fail "version schema accepted ${bad}"
+  fi
+  for field in current latest; do
+    document=$(
+      python3 - "$field" "$bad" <<'PY'
+import json, sys
+obj = {"current": "go1.21.6", "latest": "go1.21.6", "up_to_date": True,
+       "gos": {"current": "v1.10.0", "latest": "v1.10.0", "up_to_date": True}}
+obj["gos"][sys.argv[1]] = "v" + sys.argv[2]
+print(json.dumps(obj))
+PY
+    )
+    if printf '%s\n' "$document" | python3 "$validator" "${schema_dir}/check.schema.json" >/dev/null 2>&1; then
+      fail "check schema accepted suffixed gos.${field}"
+    fi
+  done
+done
+pass "schemas reject noncanonical gos version suffixes in every affected field"

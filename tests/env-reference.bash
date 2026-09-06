@@ -48,7 +48,7 @@ end
 assert(!run!("bash", "gos.sh", "__commands").lines.map(&:strip).include?("__env"), "__env stays hidden")
 
 # Cover each reader, not a hand-maintained list of installer variable names.
-internal = %w[GOS_ACTIVATION_BACKUP GOS_COMPLETED_PARTIAL GOS_EXIT_CLASS GOS_FEED_PARSER GOS_LAST_ERROR GOS_OUTPUT_JSON GOS_RELEASE_BASE_URL GOS_VERSION GOS_EXPECTED_SHA256 GOS_RELEASE_TAG GOS_SCRIPT_URL GOS_TMP_DIR]
+internal = %w[GOS_ACTIVATION_BACKUP GOS_REPLACEMENT_BACKUP GOS_REPLACEMENT_TARGET GOS_COMPLETED_PARTIAL GOS_EXIT_CLASS GOS_FEED_PARSER GOS_LAST_ERROR GOS_OUTPUT_JSON GOS_RELEASE_BASE_URL GOS_VERSION GOS_EXPECTED_SHA256 GOS_RELEASE_TAG GOS_SCRIPT_URL GOS_TMP_DIR]
 { "gos" => "gos.sh", "install.sh" => "install.sh", "install.ps1" => "install.ps1", "packaging/windows/uninstall.ps1" => "packaging/windows/uninstall.ps1" }.each do |reader, path|
   source = File.read(path)
   names = if path.end_with?(".ps1")

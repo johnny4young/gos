@@ -538,6 +538,8 @@ inside the active install slot, because activation moves that slot atomically.
 
 ### Air-gapped installs
 
+`--from-file` also replaces an already installed version, so it can repair a tree reported as damaged by `gos verify`. The local archive is snapshotted before hashing; its staged Go version and platform must match the request before caching or activation.
+
 Hosts without access to go.dev can install from an archive copied over by hand. `gos install` takes the same version plus the archive, and applies the same trust rules as a download:
 
 ```bash
@@ -555,7 +557,7 @@ gos install 1.26.1 --from-file ./go1.26.1.linux-amd64.tar.gz --sha256 <digest>
 
 ### Proxies
 
-gos does not open connections itself: `curl` (or `wget`) does, and both honor the standard `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` variables. Export them in the shell that runs gos and every download (feed, checksums, archives, self-update) goes through the proxy. `gos doctor` reports the proxy in use so a failing download is diagnosed in one look. A proxy that rewrites responses is caught by the checksum verification, not silently accepted.
+gos delegates downloads to `curl`, or `wget` when curl is absent. Set `https_proxy` and `no_proxy` for portable HTTPS proxy configuration. curl also supports `HTTPS_PROXY`, `ALL_PROXY`/`all_proxy` fallback, and `NO_PROXY`; HTTP-only proxy variables do not select a proxy for gos's HTTPS endpoints. `gos doctor` reports the applicable variable name, never its potentially secret value. This is a configuration hint, not proof that a request used the proxy: exclusions and downloader configuration may override it. For integrity, use a trusted digest or `GOS_REQUIRE_CHECKSUM=feed`; a proxy trusted by your TLS configuration that rewrites both metadata and archives is outside that checksum trust boundary.
 
 ## How It Works
 

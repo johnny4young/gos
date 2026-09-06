@@ -763,7 +763,7 @@ assert(map_sections == real_sections, "gos.sh section map #{map_sections.inspect
 # section. Internal state variables are recognised by prefix.
 env_manifest = `bash gos.sh __env`.lines.map { |line| line.split("|").first }
 assert($?.success? && !env_manifest.empty?, "gos __env must print the environment manifest")
-internal_prefixes = %w[GOS_AUTO_ GOS_DOCTOR_ GOS_EXIT_ GOS_FEED_JSON GOS_FEED_PARSER GOS_LAST_ERROR GOS_OUTPUT_JSON GOS_PS_ GOS_SUDO_TARGET GOS_ACTIVATION_BACKUP GOS_COMPLETED_PARTIAL GOS_TMP_DIR GOS_LOCK_DIR GOS_RELEASE_BASE_URL GOS_VERSION GOS_JSON_COMMANDS GOS_PROGRESS_FD GOS_VERSIONS_MODE_EXAMPLE GOS_TEST_]
+internal_prefixes = %w[GOS_AUTO_ GOS_DOCTOR_ GOS_EXIT_ GOS_FEED_JSON GOS_FEED_PARSER GOS_LAST_ERROR GOS_OUTPUT_JSON GOS_PS_ GOS_SUDO_TARGET GOS_ACTIVATION_BACKUP GOS_REPLACEMENT_ GOS_COMPLETED_PARTIAL GOS_TMP_DIR GOS_LOCK_DIR GOS_RELEASE_BASE_URL GOS_VERSION GOS_JSON_COMMANDS GOS_PROGRESS_FD GOS_VERSIONS_MODE_EXAMPLE GOS_TEST_]
 gos_sh.scan(/\$\{(GOS_[A-Z0-9_]+|NO_COLOR|TERM|XDG_[A-Z0-9_]+|GOTOOLCHAIN)[:}-]/).flatten.uniq.each do |name|
   next if internal_prefixes.any? { |prefix| prefix.end_with?("_") ? name.start_with?(prefix) : name == prefix }
   assert(env_manifest.include?(name), "gos.sh reads #{name} but _gos_env_manifest does not document it")

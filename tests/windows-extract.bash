@@ -335,3 +335,35 @@ case "$output" in
   *) fail "no tools: missing extraction error. Output: ${output}" ;;
 esac
 pass "Windows zip extraction fails clearly without tools"
+
+# Exercise the new local-archive path on every runner, including native Git
+# Bash: Windows go.exe prints CRLF, unlike the existing shell fixture.
+run_install "local_archive" "unzip"
+assert_status 0 "$status" "local archive setup" "$output"
+link_tool cp
+link_tool find
+link_tool cmp
+cat >"${case_bin}/write-go-tree" <<'LOCAL_EXTRACTOR'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "$1/go/bin"
+cat >"$1/go/bin/go" <<'GO'
+#!/usr/bin/env bash
+printf 'go version go1.21.6 windows/amd64\r\n'
+GO
+chmod +x "$1/go/bin/go"
+printf repaired >"$1/go/VERSION_MARKER"
+LOCAL_EXTRACTOR
+printf local >"${case_dir}/local archive.zip"
+output=$(PATH="$case_bin" GOS_INSTALL_DIR="$install_dir" GOS_CACHE_DIR="${case_dir}/cache" \
+  GOS_TEST_EXTRACT_LOG="$extract_log" bash "$script" install 1.21.6 --from-file "${case_dir}/local archive.zip" 2>&1) \
+  || fail "Windows local archive repair failed: ${output}"
+[ "$(cat "${install_dir}/VERSION_MARKER")" = repaired ] || fail "Windows local archive was not activated"
+pass "Windows local archive snapshot and repair accept CRLF version output"
+
+# verify snapshots cache entries and consumes NUL-delimited paths on Windows.
+output=$(PATH="$case_bin" GOS_INSTALL_DIR="$install_dir" GOS_CACHE_DIR="${case_dir}/cache" \
+  GOS_TEST_EXTRACT_LOG="$extract_log" bash "$script" verify --json 2>"${case_dir}/stderr") \
+  || fail "Windows verify failed: ${output} $(cat "${case_dir}/stderr")"
+assert_contains "$output" '"ok":true' "Windows verify snapshot"
+pass "Windows verification reads private cache snapshots and reports JSON success"
