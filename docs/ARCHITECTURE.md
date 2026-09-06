@@ -194,9 +194,17 @@ Invariant, enforced by `tests/workflows.bash`: every function that writes under
 
 The suites in `tests/` are hermetic: each builds a directory of fake `curl`,
 `sha256sum`, `tar`, `go`, `mv`, `sudo`, ... on `PATH` and drives `gos.sh`
-through the CLI. `tests/features.bash` also runs cases with a restricted `PATH`
-exposing only `jq`, only `python3`, or neither. CI requires both parsers; local
-runs report unavailable parser cases explicitly. `tests/install-transaction.bash` injects rename and removal
+through the CLI. `scripts/run-tests.bash` discovers every tracked
+`tests/*.bash` (the `lib*.bash` files are shared helpers, not suites), reads
+each suite's `# gos-suite:` header for its per-OS rules, and runs them in
+parallel; adding a suite is adding a file. The CLI feature suites (`cli-*`,
+`install-cache`, `lock-rollback`, `doctor-status`, `project-env`,
+`feed-check`, `self-update`, `side-by-side`, `unit-versions`, `downloaders`,
+`property-versions`) share
+`tests/lib-features.bash`, whose `run_gos` also runs cases with a restricted
+`PATH` exposing only `jq`, only `python3`, or neither. CI requires both
+parsers; local runs report unavailable parser cases explicitly.
+`tests/install-transaction.bash` injects rename and removal
 failures, and kills gos between the two renames of a rollback, to prove the
 saga above. `tests/workflows.bash` asserts repository invariants (pinned
 actions, job timeouts, generated surfaces, doc fragments). The nightly canary

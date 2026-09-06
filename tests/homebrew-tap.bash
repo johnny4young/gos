@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# gos-suite: only-os=linux
 
 # Functional tests for scripts/update-homebrew-tap.sh — the one script that
 # pushes directly to a user-facing channel. A local bare repository stands in

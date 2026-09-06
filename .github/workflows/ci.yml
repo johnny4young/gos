@@ -77,11 +77,10 @@ jobs:
           sudo apt-get install -y zsh fish
 
       # Every tracked shell file, derived from git so a new script can never be
-      # left out of the syntax gate (validate-local keeps the explicit list and an
-      # invariant asserts the two agree).
+      # left out of the syntax gate (validate-local uses the same discovery).
       - name: Bash syntax
         run: |
-          git ls-files -z '*.sh' '*.bash' | xargs -0 bash -n --
+          git ls-files -z '*.sh' '*.bash' | xargs -0 -n 1 bash -n --
 
       - name: Command surface sync
         run: |
@@ -109,9 +108,7 @@ jobs:
           ln -s /bin/bash "${RUNNER_TEMP}/bash32/bash"
           export PATH="${RUNNER_TEMP}/bash32:${PATH}"
           bash --version | head -n 1 | grep -F 'version 3.2'
-          bash tests/features.bash
-          bash tests/install-transaction.bash
-          bash tests/checksum.bash
+          bash scripts/run-tests.bash --jobs 2
 
       - name: PowerShell syntax
         if: runner.os == 'Windows'
@@ -124,55 +121,11 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests/install-ps1.ps1
 
-      - name: Run checksum tests
+      # Every tracked tests/*.bash suite; each suite's own "# gos-suite:" header
+      # says where it can run, so a new suite needs no workflow change.
+      - name: Run test suites
         run: |
-          bash tests/checksum.bash
-
-      - name: Run completion tests
-        run: |
-          bash tests/completions.bash
-
-      - name: Run transactional install tests
-        run: |
-          bash tests/install-transaction.bash
-
-      - name: Run installer tests
-        run: |
-          bash tests/install-sh.bash
-
-      - name: Run PowerShell installer tests
-        run: |
-          bash tests/install-ps1.bash
-
-      - name: Run packaging automation tests
-        if: runner.os == 'Linux'
-        run: |
-          bash tests/packaging.bash
-
-      - name: Run Homebrew tap automation tests
-        if: runner.os == 'Linux'
-        run: |
-          bash tests/homebrew-tap.bash
-
-      - name: Run changelog automation tests
-        run: |
-          bash tests/changelog.bash
-
-      - name: Run feature tests
-        # The feature suite drives Unix-only behaviour (pseudo-terminals via
-        # termios, mtime and mode probes, executable fake bins). Windows-facing
-        # paths are covered by the extraction, installer, and completion suites.
-        if: runner.os != 'Windows'
-        run: |
-          bash tests/features.bash
-
-      - name: Run platform detection tests
-        run: |
-          bash tests/detection.bash
-
-      - name: Run Windows extraction tests
-        run: |
-          bash tests/windows-extract.bash
+          bash scripts/run-tests.bash --jobs 2
 
       - name: Smoke gos commands
         run: |

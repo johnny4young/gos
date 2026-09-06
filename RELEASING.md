@@ -61,7 +61,7 @@ bash tests/install-ps1.bash
 bash tests/packaging.bash
 bash tests/homebrew-tap.bash
 bash tests/changelog.bash
-bash tests/features.bash
+scripts/run-tests.bash --jobs 1
 bash tests/detection.bash
 bash tests/windows-extract.bash
 bash tests/workflows.bash

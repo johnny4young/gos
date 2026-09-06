@@ -23,6 +23,9 @@ Options:
   --strict         fail when an optional tool is missing (CI parity)
   --help, -h       show this help
 
+Test suites run in parallel (scripts/run-tests.bash); set GOS_TEST_JOBS=1
+for serial output.
+
 Optional tools are run when installed unless --required-only is set:
   - shellcheck
   - shfmt
@@ -61,53 +64,6 @@ esac
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
-
-syntax_files=(
-  gos.sh
-  install.sh
-  completions/gos.bash
-  scripts/build-windows-package.bash
-  scripts/sync-bash-command-completions.bash
-  scripts/sync-command-surfaces.bash
-  scripts/sync-embedded-completions.bash
-  scripts/sync-fish-command-completions.bash
-  scripts/sync-man-page.bash
-  scripts/sync-readme-usage.bash
-  scripts/sync-zsh-command-completions.bash
-  scripts/update-aur.bash
-  scripts/update-changelog.bash
-  scripts/update-homebrew-tap.sh
-  scripts/update-packaging.bash
-  scripts/validate-local.bash
-  tests/changelog.bash
-  tests/checksum.bash
-  tests/completions.bash
-  tests/detection.bash
-  tests/features.bash
-  tests/homebrew-tap.bash
-  tests/install-transaction.bash
-  tests/install-sh.bash
-  tests/install-ps1.bash
-  tests/lib.bash
-  tests/packaging.bash
-  tests/windows-extract.bash
-  tests/workflows.bash
-)
-
-test_scripts=(
-  tests/changelog.bash
-  tests/checksum.bash
-  tests/completions.bash
-  tests/detection.bash
-  tests/features.bash
-  tests/homebrew-tap.bash
-  tests/install-transaction.bash
-  tests/install-sh.bash
-  tests/install-ps1.bash
-  tests/packaging.bash
-  tests/windows-extract.bash
-  tests/workflows.bash
-)
 
 shellcheck_files=(
   gos.sh
@@ -227,11 +183,17 @@ require_tool ruby "workflow YAML syntax validation"
 run scripts/sync-command-surfaces.bash --check
 run_optional shfmt -d -i 2 -ci -bn .
 run_optional shellcheck "${shellcheck_files[@]}"
-run bash -n "${syntax_files[@]}"
+# Check each file separately: bash -n accepts only one script, not a file list.
+syntax_list="$(mktemp)"
+trap 'rm -f "$syntax_list"' EXIT
+git ls-files -z '*.sh' '*.bash' >"$syntax_list"
+while IFS= read -r -d '' tracked_shell_file; do
+  run bash -n -- "$tracked_shell_file"
+done <"$syntax_list"
 
-for test_script in "${test_scripts[@]}"; do
-  run bash "$test_script"
-done
+# Every tracked tests/*.bash suite, discovered by the runner (see its header
+# for the per-OS rules); GOS_TEST_JOBS=1 runs them serially.
+run scripts/run-tests.bash --jobs "${GOS_TEST_JOBS:-auto}"
 
 run_optional zsh -n completions/gos.zsh
 run_optional fish --no-config --no-execute completions/gos.fish
