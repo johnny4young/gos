@@ -189,7 +189,7 @@ jobs:
       # builds match, so a rebuild can drift from the checksum stamped into
       # the committed package metadata.
       - name: Upload Windows package artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gos-windows-zip
           path: gos-windows.zip
@@ -286,7 +286,7 @@ jobs:
       # against an identical zip.
       - name: Download Windows package asset
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: gos-windows-zip
 
@@ -335,12 +335,12 @@ jobs:
           } > checksums.txt
 
       - name: Attest script release assets
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
         with:
           subject-checksums: checksums.txt
 
       - name: Attest checksum manifest
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
         with:
           subject-path: checksums.txt
 
