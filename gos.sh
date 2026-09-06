@@ -4736,7 +4736,7 @@ _gos_usage() {
 
 # Every environment variable a user can set, in one place: the README
 # configuration table and the man page ENVIRONMENT section are generated from
-# it (scripts/sync-readme-env.bash, scripts/sync-man-page.bash), and
+# it (scripts/sync-command-surfaces.bash), and
 # tests/workflows.bash refuses a GOS_* variable read by gos.sh that is missing
 # here. Fields: name|readers|default|description; readers is a comma-separated
 # list of gos, install.sh, install.ps1, or packaging/windows/uninstall.ps1.

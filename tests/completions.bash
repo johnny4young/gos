@@ -29,32 +29,18 @@ set -e
 [ "$status" -eq 2 ] || fail "sync-command-surfaces should reject extra arguments with usage status. Output: ${output}"
 assert_contains "$output" "Usage: sync-command-surfaces.bash [--check|--write]" "sync-command-surfaces extra argument usage"
 
-sync_helpers=(
-  scripts/sync-bash-command-completions.bash
-  scripts/sync-fish-command-completions.bash
-  scripts/sync-zsh-command-completions.bash
-  scripts/sync-readme-usage.bash
-  scripts/sync-readme-env.bash
-  scripts/sync-man-page.bash
-  scripts/sync-embedded-completions.bash
-)
-for sync_helper in "${sync_helpers[@]}"; do
-  sync_helper_name="${sync_helper##*/}"
-
-  set +e
-  output="$(bash "${repo_root}/${sync_helper}" --bogus 2>&1)"
-  status=$?
-  set -e
-  [ "$status" -eq 2 ] || fail "${sync_helper_name} should reject unknown options with usage status. Output: ${output}"
-  assert_contains "$output" "Usage: ${sync_helper_name} [--check|--write]" "${sync_helper_name} unknown option usage"
-
-  set +e
-  output="$(bash "${repo_root}/${sync_helper}" --check extra 2>&1)"
-  status=$?
-  set -e
-  [ "$status" -eq 2 ] || fail "${sync_helper_name} should reject extra arguments with usage status. Output: ${output}"
-  assert_contains "$output" "Usage: ${sync_helper_name} [--check|--write]" "${sync_helper_name} extra argument usage"
-done
+# The target list comes from the orchestrator's own table, so this test can
+# never check a stale copy of it.
+sync_targets=()
+sync_target_list="$(bash "$sync_script" --targets)"
+while IFS= read -r sync_target; do
+  sync_target="${sync_target%$'\r'}"
+  [ -n "$sync_target" ] || continue
+  sync_targets=(${sync_targets[@]:+"${sync_targets[@]}"} "$sync_target")
+done <<EOF
+$sync_target_list
+EOF
+[ "${#sync_targets[@]}" -eq 6 ] || fail "sync-command-surfaces --targets should list the six generated files, got: ${sync_targets[*]}"
 
 write_fixture="${test_root}/write-fixture"
 mkdir -p "${write_fixture}/completions" "${write_fixture}/scripts" "${write_fixture}/docs"
@@ -71,10 +57,8 @@ bash "${write_fixture}/scripts/sync-command-surfaces.bash" --write
 git -C "$write_fixture" diff --exit-code -- README.md gos.sh completions docs >/dev/null \
   || fail "sync-command-surfaces --write should be idempotent when generated surfaces are current"
 
-# A late generator failure must not leave the earlier completion and README
-# writers committed. Add a real manifest change so every early writer has work,
-# then break the final embedded-completion marker and compare the whole target
-# set against its exact pre-run state.
+# A malformed marker must abort the in-memory render without changing any
+# target. This is a preflight failure, not proof of partial-write rollback.
 ruby - "${write_fixture}/gos.sh" <<'RUBY'
 path = ARGV.fetch(0)
 current = File.read(path)
@@ -93,7 +77,6 @@ RUBY
 
 rollback_snapshot="${test_root}/rollback-snapshot"
 mkdir -p "${rollback_snapshot}/completions" "${rollback_snapshot}/docs"
-sync_targets=(README.md gos.sh completions/gos.bash completions/gos.fish completions/gos.zsh docs/gos.1)
 for sync_target in "${sync_targets[@]}"; do
   cp -p "${write_fixture}/${sync_target}" "${rollback_snapshot}/${sync_target}"
 done
@@ -113,6 +96,115 @@ for sync_target in "${sync_targets[@]}"; do
   [ "$snapshot_mode" = "$restored_mode" ] \
     || fail "sync-command-surfaces changed the mode of ${sync_target} while rolling back"
 done
+
+# Repair the preflight fixture so every target renders and the actual write
+# loop is reached. The added manifest command makes all six files stale.
+ruby - "${write_fixture}/gos.sh" <<'RUBY'
+path = ARGV.fetch(0)
+File.write(path, File.read(path).sub("# gos-completions:fish:broken-end", "# gos-completions:fish:end"))
+RUBY
+for sync_target in "${sync_targets[@]}"; do
+  cp -p "${write_fixture}/${sync_target}" "${rollback_snapshot}/${sync_target}"
+done
+
+assert_sync_snapshot() {
+  local sync_target snapshot_mode restored_mode
+  for sync_target in "${sync_targets[@]}"; do
+    cmp -s "${rollback_snapshot}/${sync_target}" "${write_fixture}/${sync_target}" \
+      || fail "sync failure changed ${sync_target}"
+    snapshot_mode="$(ruby -e 'printf "%o", File.stat(ARGV.fetch(0)).mode & 07777' "${rollback_snapshot}/${sync_target}")"
+    restored_mode="$(ruby -e 'printf "%o", File.stat(ARGV.fetch(0)).mode & 07777' "${write_fixture}/${sync_target}")"
+    [ "$snapshot_mode" = "$restored_mode" ] || fail "sync failure changed mode of ${sync_target}"
+  done
+}
+set +e
+output="$(bash "${write_fixture}/scripts/sync-command-surfaces.bash" --check 2>&1)"
+status=$?
+set -e
+assert_status 1 "$status" "check reports stale targets" "$output"
+for sync_target in "${sync_targets[@]}"; do
+  assert_contains "$output" "${sync_target} is out of sync" "check reports ${sync_target}"
+done
+assert_sync_snapshot
+pass "sync check reports all stale targets without modifying them"
+
+# Inject only at the Ruby boundary; production code has no test-only switch.
+# Relative trace paths are interpreted in the fixture by native Windows Ruby.
+shim_dir="${test_root}/sync-shims"
+mkdir -p "$shim_dir"
+real_ruby="$(command -v ruby)"
+cat >"${shim_dir}/ruby" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+last=""
+for arg in "$@"; do last="$arg"; done
+if [ "$last" = --targets ]; then
+  case "${GOS_SYNC_TEST_DISCOVERY:-}" in
+    fail) printf 'completions/gos.bash\n'; echo 'injected target discovery failure' >&2; exit 23 ;;
+    empty) exit 0 ;;
+  esac
+fi
+if [ -n "${GOS_SYNC_TEST_RUBY_HOOK:-}" ]; then
+  exec "$GOS_SYNC_TEST_REAL_RUBY" -r "$GOS_SYNC_TEST_RUBY_HOOK" "$@"
+fi
+exec "$GOS_SYNC_TEST_REAL_RUBY" "$@"
+SH
+chmod +x "${shim_dir}/ruby"
+cat >"${test_root}/fail-write.rb" <<'RUBY'
+module FailLaterSyncWrite
+  def write(path, *args)
+    return super unless ARGV == ["--write"]
+
+    if path == "README.md"
+      # Prove an earlier target contains new generated bytes before failing.
+      abort "injection reached before a real write" unless File.read("completions/gos.bash").include?("probe")
+      File.open("sync-write-trace", "a") { |file| file.puts "failing README after earlier writes" }
+      raise IOError, "injected later target write failure"
+    end
+    result = super
+    # A mode change must also be undone on platforms that support Unix modes.
+    File.chmod(0600, path) if path == "completions/gos.bash"
+    File.open("sync-write-trace", "a") { |file| file.puts "wrote #{path}" }
+    result
+  end
+end
+File.singleton_class.prepend(FailLaterSyncWrite)
+RUBY
+set +e
+output="$(PATH="${shim_dir}:$PATH" GOS_SYNC_TEST_REAL_RUBY="$real_ruby" \
+  GOS_SYNC_TEST_RUBY_HOOK="${test_root}/fail-write.rb" \
+  bash "${write_fixture}/scripts/sync-command-surfaces.bash" --write 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "later target write injection should fail"
+assert_contains "$output" "injected later target write failure" "real write failure"
+assert_contains "$output" "rolled back command surface changes" "partial-write rollback notice"
+assert_file_contains "${write_fixture}/sync-write-trace" "wrote completions/gos.bash"
+assert_file_contains "${write_fixture}/sync-write-trace" "wrote completions/gos.fish"
+assert_file_contains "${write_fixture}/sync-write-trace" "failing README after earlier writes"
+assert_sync_snapshot
+pass "sync restores every target's bytes and modes after a real partial write"
+
+for discovery_failure in fail empty; do
+  set +e
+  output="$(PATH="${shim_dir}:$PATH" GOS_SYNC_TEST_REAL_RUBY="$real_ruby" \
+    GOS_SYNC_TEST_DISCOVERY="$discovery_failure" \
+    bash "${write_fixture}/scripts/sync-command-surfaces.bash" --write 2>&1)"
+  status=$?
+  set -e
+  [ "$status" -ne 0 ] || fail "${discovery_failure} target discovery must stop before writing"
+  if [ "$discovery_failure" = fail ]; then
+    assert_contains "$output" "could not discover command surface targets" "failed target discovery diagnostic"
+  else
+    assert_contains "$output" "command surface target list is empty" "empty target discovery diagnostic"
+  fi
+  assert_sync_snapshot
+  pass "sync rejects ${discovery_failure} target discovery before writing"
+done
+
+bash "${write_fixture}/scripts/sync-command-surfaces.bash" --write
+bash "${write_fixture}/scripts/sync-command-surfaces.bash" --check
+pass "sync can write and recheck every stale target after rollback"
 
 for shell_name in bash zsh fish; do
   output_file="${test_root}/gos.${shell_name}"

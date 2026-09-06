@@ -48,19 +48,22 @@ The conditional `use [--print [--json]]` form stays in its manifest entry.
 Entries are ordered by task group for help and generated command lists.
 `__commands --details` retains the three-field `name|usage|description` format;
 `__commands --details --json` includes the additive `group` field.
-This effective manifest is the single source for:
+This effective manifest, together with `_gos_env_manifest` (`gos __env`,
+`name|readers|default|description`), is the single source for:
 
-- `gos help` and `gos help <command>`
-- the README command table (`scripts/sync-readme-usage.bash`)
-- the man page `docs/gos.1` (`scripts/sync-man-page.bash`)
+- `gos help` and `gos help <command>`, and any usage lines emitted through
+  `_gos_usage` (some argument errors emit only a diagnostic)
+- the README command table and configuration table
+- the man page `docs/gos.1` (COMMANDS and ENVIRONMENT)
 - the command lists inside the three completion files
-  (`scripts/sync-<shell>-command-completions.bash`)
 - the completions embedded back into `gos.sh`
-  (`scripts/sync-embedded-completions.bash`)
 
-`scripts/sync-command-surfaces.bash --write` runs all of them transactionally
-(every target is snapshotted and restored if a later generator fails);
-`--check` is a CI gate, so none of those surfaces can drift from the manifest.
+`scripts/sync-command-surfaces.bash` is the only generator: one Ruby target
+table names every marked block (or whole file) and its renderer, everything is
+rendered in memory first, `--check` reports every stale surface at once, and
+`--write` first requires successful, nonempty target discovery (`--targets`),
+snapshots those files, and restores them if a write fails. It is a CI gate, so
+none of those surfaces can drift from the manifests.
 The per-command *flag* completions below the generated markers are still hand
 written in each shell file. Tests compare them with effective manifest flags
 (including JSON) and exercise Bash/Fish queries and real Zsh ZLE completion in

@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Command-surface synchronization rejects failed or empty target discovery before writing; regression tests exercise restoration of every target's bytes and modes after a real partial write, independently of render preflight failures.
+
 - PowerShell installs reject invalid checksum policies and unverified `main` payloads in strict mode; Chocolatey Git detection tolerates missing installation roots. Native regressions cover checksum enforcement and custom-directory uninstall from a fresh shell. Release package updates explicitly handle skipped manual-only ancestors, and PowerShell analyzer invocation errors fail CI.
 
 - Classified failures now survive all list output modes; doctor probes keep a single report, missing operands return usage errors, and lock creation failures remain generic. Trailing JSON flags are honored even for early argument/configuration failures without consuming child command flags. Bare status includes a Project line when no manifest exists.
@@ -53,6 +55,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- New test coverage for migrating a flat install into side-by-side mode, ambiguous bare-minor uninstalls, `run --json`, `each --` without a version list, and an uncreatable `completions --install` directory.
+- The seven command-surface generators are now one `scripts/sync-command-surfaces.bash` driven by a declarative target table: every surface is rendered in memory first, `--check` reports all stale files at once, and the write transaction snapshots exactly the files the table names (`--targets`). No generated file changes.
 - Windows: `uninstall.ps1` removes the directory it lives in, so a `GOS_HOME` install is removable from a fresh shell; the Chocolatey package warns when Git Bash is missing (the WSL launcher does not count); `install.ps1` honours `GOS_REQUIRE_CHECKSUM=1`/`feed` and refuses an unverifiable local package like `install.sh` does.
 - Release automation: an `update-aur` job commits the bumped `PKGBUILD`/`.SRCINFO` to `main` after each release (publishing to the AUR stays a maintainer step), and the Homebrew update fails instead of silently skipping when the tap deploy key is missing on the canonical repository. CI gains a pinned `actionlint` job and a PSScriptAnalyzer (error severity) step on Windows.
 - Every environment variable gos, `install.sh`, and `install.ps1` read now lives in one manifest inside `gos.sh` (`gos __env`), which generates the README configuration table and the man page ENVIRONMENT section; the README gains the previously undocumented `GOS_HOME`, `GOS_WINDOWS_PACKAGE_PATH`, `GOS_WINDOWS_PACKAGE_SHA256`, `NO_COLOR`, `TERM`, and XDG variables, a Troubleshooting section, and an Uninstallation section that also covers the Go installs, cache, and completion files gos manages. SECURITY.md shows how to verify the release attestations with `gh attestation verify`.
