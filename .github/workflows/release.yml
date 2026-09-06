@@ -363,7 +363,10 @@ jobs:
     name: Update Homebrew Formula
     needs: [validate-release-ref, release]
     # Pre-releases must not reach the Homebrew tap; brew serves one version.
-    if: ${{ needs.validate-release-ref.outputs.is_prerelease != 'true' }}
+    # Tag pushes intentionally skip the manual preflight/bump ancestors.
+    # Override implicit success(), but still require a successful release and
+    # never continue package updates after cancellation.
+    if: ${{ !cancelled() && needs.validate-release-ref.result == 'success' && needs.release.result == 'success' && needs.validate-release-ref.outputs.is_prerelease != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -373,6 +376,20 @@ jobs:
           # The vendored bump script and the formula template ship with the
           # released source, so check out the published tag (not the tap).
           ref: ${{ needs.validate-release-ref.outputs.tag }}
+
+      # On a fork the missing secret is expected and the vendored script warns
+      # and exits 0. On the canonical repository it means the key was rotated
+      # or removed, and a release that silently skipped the Homebrew bump
+      # would look green while brew users stayed behind.
+      - name: Require the tap deploy key on the canonical repository
+        if: github.repository == 'johnny4young/gos'
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          if [ -z "${TAP_DEPLOY_KEY}" ]; then
+            echo "::error::TAP_DEPLOY_KEY is not set on johnny4young/gos; the Homebrew tap would not be updated."
+            exit 1
+          fi
 
       - name: Publish the formula to the central Homebrew tap
         env:
@@ -403,3 +420,43 @@ jobs:
             --sha256 "${SHA}" \
             --url "${ARCHIVE_URL}" \
             --template packaging/Formula/gos.rb
+
+  update-aur:
+    name: Point the AUR package at the release
+    needs: [validate-release-ref, release]
+    # The AUR digest covers the source tarball GitHub generates for the tag,
+    # so this can only run once the release exists. It commits the bumped
+    # PKGBUILD/.SRCINFO to main; publishing to aur.archlinux.org stays a
+    # maintainer step (packaging/README.md), so no AUR credential lives here.
+    # Tag pushes intentionally skip the manual preflight/bump ancestors.
+    # Override implicit success(), but still require a successful release and
+    # never continue package updates after cancellation.
+    if: ${{ !cancelled() && needs.validate-release-ref.result == 'success' && needs.release.result == 'success' && needs.validate-release-ref.outputs.is_prerelease != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          persist-credentials: true
+
+      - name: Update PKGBUILD and .SRCINFO from the release tarball
+        env:
+          TAG: ${{ needs.validate-release-ref.outputs.tag }}
+        run: |
+          : "${TAG:?missing release tag}"
+          VERSION="${TAG#v}"
+          scripts/update-aur.bash "${VERSION}"
+          bash tests/packaging.bash
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packaging/aur/PKGBUILD packaging/aur/.SRCINFO
+          if git diff --cached --quiet; then
+            echo "AUR package already points at ${TAG}."
+            exit 0
+          fi
+          git commit -m "chore(aur): point the package at ${TAG}"
+          git push origin HEAD:main
+          echo "::notice::AUR files updated on main; publish them from a checkout of ssh://aur@aur.archlinux.org/gos.git (packaging/README.md)."

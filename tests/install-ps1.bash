@@ -46,6 +46,13 @@ assert_file_contains install.ps1 "IsNullOrWhiteSpace(\$env:LocalAppData)"
 assert_file_contains install.ps1 '-TimeoutSec 60'
 # shellcheck disable=SC2016
 assert_file_contains packaging/windows/uninstall.ps1 'Remove-Item -LiteralPath $resolvedInstallDir -Recurse -Force'
+# The uninstaller lives inside the directory it removes; it must find it from
+# there so a GOS_HOME install is removable from a fresh shell.
+# shellcheck disable=SC2016
+assert_file_contains packaging/windows/uninstall.ps1 'Join-Path $PSScriptRoot '"'"'gos.sh'"'"''
+assert_file_contains install.ps1 'GOS_REQUIRE_CHECKSUM'
+assert_file_contains packaging/chocolatey/tools/chocolateyInstall.ps1 'Git Bash was not found'
+assert_file_contains packaging/chocolatey/tools/chocolateyInstall.ps1 "notmatch '\\\\System32\\\\'"
 # shellcheck disable=SC2016
 assert_file_contains packaging/windows/uninstall.ps1 '$envKey.SetValue('"'"'Path'"'"''
 assert_file_contains packaging/windows/uninstall.ps1 "DoNotExpandEnvironmentNames"

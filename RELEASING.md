@@ -155,19 +155,23 @@ gos version
 bash tests/packaging.bash
 ```
 
-8. Point the AUR package at the new tag. The digest covers the source tarball
-   GitHub generates for the tag, so this can only run after the release exists;
-   `tests/packaging.bash` fails on `main` until `pkgver` matches `GOS_VERSION`:
+8. Confirm the `update-aur` job committed `chore(aur): point the package at
+   vX.Y.Z` to `main` (it runs `scripts/update-aur.bash` against the release
+   tarball and `tests/packaging.bash`; `tests/packaging.bash` fails on `main`
+   until `pkgver` matches `GOS_VERSION`). That keeps the AUR metadata in sync
+   in the repository only. **The AUR package is not published yet**, so skip
+   the push to `ssh://aur@aur.archlinux.org/gos.git` until the channel is
+   launched (`packaging/README.md`); the same applies to Chocolatey and
+   Winget, whose metadata the release also updates without submitting it.
+   Pre-releases intentionally skip the AUR bump and must not be substituted
+   into the stable-only command below. For a stable release whose job failed
+   or was unavailable, repair the cause and rerun it, or bump manually:
 
 ```bash
 scripts/update-aur.bash X.Y.Z
 bash tests/packaging.bash
 git commit -am "chore(aur): point the package at vX.Y.Z"
 ```
-
-   Then publish from a checkout of `ssh://aur@aur.archlinux.org/gos.git` (copy
-   `packaging/aur/PKGBUILD` and `.SRCINFO`, commit, push); see
-   `packaging/README.md`.
 9. Confirm README install commands still match published channels and do not
    advertise unreleased package-manager commands.
 10. Confirm the `[Unreleased]` compare link in `CHANGELOG.md` points from the new

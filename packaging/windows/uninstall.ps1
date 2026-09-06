@@ -13,6 +13,13 @@ function Resolve-InstallDir {
     return $RequestedInstallDir
   }
 
+  # This script ships inside the install directory, so the directory it runs
+  # from is the one to remove: an install placed with GOS_HOME can then be
+  # uninstalled from a fresh shell without setting the variable again.
+  if ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'gos.sh'))) {
+    return $PSScriptRoot
+  }
+
   $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
   if ([string]::IsNullOrWhiteSpace($localAppData)) {
     throw 'LOCALAPPDATA is not available. Set GOS_HOME to the installed gos directory.'

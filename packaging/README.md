@@ -13,9 +13,9 @@ release asset.
 | GitHub release installer | Active | Canonical `curl | bash` path for stable releases. |
 | Homebrew | Active | Updated by the release workflow through the central `johnny4young/homebrew-tap` tap. |
 | PowerShell | CI-validated | Release workflow publishes `install.ps1` and `gos-windows.zip` as the canonical Windows install path. |
-| Chocolatey | Draft | Metadata wraps the Windows release asset and is updated by release automation. |
-| Winget | Draft | Metadata consumes the Windows release asset and is updated by release automation. |
-| AUR | Draft | `packaging/aur/PKGBUILD` packages the release source tarball for Arch Linux; published by pushing to the AUR git remote. |
+| Chocolatey | Draft, not published | Metadata wraps the Windows release asset and is updated by release automation; nothing is submitted to chocolatey.org yet. |
+| Winget | Draft, not published | Metadata consumes the Windows release asset and is updated by release automation; no `winget-pkgs` submission yet. |
+| AUR | Draft, not published | `packaging/aur/PKGBUILD` packages the release source tarball for Arch Linux; the `update-aur` release job keeps it in sync in this repository, and nothing is pushed to the AUR git remote until the channel is launched. |
 
 Do not advertise `choco install gos`, `winget install johnny4young.gos`, or
 `yay -S gos` in the public README until the packages have been accepted by (or
@@ -27,8 +27,10 @@ pushed to) their registries.
 package installs `gos.sh` to `/usr/bin/gos`, the three shell completions to their
 standard vendor directories, the `gos.1` man page, and the MIT license.
 
-Publishing and bumping are manual maintainer steps (the AUR accepts a package
-the moment it is pushed — there is no review queue):
+The channel is prepared but not launched: skip the publish step below until it
+is. Bumping is automated by the `update-aur` release job; publishing is a
+manual maintainer step (the AUR accepts a package the moment it is pushed;
+there is no review queue):
 
 1. Run `scripts/update-aur.bash X.Y.Z` after the GitHub release exists. It
    downloads the tag's source tarball, computes its sha256, and rewrites

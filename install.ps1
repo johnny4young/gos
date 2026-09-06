@@ -107,13 +107,29 @@ function Find-GitBash {
   return $null
 }
 
+# Match the shell installers exactly; misspelled/case-variant policies must
+# never silently turn a requested integrity check into an unverified install.
+function Get-ChecksumPolicy {
+  $policy = [string]$env:GOS_REQUIRE_CHECKSUM
+  if (@('', '1', 'feed') -cnotcontains $policy) {
+    throw "GOS_REQUIRE_CHECKSUM must be unset, '1', or 'feed'."
+  }
+  return $policy
+}
+
 function Assert-Sha256 {
   param(
     [string]$Path,
     [string]$ExpectedSha256
   )
 
+  $policy = Get-ChecksumPolicy
   if ([string]::IsNullOrWhiteSpace($ExpectedSha256) -or $ExpectedSha256 -eq 'UPDATE_ON_RELEASE') {
+    # Same policy knob as install.sh and gos: GOS_REQUIRE_CHECKSUM=1 (or feed)
+    # refuses to install anything that cannot be verified.
+    if ($policy -eq '1' -or $policy -eq 'feed') {
+      throw 'GOS_REQUIRE_CHECKSUM is set but no checksum is available for this package: use the GitHub release install.ps1 asset, or pass -ExpectedSha256 with -PackagePath.'
+    }
     Write-Warning 'No release checksum configured, skipping integrity check.'
     Write-Warning 'For a verified install use the GitHub release install.ps1 asset, or pass -ExpectedSha256 when installing from -PackagePath.'
     return
@@ -258,6 +274,10 @@ function Get-PayloadFromLocalPackage {
 function Get-PayloadFromMain {
   param([string]$StageDir)
 
+  if ((Get-ChecksumPolicy) -ne '') {
+    throw 'GOS_REQUIRE_CHECKSUM is set but main has no release-pinned checksum. Use the GitHub release install.ps1 asset, or pass -ExpectedSha256 with -PackagePath.'
+  }
+
   Write-Warning 'Installing from main without a release-pinned checksum. Use this only for development testing.'
   New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
 
@@ -269,6 +289,8 @@ function Get-PayloadFromMain {
   return $StageDir
 }
 
+# Validate before creating temporary directories or accessing any payload.
+[void](Get-ChecksumPolicy)
 $resolvedInstallDir = Resolve-InstallDir -RequestedInstallDir $InstallDir
 $tempDir = New-TempDir
 $stageDir = Join-Path $tempDir 'stage'

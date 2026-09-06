@@ -38,7 +38,7 @@ assert(by_name.size == variables.size, "__env names must be unique")
 text_rows = run!("bash", "gos.sh", "__env").lines.map { |line| line.chomp.split("|", -1) }
 assert(text_rows == variables.map { |r| [r["name"], r["readers"].join(","), r["default"], r["description"]] }, "text/JSON environment parity")
 assert(by_name.fetch("GOS_HOME").fetch("default") == '%LOCALAPPDATA%\Programs\gos', "Windows default must preserve literal backslashes")
-assert(by_name.fetch("GOS_REQUIRE_CHECKSUM").fetch("readers") == %w[gos install.sh], "checksum readers")
+assert(by_name.fetch("GOS_REQUIRE_CHECKSUM").fetch("readers") == %w[gos install.sh install.ps1], "checksum readers")
 assert(by_name.fetch("GOS_HOME").fetch("readers") == %w[install.ps1 packaging/windows/uninstall.ps1], "Windows install/uninstall readers")
 assert(by_name.fetch("NO_COLOR").fetch("description").include?("non-empty"), "NO_COLOR documentation must match implementation")
 %w[--bogus positional].each do |arg|

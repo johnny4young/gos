@@ -228,7 +228,7 @@ assert(release.dig("permissions", "contents") == "read", "release workflow must 
 assert(release.dig("defaults", "run", "shell") == "bash", "release workflow must default to bash shell")
 
 release_jobs = release.fetch("jobs") { fail!("release workflow must define jobs") }
-%w[validate-release-ref release-preflight version-bump smoke-test release update-formula].each do |job|
+%w[validate-release-ref release-preflight version-bump smoke-test release update-formula update-aur].each do |job|
   assert(release_jobs.key?(job), "release workflow must define #{job} job")
 end
 
@@ -362,6 +362,27 @@ assert(update_formula_checkout.dig("with", "ref").to_s.include?("needs.validate-
 update_formula_runs = update_formula_steps.map { |step| step["run"].to_s }.join("\n")
 assert(update_formula_runs.include?('TAG:?missing release tag'), "update-formula must use the validated release tag")
 assert(update_formula_runs.include?("scripts/update-homebrew-tap.sh"), "update-formula must use the vendored central-tap bump script")
+tap_key_guard = update_formula_steps.find { |step| step["name"].to_s.include?("Require the tap deploy key") }
+assert(tap_key_guard, "update-formula must fail on the canonical repository when TAP_DEPLOY_KEY is missing")
+assert(tap_key_guard["if"].to_s.include?("github.repository == 'johnny4young/gos'"), "the tap deploy key guard must apply only to the canonical repository")
+
+update_aur = release_jobs.fetch("update-aur")
+assert(job_needs(update_aur).include?("release"), "update-aur must run after the release exists (its digest covers the tag tarball)")
+assert(update_aur["if"].to_s.include?("is_prerelease != 'true'"), "update-aur must skip pre-releases")
+assert(update_aur.dig("permissions", "contents") == "write", "update-aur commits the bumped PKGBUILD to main and needs contents: write")
+# Tag-push runs skip the manual-only ancestors. A status function prevents
+# that expected skip from silently suppressing successful-release updates.
+%w[update-formula update-aur].each do |job_name|
+  condition = release_jobs.fetch(job_name).fetch("if").to_s
+  assert(condition.include?("!cancelled()"), "#{job_name} must override implicit success and honor cancellation")
+  ["needs.validate-release-ref.result == 'success'", "needs.release.result == 'success'", "is_prerelease != 'true'"].each do |fragment|
+    assert(condition.include?(fragment), "#{job_name} must require a validated successful stable release: #{fragment}")
+  end
+end
+update_aur_runs = steps_for(release_jobs, "update-aur").map { |step| step["run"].to_s }.join("\n")
+assert(update_aur_runs.include?("scripts/update-aur.bash"), "update-aur must use scripts/update-aur.bash")
+assert(update_aur_runs.include?("bash tests/packaging.bash"), "update-aur must verify the bumped files before committing")
+assert(update_aur_runs.include?("git push origin HEAD:main"), "update-aur must push the bump to main")
 assert(update_formula_runs.include?("--kind formula"), "update-formula must publish a formula to the tap")
 assert(update_formula_runs.include?("--template packaging/Formula/gos.rb"), "update-formula must regenerate the formula from the in-repo template")
 update_formula_env = update_formula_steps.flat_map { |step| (step["env"] || {}).to_a }
@@ -412,10 +433,13 @@ assert(ci.dig("permissions", "contents") == "read", "CI must use read-only conte
 assert(ci.dig("defaults", "run", "shell") == "bash", "CI must default to bash shell")
 
 ci_jobs = ci.fetch("jobs") { fail!("CI must define jobs") }
-%w[shellcheck shfmt smoke workflow-validation].each do |job|
+%w[shellcheck shfmt smoke workflow-validation actionlint].each do |job|
   assert(ci_jobs.key?(job), "CI must define #{job} job")
 end
 workflow_validation_runs = ci_jobs.dig("workflow-validation", "steps").map { |step| step["run"].to_s }.join("\n")
+actionlint_runs = ci_jobs.dig("actionlint", "steps").map { |step| step["run"].to_s }.join("\n")
+assert(ci_jobs.dig("actionlint", "env", "ACTIONLINT_VERSION").to_s.match?(/\A\d+\.\d+\.\d+\z/), "actionlint job must pin an exact rhysd/actionlint release")
+assert(actionlint_runs.match?(/^\s*actionlint\s*$/), "actionlint job must lint the workflows")
 assert(workflow_validation_runs.include?("bash tests/workflows.bash"), "workflow-validation job must run the invariant suite")
 assert(workflow_validation_runs.include?("git diff --check \"$(git hash-object -t tree /dev/null)\" HEAD"), "workflow-validation job must check every tracked file for whitespace errors and conflict markers")
 
@@ -456,6 +480,9 @@ assert(fish_completion["if"] == "runner.os == 'Linux'", "Fish completion syntax 
 assert(!fish_completion["run"].to_s.include?("skipping"), "Fish completion syntax must not be optional once fish is installed")
 
 command_surface_sync = step_named(smoke_steps, "Command surface sync")
+psscriptanalyzer = step_named(smoke_steps, "PSScriptAnalyzer")
+assert(psscriptanalyzer["run"].to_s.include?("-Severity Error -ErrorAction Stop"), "PowerShell analyzer invocation failures must terminate the gate")
+assert(psscriptanalyzer && psscriptanalyzer["if"] == "runner.os == 'Windows'" && psscriptanalyzer["run"].to_s.include?("Invoke-ScriptAnalyzer"), "smoke job must run PSScriptAnalyzer on Windows")
 bash32 = step_named(smoke_steps, "Bash 3.2 compatibility")
 assert(bash32, "smoke job must exercise the bash 3.2 floor")
 assert(bash32["if"] == "runner.os == 'macOS'", "bash 3.2 compatibility step must run on macOS, the only runner shipping bash 3.2")

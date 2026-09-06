@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- PowerShell installs reject invalid checksum policies and unverified `main` payloads in strict mode; Chocolatey Git detection tolerates missing installation roots. Native regressions cover checksum enforcement and custom-directory uninstall from a fresh shell. Release package updates explicitly handle skipped manual-only ancestors, and PowerShell analyzer invocation errors fail CI.
+
 - Classified failures now survive all list output modes; doctor probes keep a single report, missing operands return usage errors, and lock creation failures remain generic. Trailing JSON flags are honored even for early argument/configuration failures without consuming child command flags. Bare status includes a Project line when no manifest exists.
 
 - Crash-residue enumeration preserves complete paths, including spaces, glob characters, backslashes and newline suffixes: `status`/`doctor` count each backup once, and `prune --rollback` cannot split a backup path into unrelated removal targets.
@@ -51,6 +53,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- Windows: `uninstall.ps1` removes the directory it lives in, so a `GOS_HOME` install is removable from a fresh shell; the Chocolatey package warns when Git Bash is missing (the WSL launcher does not count); `install.ps1` honours `GOS_REQUIRE_CHECKSUM=1`/`feed` and refuses an unverifiable local package like `install.sh` does.
+- Release automation: an `update-aur` job commits the bumped `PKGBUILD`/`.SRCINFO` to `main` after each release (publishing to the AUR stays a maintainer step), and the Homebrew update fails instead of silently skipping when the tap deploy key is missing on the canonical repository. CI gains a pinned `actionlint` job and a PSScriptAnalyzer (error severity) step on Windows.
 - Every environment variable gos, `install.sh`, and `install.ps1` read now lives in one manifest inside `gos.sh` (`gos __env`), which generates the README configuration table and the man page ENVIRONMENT section; the README gains the previously undocumented `GOS_HOME`, `GOS_WINDOWS_PACKAGE_PATH`, `GOS_WINDOWS_PACKAGE_SHA256`, `NO_COLOR`, `TERM`, and XDG variables, a Troubleshooting section, and an Uninstallation section that also covers the Go installs, cache, and completion files gos manages. SECURITY.md shows how to verify the release attestations with `gh attestation verify`.
 - `gos` with no arguments now prints a three-line status (active Go, the project's requested version, and where to go next) instead of the full help; `gos help` is unchanged. Scripts that relied on the bare command printing help should call `gos help`.
 - `gos help` groups the commands (Install & switch, Project, Inspect, Maintain, Meta); the manifest, and therefore the README table, the man page, and the completion lists, follow that order.
