@@ -1,6 +1,6 @@
 pkgbase = gos
 	pkgdesc = Install and switch Go versions in seconds. One script, zero dependencies.
-	pkgver = 1.9.0
+	pkgver = 1.10.0
 	pkgrel = 1
 	url = https://github.com/johnny4young/gos
 	arch = any
@@ -9,7 +9,7 @@ pkgbase = gos
 	depends = curl
 	optdepends = jq: faster release-metadata parsing
 	optdepends = coreutils: SHA-256 archive verification
-	source = gos-1.9.0.tar.gz::https://github.com/johnny4young/gos/archive/refs/tags/v1.9.0.tar.gz
-	sha256sums = 0e0af8484d4de0b8c4a25e4465d789ccab6f03f710c06416e5568d583d1c46f5
+	source = gos-1.10.0.tar.gz::https://github.com/johnny4young/gos/archive/refs/tags/v1.10.0.tar.gz
+	sha256sums = ccf7d14ea94bc5cb8c4b25e93a98456cf08fb7be1e138fb2fb399095e8878445
 
 pkgname = gos
