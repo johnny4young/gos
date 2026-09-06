@@ -111,7 +111,17 @@ FAKE_JQ
 #!/usr/bin/env bash
 set -euo pipefail
 
-printf 'expectedsha  %s\n' "$1"
+# One line per argument, like the real tool: gos verify hashes trees in bulk.
+if [ "$#" -eq 0 ]; then
+  cat >/dev/null
+  printf 'expectedsha  -\n'
+fi
+for file in "$@"; do
+  case "$file" in
+    *.zip | *.partial) printf 'expectedsha  %s\n' "$file" ;;
+    *) printf '%064x  %s\n' "$(cksum <"$file" | cut -d' ' -f1)" "$file" ;;
+  esac
+done
 FAKE_SHA256SUM
 
   cat >"${case_bin}/go" <<'FAKE_GO'
@@ -126,7 +136,7 @@ FAKE_GO
 
   # Wrap tools instead of symlinking them: symlinks may execute from the fake
   # bin directory, which can break DLL discovery on Windows.
-  for tool in bash dirname basename grep sed tr wc head mktemp rm chmod mv cut cat mkdir; do
+  for tool in bash dirname basename grep sed tr wc head mktemp rm chmod mv cut cat mkdir find sort awk xargs paste cksum; do
     link_tool "$tool"
   done
 }

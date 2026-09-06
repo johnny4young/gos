@@ -150,6 +150,77 @@ jobs:
         run: |
           fish --no-config --no-execute completions/gos.fish
 
+  action:
+    name: Action (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Write a project file
+        run: |
+          mkdir -p "${RUNNER_TEMP}/project"
+          printf '1.25\n' >"${RUNNER_TEMP}/project/.go-version"
+
+      - name: Install Go with the action
+        id: setup
+        uses: ./
+        with:
+          project-dir: ${{ runner.temp }}/project
+          install-dir: ${{ runner.temp }}/gos custom
+          verify: 'true'
+
+      - name: Check the toolchain the action installed
+        env:
+          INSTALLED: ${{ steps.setup.outputs.go-version }}
+          GO_ROOT: ${{ steps.setup.outputs.go-root }}
+        run: |
+          case "$INSTALLED" in
+            1.25.*) ;;
+            *)
+              echo "expected the newest go1.25 patch, got '${INSTALLED}'" >&2
+              exit 1
+              ;;
+          esac
+          go version | grep -F "go${INSTALLED}"
+          echo "GOROOT from go: $(go env GOROOT); from the action: ${GO_ROOT}"
+          gos status
+          gos verify --json | grep -F '"ok":true'
+          gos which
+
+      - name: Check Windows PowerShell launcher and GOROOT
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          EXPECTED_ROOT: ${{ steps.setup.outputs.go-root }}
+          EXPECTED_VERSION: ${{ steps.setup.outputs.go-version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gos version
+          if ($LASTEXITCODE -ne 0) { throw 'gos failed from PowerShell' }
+          gos which
+          if ($LASTEXITCODE -ne 0) { throw 'gos which failed from PowerShell' }
+          $actual = go env GOROOT
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_ROOT) { throw "Wrong GOROOT: $actual" }
+          $version = go version
+          if ($LASTEXITCODE -ne 0 -or $version -notlike "*go$env:EXPECTED_VERSION *") { throw "Wrong Go: $version" }
+
+      - name: Check Windows cmd launcher
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call gos version
+          if errorlevel 1 exit /b 1
+          call gos which
+          if errorlevel 1 exit /b 1
+
   actionlint:
     name: actionlint
     runs-on: ubuntu-latest

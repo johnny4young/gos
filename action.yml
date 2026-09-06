@@ -1,0 +1,157 @@
+name: 'Setup Go with gos'
+description: 'Install a checksum-verified Go toolchain with gos: the version from .go-version, .tool-versions, or go.mod, or an explicit one, cached across runs.'
+author: 'johnny4young'
+branding:
+  icon: 'download'
+  color: 'blue'
+
+inputs:
+  go-version:
+    description: 'Go version to install: exact (1.26.1), a minor (1.26 installs its newest patch), or latest. Empty resolves it from .go-version, .tool-versions, or go.mod in project-dir.'
+    required: false
+    default: ''
+  project-dir:
+    description: 'Directory whose project files decide the version when go-version is empty.'
+    required: false
+    default: '.'
+  install-dir:
+    description: 'Where Go is installed (GOROOT). The basename must contain "go".'
+    required: false
+    default: ''
+  cache:
+    description: 'Cache the verified Go archive between runs with actions/cache (keyed by version, OS, and architecture).'
+    required: false
+    default: 'true'
+  verify:
+    description: 'Run gos verify after installing: every file the official archive ships is compared with the installed copy.'
+    required: false
+    default: 'false'
+  require-checksum:
+    description: 'GOS_REQUIRE_CHECKSUM policy. feed (default) refuses to install anything the go.dev feed cannot vouch for; 1 also accepts the .sha256 companion file.'
+    required: false
+    default: 'feed'
+
+outputs:
+  go-version:
+    description: 'Installed Go version without the go prefix (1.26.1).'
+    value: ${{ steps.install.outputs.go-version }}
+  go-root:
+    description: 'Installation directory (GOROOT), in the runner''s native path syntax.'
+    value: ${{ steps.install.outputs.go-root }}
+  cache-hit:
+    description: 'true when the archive came from the actions/cache entry; empty when cache is false.'
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve the Go version
+      id: resolve
+      shell: bash
+      env:
+        INPUT_GO_VERSION: ${{ inputs.go-version }}
+        INPUT_PROJECT_DIR: ${{ inputs.project-dir }}
+        INPUT_INSTALL_DIR: ${{ inputs.install-dir }}
+      run: |
+        set -euo pipefail
+        gos="${GITHUB_ACTION_PATH}/gos.sh"
+        # Values written to runner command files must be single-line. Validate
+        # the version before using it as a regex or emitting cache-key outputs.
+        for value in "$INPUT_GO_VERSION" "$INPUT_PROJECT_DIR" "$INPUT_INSTALL_DIR" "$HOME"; do
+          case "$value" in
+            *$'\n'* | *$'\r'*) echo '::error::action inputs and HOME must be single-line'; exit 1 ;;
+          esac
+        done
+        export GOS_CACHE_DIR="${HOME}/.cache/gos" GOS_VERSIONS_DIR=""
+        requested="${INPUT_GO_VERSION#go}"
+        if [ -z "$requested" ]; then
+          # The same resolver a developer runs locally: gos use --print.
+          requested=$(cd -- "$INPUT_PROJECT_DIR" && bash "$gos" use --print)
+          requested="${requested#go}"
+          echo "Project ${INPUT_PROJECT_DIR} requests Go ${requested}."
+        fi
+        version_pattern='^[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$'
+        if [ "$requested" != latest ] && ! [[ "$requested" =~ $version_pattern ]]; then
+          echo '::error::go-version must be latest or a Go version X.Y[.Z][rcN|betaN]'
+          exit 1
+        fi
+        # Pin the cache key to an exact version so a bare minor or latest
+        # picks up new patch releases instead of reusing a stale archive.
+        stable_versions() {
+          bash "$gos" list --minor --json | tr ',[]' '\n\n\n' | tr -d '"' | grep -E '^go[0-9]+\.[0-9]+(\.[0-9]+)?$'
+        }
+        case "$requested" in
+          latest) exact=$(stable_versions | tail -1) ;;
+          *.*.* | *rc* | *beta*) exact="go${requested}" ;;
+          *) exact=$(stable_versions | grep -E "^go${requested//./\\.}(\.[0-9]+)?$" | tail -1) ;;
+        esac
+        if [ -z "${exact:-}" ]; then
+          echo "::error::could not resolve Go '${requested}' against the go.dev downloads feed"
+          exit 1
+        fi
+        install_dir="${INPUT_INSTALL_DIR:-${HOME}/.gos/go}"
+        if [ "$RUNNER_OS" = Windows ]; then
+          install_dir=$(cygpath -u "$install_dir")
+        fi
+        {
+          printf 'version=%s\n' "${exact#go}"
+          printf 'install-dir=%s\n' "$install_dir"
+          printf 'cache-key=gos-%s-%s-%s\n' "$exact" "$RUNNER_OS" "$RUNNER_ARCH"
+        } >>"$GITHUB_OUTPUT"
+        echo "Installing ${exact} into ${install_dir}."
+
+    - name: Restore cached Go archives
+      id: cache
+      if: ${{ inputs.cache == 'true' }}
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/gos
+        key: ${{ steps.resolve.outputs.cache-key }}
+
+    - name: Install Go
+      id: install
+      shell: bash
+      env:
+        GOS_INSTALL_DIR: ${{ steps.resolve.outputs.install-dir }}
+        GOS_REQUIRE_CHECKSUM: ${{ inputs.require-checksum }}
+        GOS_VERSION_TO_INSTALL: ${{ steps.resolve.outputs.version }}
+      run: |
+        set -euo pipefail
+        gos="${GITHUB_ACTION_PATH}/gos.sh"
+        export GOS_CACHE_DIR="${HOME}/.cache/gos" GOS_VERSIONS_DIR=""
+        bash "$gos" install "$GOS_VERSION_TO_INSTALL"
+        # Later steps get go and gos on PATH; GOS_INSTALL_DIR keeps gos
+        # pointed at this toolchain.
+        gos_bin="${HOME}/.gos/bin"
+        mkdir -p "$gos_bin"
+        cp "$gos" "${gos_bin}/gos"
+        chmod +x "${gos_bin}/gos"
+        if [ "$RUNNER_OS" = Windows ]; then
+          cp "$gos" "${gos_bin}/gos.sh"
+          cp "${GITHUB_ACTION_PATH}/packaging/windows/gos.cmd" "${gos_bin}/gos.cmd"
+        fi
+        native() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s\n' "$1"; fi; }
+        native "${GOS_INSTALL_DIR}/bin" >>"$GITHUB_PATH"
+        native "$gos_bin" >>"$GITHUB_PATH"
+        {
+          printf 'GOS_INSTALL_DIR=%s\n' "$GOS_INSTALL_DIR"
+          printf 'GOS_CACHE_DIR=%s\n' "$GOS_CACHE_DIR"
+          printf 'GOROOT=%s\n' "$(native "$GOS_INSTALL_DIR")"
+        } >>"$GITHUB_ENV"
+        installed=$("${GOS_INSTALL_DIR}/bin/go" version | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' | head -1)
+        {
+          printf 'go-version=%s\n' "${installed#go}"
+          printf 'go-root=%s\n' "$(native "$GOS_INSTALL_DIR")"
+        } >>"$GITHUB_OUTPUT"
+        echo "Installed ${installed} at ${GOS_INSTALL_DIR}."
+
+    - name: Verify the installation
+      if: ${{ inputs.verify == 'true' }}
+      shell: bash
+      env:
+        GOS_INSTALL_DIR: ${{ steps.resolve.outputs.install-dir }}
+        GOS_REQUIRE_CHECKSUM: ${{ inputs.require-checksum }}
+      run: |
+        set -euo pipefail
+        export GOS_CACHE_DIR="${HOME}/.cache/gos" GOS_VERSIONS_DIR=""
+        bash "${GITHUB_ACTION_PATH}/gos.sh" verify

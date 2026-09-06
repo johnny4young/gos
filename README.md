@@ -7,6 +7,7 @@
     <a href="https://github.com/johnny4young/gos/releases"><img src="https://img.shields.io/github/v/release/johnny4young/gos" alt="GitHub Release"></a>
     <a href="https://github.com/johnny4young/gos/blob/main/LICENSE"><img src="https://img.shields.io/github/license/johnny4young/gos" alt="License"></a>
     <a href="https://github.com/johnny4young/gos/actions/workflows/ci.yml"><img src="https://github.com/johnny4young/gos/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/johnny4young/gos/actions/workflows/canary.yml"><img src="https://github.com/johnny4young/gos/actions/workflows/canary.yml/badge.svg" alt="Canary"></a>
     <a href="https://scorecard.dev/viewer/?uri=github.com/johnny4young/gos"><img src="https://api.securityscorecards.dev/projects/github.com/johnny4young/gos/badge" alt="OpenSSF Scorecard"></a>
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20%7C%20BSD-blue" alt="Platform">
     <img src="https://img.shields.io/badge/shell-bash-green" alt="Shell">
@@ -74,6 +75,7 @@ interaction is never a surprise.
   - [PowerShell](#powershell-windows)
   - [Windows Package Managers](#windows-package-managers)
   - [Git Clone](#git-clone)
+  - [GitHub Actions](#github-actions)
   - [Manual Shell Config](#manual-shell-configuration)
 - [Usage](#usage)
 - [Shell Completions](#shell-completions)
@@ -246,6 +248,30 @@ Then add to your shell profile (see [Manual Shell Configuration](#manual-shell-c
 ```bash
 export PATH="$HOME/.gos:$PATH"
 ```
+
+### GitHub Actions
+
+`uses: johnny4young/gos@v1` installs the Go version your project asks for, verified against go.dev, with the same script and resolver you run locally:
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: johnny4young/gos@v1 # reads .go-version, .tool-versions, or go.mod
+  - run: go test ./...
+```
+
+| Input | Default | What it does |
+|---|---|---|
+| `go-version` | *(project file)* | Exact version (`1.26.1`), a minor (`1.26` installs its newest patch), or `latest`. |
+| `project-dir` | `.` | Where `.go-version`, `.tool-versions`, or `go.mod` is read when `go-version` is empty. |
+| `install-dir` | `~/.gos/go` | Installation directory (GOROOT); its basename must contain `go`. |
+| `cache` | `true` | Cache the verified archive in `~/.cache/gos` with `actions/cache`, keyed by version, OS, and architecture. |
+| `verify` | `false` | Run `gos verify` after installing: every file the official archive ships is compared with the installed copy. |
+| `require-checksum` | `feed` | `GOS_REQUIRE_CHECKSUM` policy; `feed` refuses to install anything the go.dev feed cannot vouch for. |
+
+Outputs: `go-version` (installed, without the `go` prefix), `go-root`, and `cache-hit`. The action exports `GOROOT` in native path syntax and keeps `GOS_INSTALL_DIR`/`GOS_CACHE_DIR` aligned with its installation and archive cache. Native Windows paths are accepted for `install-dir`. Both `go` and `gos` are on `PATH` afterwards, so later steps can run `gos verify`, `gos status`, or `gos each 1.25,1.26 -- go test ./...`. The action installs through Git Bash on Windows and provides launchers for subsequent Bash, PowerShell, and cmd steps. CI exercises a custom installation path on all three runner OSes and native PowerShell/cmd invocation on Windows.
+
+Why not `actions/setup-go`? It also reads `.go-version` and `.tool-versions`, but it does not verify the checksum of what it downloads ([actions/setup-go#678](https://github.com/actions/setup-go/issues/678)) and resolves versions through an intermediate manifest repository. gos verifies every archive against the go.dev feed and resolves the version with the same code path as your laptop, so "what I tested locally is what CI runs" is something you can check with `gos verify` rather than assume.
 
 ### Manual Shell Configuration
 
