@@ -56,7 +56,8 @@ generate_release_notes_from_git() {
 
   # ${previous_tag:+...} keeps this bash 3.2-safe: expanding an empty array
   # with "${range_args[@]}" is an unbound-variable error under set -u there.
-  if ! git log --no-merges --reverse --format='%s' ${previous_tag:+"${previous_tag}..HEAD"} >"$commit_subjects"; then
+  # The post-release AUR bump commit is automation and never a release note.
+  if ! git log --no-merges --reverse --format='%s' --invert-grep --grep='^chore(aur): point the package at v' ${previous_tag:+"${previous_tag}..HEAD"} >"$commit_subjects"; then
     printf 'error: failed to read git commit subjects for changelog generation\n' >&2
     return 1
   fi

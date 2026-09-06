@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+
+- The changelog guard and the fallback note generator ignore the release workflow's post-tag `chore(aur)` bump commit, so `main` no longer fails `tests/changelog.bash` right after every release.
+
 ## [1.10.0] - 2026-09-06
 
 ### Added
