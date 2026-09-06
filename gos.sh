@@ -16,7 +16,7 @@
 #   Entrypoint         _gos_preflight and main's dispatcher
 set -euo pipefail
 
-GOS_VERSION="1.10.0"
+GOS_VERSION="1.11.0"
 GOS_INSTALL_DIR="${GOS_INSTALL_DIR:-/usr/local/go}"
 # Strip trailing slashes so sibling paths (backup, rollback) are computed as
 # true siblings: /usr/local/go/ would otherwise yield /usr/local/go/.gos-backup.

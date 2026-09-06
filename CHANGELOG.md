@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-09-06
+
 ### Added
 
 - A GitHub Action in this repository: `uses: johnny4young/gos@v1` installs the Go version a project requests (or an explicit `go-version`), verified against go.dev through the tagged `gos.sh` itself, caches the archive with `actions/cache`, optionally runs `gos verify`, and puts `go` and `gos` on `PATH`. CI exercises it on ubuntu, macos, and windows runners, and the release workflow moves the `v1` tag to each stable release.
@@ -389,7 +391,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Homebrew formula
 
 
-[Unreleased]: https://github.com/johnny4young/gos/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/johnny4young/gos/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/johnny4young/gos/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/johnny4young/gos/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/johnny4young/gos/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/johnny4young/gos/compare/v1.7.0...v1.8.0

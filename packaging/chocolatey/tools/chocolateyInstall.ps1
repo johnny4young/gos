@@ -2,8 +2,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 $toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$url = 'https://github.com/johnny4young/gos/releases/download/v1.10.0/gos-windows.zip'
-$checksum = '6058157bc0d096a6e9e73fa216f987dda95bf48e1ce7f3abbb7f1e01c35457c1'
+$url = 'https://github.com/johnny4young/gos/releases/download/v1.11.0/gos-windows.zip'
+$checksum = '9ffd5fb04152bdd1956a41bfba2d7d5470d6c56b825c73661712687049c86308'
 $zipPath = Join-Path $toolsDir 'gos-windows.zip'
 $installDir = Join-Path $toolsDir 'gos'
 $gosPath = Join-Path $installDir 'gos.sh'
