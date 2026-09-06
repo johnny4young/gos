@@ -237,6 +237,11 @@ if [ "${GOS_TEST_SHA256_FAIL:-0}" = "1" ]; then
   exit 1
 fi
 
+# Model stdin too: pristine newline-bearing names must not always fail.
+if [ "$#" -eq 0 ]; then
+  printf '%064x  -\n' "$(cksum | cut -d' ' -f1)"
+  exit 0
+fi
 # Like the real tool, hash every argument: gos verify hashes whole trees in
 # one invocation per xargs batch.
 for file in "$@"; do
@@ -265,7 +270,7 @@ for file in "$@"; do
       ;;
     *)
       # Extracted files hash by content so tree comparisons notice edits.
-      printf 'tree%s  %s\n' "$(cksum <"$file" | cut -d' ' -f1)" "$file"
+      printf '%064x  %s\n' "$(cksum <"$file" | cut -d' ' -f1)" "$file"
       ;;
   esac
 done

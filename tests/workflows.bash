@@ -808,6 +808,10 @@ ci_action_job = ci_jobs.fetch("action") { fail!("ci.yml must exercise the action
 assert(ci_action_job.dig("strategy", "matrix", "os") == ci_jobs.fetch("smoke").dig("strategy", "matrix", "os"), "the action job must run on the same OS matrix as the smoke job")
 assert(ci_action_job.dig("strategy", "fail-fast") == false, "the action job must not fail fast")
 assert((ci_action_job["steps"] || []).any? { |step| step["uses"] == "./" && step.dig("with", "verify") == "true" }, "the action job must use the local action with verify enabled")
+assert((ci_action_job["steps"] || []).any? { |step| step["uses"] == "./" && step.dig("with", "install-dir").to_s.include?("runner.temp") }, "action CI must exercise a custom native runner path")
+%w[pwsh cmd].each do |shell|
+  assert((ci_action_job["steps"] || []).any? { |step| step["shell"] == shell && step["run"].to_s.include?("gos version") }, "Windows action CI must exercise gos from #{shell}")
+end
 major_tag_step = release_jobs.fetch("release").fetch("steps").find { |step| step["name"] == "Move the major version tag" }
 assert(major_tag_step, "release job must move the major version tag for uses: johnny4young/gos@v1")
 assert(major_tag_step["if"].to_s.include?("is_prerelease != 'true'"), "the major tag must only follow stable releases")

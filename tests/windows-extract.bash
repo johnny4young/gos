@@ -117,7 +117,10 @@ if [ "$#" -eq 0 ]; then
   printf 'expectedsha  -\n'
 fi
 for file in "$@"; do
-  printf 'expectedsha  %s\n' "$file"
+  case "$file" in
+    *.zip | *.partial) printf 'expectedsha  %s\n' "$file" ;;
+    *) printf '%064x  %s\n' "$(cksum <"$file" | cut -d' ' -f1)" "$file" ;;
+  esac
 done
 FAKE_SHA256SUM
 
@@ -133,7 +136,7 @@ FAKE_GO
 
   # Wrap tools instead of symlinking them: symlinks may execute from the fake
   # bin directory, which can break DLL discovery on Windows.
-  for tool in bash dirname basename grep sed tr wc head mktemp rm chmod mv cut cat mkdir find sort awk xargs paste; do
+  for tool in bash dirname basename grep sed tr wc head mktemp rm chmod mv cut cat mkdir find sort awk xargs paste cksum; do
     link_tool "$tool"
   done
 }

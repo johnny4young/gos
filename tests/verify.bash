@@ -298,3 +298,61 @@ chmod +x "${fake_bin}/sha256sum" "${fake_bin}/tar"
 run_gos "$case_dir" bash "$script" verify
 assert_status 0 "$status" "cache replaced after hash" "$output"
 pass "verify hashes and extracts the same private snapshot despite concurrent cache replacement"
+
+# Real SHA256 implementations must agree on pristine and modified trees,
+# including whitespace, option-looking names and hashers' escaping differences.
+mv "${test_root}/snapshot-tar" "${fake_bin}/tar"
+mv "${fake_bin}/tar" "${test_root}/bulk-tar"
+cat >"${fake_bin}/tar" <<TAR
+#!/usr/bin/env bash
+set -euo pipefail
+"${test_root}/bulk-tar" "\$@"
+for ((i=0; i<100; i++)); do printf original >"\$2/go/file-\$i"; done
+for name in '--help' 'space name' 'back\slash' \$'line\\nbreak'; do
+  printf original >"\$2/go/\$name"
+done
+TAR
+chmod +x "${fake_bin}/tar"
+for implementation in sha256sum shasum; do
+  real_hash=$(PATH="$original_path" command -v "$implementation") || continue
+  cat >"${fake_bin}/sha256sum" <<HASH
+#!/usr/bin/env bash
+set -euo pipefail
+case "\${1:-}" in
+  *.tar.gz | *.partial) printf 'expectedsha  %s\\n' "\$1"; exit 0 ;;
+esac
+printf '%s\\n' "\$#" >>"\$GOS_TEST_BULK_LOG"
+case "\${GOS_TEST_BULK_MODE:-valid}" in
+  invalid) for file in "\$@"; do printf 'not-a-digest  %s\\n' "\$file"; done; exit 0 ;;
+  short) exit 0 ;;
+  fail) exit 23 ;;
+esac
+if [ "$implementation" = shasum ]; then exec "$real_hash" -a 256 "\$@"; fi
+exec "$real_hash" "\$@"
+HASH
+  chmod +x "${fake_bin}/sha256sum"
+  case_dir="${test_root}/bulk-${implementation}"
+  run_gos "$case_dir" bash "$script" install 1.21.6
+  assert_status 0 "$status" "bulk fixture install" "$output"
+  : >"${case_dir}/bulk.log"
+  GOS_TEST_BULK_LOG="${case_dir}/bulk.log" GOS_TEST_STDERR_FILE="${case_dir}/stderr" run_gos "$case_dir" bash "$script" verify --json
+  assert_status 0 "$status" "pristine real $implementation tree" "$output"
+  assert_contains "$output" '"checked":106,"modified":[],"missing":[]' "bulk pristine report"
+  [ "$(wc -l <"${case_dir}/bulk.log" | tr -d ' ')" -eq 4 ] || fail "normal tree hashing must batch rather than fork per file"
+  printf tampered >"${case_dir}/go/space name"
+  printf tampered >"${case_dir}/go/line
+break"
+  GOS_TEST_BULK_LOG="${case_dir}/bulk.log" GOS_TEST_STDERR_FILE="${case_dir}/stderr" run_gos "$case_dir" bash "$script" verify --json
+  assert_status 4 "$status" "tampered real $implementation tree" "$output"
+  assert_contains "$output" 'line\nbreak' "newline path survives real hashing"
+  assert_contains "$output" 'space name' "space path survives real hashing"
+  # Remove the newline file so the following failures target the bulk branch.
+  rm "${case_dir}/go/line
+break"
+  for mode in invalid short fail; do
+    GOS_TEST_BULK_MODE="$mode" GOS_TEST_BULK_LOG="${case_dir}/bulk.log" GOS_TEST_STDERR_FILE="${case_dir}/stderr" run_gos "$case_dir" bash "$script" verify --json
+    assert_status 4 "$status" "bulk hasher $mode" "$output"
+    assert_contains "$output" '"error":{"code":"verification"' "bulk hash errors fail closed"
+  done
+  pass "real $implementation verifies special paths in batches and fails closed on malformed, partial or failed hashing"
+done

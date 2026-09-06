@@ -55,12 +55,25 @@ runs:
       run: |
         set -euo pipefail
         gos="${GITHUB_ACTION_PATH}/gos.sh"
+        # Values written to runner command files must be single-line. Validate
+        # the version before using it as a regex or emitting cache-key outputs.
+        for value in "$INPUT_GO_VERSION" "$INPUT_PROJECT_DIR" "$INPUT_INSTALL_DIR" "$HOME"; do
+          case "$value" in
+            *$'\n'* | *$'\r'*) echo '::error::action inputs and HOME must be single-line'; exit 1 ;;
+          esac
+        done
+        export GOS_CACHE_DIR="${HOME}/.cache/gos" GOS_VERSIONS_DIR=""
         requested="${INPUT_GO_VERSION#go}"
         if [ -z "$requested" ]; then
           # The same resolver a developer runs locally: gos use --print.
-          requested=$(cd "$INPUT_PROJECT_DIR" && bash "$gos" use --print)
+          requested=$(cd -- "$INPUT_PROJECT_DIR" && bash "$gos" use --print)
           requested="${requested#go}"
           echo "Project ${INPUT_PROJECT_DIR} requests Go ${requested}."
+        fi
+        version_pattern='^[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$'
+        if [ "$requested" != latest ] && ! [[ "$requested" =~ $version_pattern ]]; then
+          echo '::error::go-version must be latest or a Go version X.Y[.Z][rcN|betaN]'
+          exit 1
         fi
         # Pin the cache key to an exact version so a bare minor or latest
         # picks up new patch releases instead of reusing a stale archive.
@@ -77,6 +90,9 @@ runs:
           exit 1
         fi
         install_dir="${INPUT_INSTALL_DIR:-${HOME}/.gos/go}"
+        if [ "$RUNNER_OS" = Windows ]; then
+          install_dir=$(cygpath -u "$install_dir")
+        fi
         {
           printf 'version=%s\n' "${exact#go}"
           printf 'install-dir=%s\n' "$install_dir"
@@ -102,6 +118,7 @@ runs:
       run: |
         set -euo pipefail
         gos="${GITHUB_ACTION_PATH}/gos.sh"
+        export GOS_CACHE_DIR="${HOME}/.cache/gos" GOS_VERSIONS_DIR=""
         bash "$gos" install "$GOS_VERSION_TO_INSTALL"
         # Later steps get go and gos on PATH; GOS_INSTALL_DIR keeps gos
         # pointed at this toolchain.
@@ -109,10 +126,18 @@ runs:
         mkdir -p "$gos_bin"
         cp "$gos" "${gos_bin}/gos"
         chmod +x "${gos_bin}/gos"
+        if [ "$RUNNER_OS" = Windows ]; then
+          cp "$gos" "${gos_bin}/gos.sh"
+          cp "${GITHUB_ACTION_PATH}/packaging/windows/gos.cmd" "${gos_bin}/gos.cmd"
+        fi
         native() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s\n' "$1"; fi; }
         native "${GOS_INSTALL_DIR}/bin" >>"$GITHUB_PATH"
         native "$gos_bin" >>"$GITHUB_PATH"
-        printf 'GOS_INSTALL_DIR=%s\n' "$GOS_INSTALL_DIR" >>"$GITHUB_ENV"
+        {
+          printf 'GOS_INSTALL_DIR=%s\n' "$GOS_INSTALL_DIR"
+          printf 'GOS_CACHE_DIR=%s\n' "$GOS_CACHE_DIR"
+          printf 'GOROOT=%s\n' "$(native "$GOS_INSTALL_DIR")"
+        } >>"$GITHUB_ENV"
         installed=$("${GOS_INSTALL_DIR}/bin/go" version | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' | head -1)
         {
           printf 'go-version=%s\n' "${installed#go}"
@@ -125,6 +150,8 @@ runs:
       shell: bash
       env:
         GOS_INSTALL_DIR: ${{ steps.resolve.outputs.install-dir }}
+        GOS_REQUIRE_CHECKSUM: ${{ inputs.require-checksum }}
       run: |
         set -euo pipefail
+        export GOS_CACHE_DIR="${HOME}/.cache/gos" GOS_VERSIONS_DIR=""
         bash "${GITHUB_ACTION_PATH}/gos.sh" verify

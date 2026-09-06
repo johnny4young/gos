@@ -102,3 +102,15 @@ assert_json "$output" "unsupported platform"
 assert_contains "$output" '"name":"platform","status":"problem"' "unsupported platform status"
 assert_contains "$output" "unsupported platform detected: Plan9/mystery" "unsupported platform message"
 pass "unsupported uname pairs are reported as a doctor problem"
+
+# Warm OS detection in the parent once; repeated substitutions inherit it.
+sed '$d' "$script" >"$test_root/functions.bash"
+cat >"$fake_bin/uname" <<'UNAME'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$GOS_TEST_UNAME_LOG"
+printf 'Darwin\n'
+UNAME
+GOS_TEST_UNAME_LOG="$test_root/uname.log" PATH="$fake_bin:$original_path" \
+  bash -c '. "$1"; for i in 1 2 3 4; do value=$(_gos_os); [ "$value" = darwin ] || exit 1; done' _ "$test_root/functions.bash"
+[ "$(wc -l <"$test_root/uname.log" | tr -d ' ')" -eq 1 ] || fail "OS cache does not survive command substitutions"
+pass "OS detection calls uname once across repeated command substitutions"

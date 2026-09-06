@@ -18,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- The composite action normalizes native Windows installation paths, installs the PowerShell/cmd launcher alongside Bash, exports matching GOROOT/cache paths, and rejects malformed versions or multiline runner-output inputs. CI covers a spaced custom root and native Windows shells.
+- OS detection is initialized in the parent shell so repeated command substitutions reuse it. Bulk tree verification rejects malformed/missing hash output, keeps option-looking file names literal, and is tested with real hashers and a bounded process count.
+
 - Local archives are snapshotted before hashing, checked against the requested Go version/platform before caching, and can repair already-installed versions without skipping an explicit digest. Failed side-by-side replacements restore the previous tree.
 - Verification fails closed on hashing or file-enumeration errors, preserves newline-bearing paths in JSON, and uses private archive snapshots/downloads without touching concurrent installs' cache entries or resumable partials. Windows local-archive validation accepts CRLF version output.
 - gos version schemas reject noncanonical suffixes; strict-schema consumers must pin schemas matching their gos release.
