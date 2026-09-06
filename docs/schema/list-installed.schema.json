@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/list-installed.schema.json",
+  "title": "gos list --installed --json (with or without --minor)",
+  "description": "Locally installed Go versions.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "installed": {
+      "type": "array",
+      "description": "Installed versions, go-prefixed, sorted ascending.",
+      "items": {
+        "type": "string",
+        "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$"
+      }
+    },
+    "active": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+      "description": "Active Go version, or null when no go binary is on PATH."
+    }
+  },
+  "required": [
+    "installed",
+    "active"
+  ]
+}

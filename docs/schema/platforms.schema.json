@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/platforms.schema.json",
+  "title": "gos platforms [version] --json",
+  "description": "Archives go.dev publishes for a Go version.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+      "description": "Version the platforms belong to."
+    },
+    "platforms": {
+      "type": "array",
+      "description": "os/arch pairs with a published archive.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+/[a-z0-9]+$"
+      }
+    }
+  },
+  "required": [
+    "version",
+    "platforms"
+  ]
+}

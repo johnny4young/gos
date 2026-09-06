@@ -124,7 +124,7 @@ Done. That's the whole setup.
 - **Resumable downloads** — an interrupted archive download resumes from where it stopped instead of restarting the whole transfer
 - **Test across versions** — `gos each 1.22,1.23,1.24 -- go test ./...` runs a command against several side-by-side versions and prints a pass/fail summary
 - **TTY diagnostics styling** — interactive `gos doctor` plus stderr `Error:`/`Warning:` lines use color and symbols; pipes, `NO_COLOR`, `GOS_NO_COLOR=1`, and JSON stay plain
-- **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `env`, `doctor`, `prune`, `version`, and `use --print`
+- **Machine-readable output** — `--json` is available for `check`, `current`, `list`, `platforms`, `status`, `which`, `verify`, `self-verify`, `env`, `doctor`, `prune`, `version`, and `use --print`; every document has a [JSON Schema](docs/schema/README.md)
 - **Helpful when you mistype** — unknown commands suggest close matches (`gos isntall` → `install`), and `gos help <command>` shows a single command's usage
 - **Auto-detects everything** — OS (`darwin`, `linux`, `windows`, plus FreeBSD/OpenBSD/NetBSD/DragonFly) and architecture (`amd64`, `arm64`, `armv6l`, `386`, `riscv64`, `loong64`, `ppc64le`, `ppc64`, `s390x`)
 - **Cross-platform** — macOS, Linux, and Windows (Git Bash / WSL)
@@ -301,7 +301,7 @@ Bare `gos` prints a three-line status (active Go, project version or no manifest
 | Command | Description |
 |---|---|
 | `gos latest` | Install the latest stable Go version |
-| `gos install <version>` | Install a specific Go version |
+| `gos install <version> [--from-file <archive> [--sha256 <hex>]]` | Install a specific Go version, optionally from a local archive (air-gapped) verified by an explicit digest |
 | `gos rollback [--dry-run]` | Restore the previous Go installation, if available; `--dry-run` only previews the swap |
 | `gos uninstall <version or --inactive> [--dry-run]` | Remove an installed version (side-by-side mode); `--inactive` removes all but the active and rollback |
 | `gos use [--print [--json]] [path]` | Install the Go version requested by `.go-version`, `.tool-versions`, or `go.mod`; `--print` only resolves it |
@@ -314,11 +314,13 @@ Bare `gos` prints a three-line status (active Go, project version or no manifest
 | `gos platforms [version] [--json]` | List supported OS/arch archives for a Go version |
 | `gos status [--json]` | Show an offline dashboard for gos and the active Go |
 | `gos which [version] [--json]` | Show the active or side-by-side Go binary path |
+| `gos verify [version] [--json]` | Re-verify an installed Go file by file against the official go.dev archive and its checksum |
 | `gos prune [--rollback] [--dry-run] [--json]` | Remove cached Go archives; `--rollback` also removes the rollback copy, `--dry-run` only previews |
 | `gos doctor [--fix] [--json]` | Diagnose gos, Go, PATH, and local tool dependencies; `--fix` creates safe missing directories and prints the shell setup line |
 | `gos env [--fish] [--auto] [--json]` | Print the PATH setup line or an opt-in per-shell auto-switch hook |
 | `gos completions <shell> [--install]` | Print a Bash, Zsh, or Fish completion script (or install it with `--install`) |
 | `gos self-update` | Update gos itself to the latest verified release |
+| `gos self-verify [--json]` | Verify the running gos script against its release checksums and build attestation |
 | `gos version [--json]` | Show gos version |
 | `gos help [command]` | Show this help message, or usage for one command |
 <!-- gos-commands:end -->
@@ -534,6 +536,29 @@ inside the active install slot, because activation moves that slot atomically.
 
 ---
 
+### Air-gapped installs
+
+`--from-file` also replaces an already installed version, so it can repair a tree reported as damaged by `gos verify`. The local archive is snapshotted before hashing; its staged Go version and platform must match the request before caching or activation.
+
+Hosts without access to go.dev can install from an archive copied over by hand. `gos install` takes the same version plus the archive, and applies the same trust rules as a download:
+
+```bash
+# On a connected machine: fetch the archive and its official digest
+curl -fsSLO https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
+curl -fsSL https://go.dev/dl/go1.26.1.linux-amd64.tar.gz.sha256
+
+# On the air-gapped host
+gos install 1.26.1 --from-file ./go1.26.1.linux-amd64.tar.gz --sha256 <digest>
+```
+
+- `--sha256` is the digest gos verifies the file against; with it, nothing is fetched from the network.
+- Without `--sha256`, gos looks the digest up in the go.dev feed like a normal install. If that fails, the install follows `GOS_REQUIRE_CHECKSUM`: a warning by default, a refusal (exit `4`) under `GOS_REQUIRE_CHECKSUM=1`.
+- The exact version must be given (`1.26.1`, not `1.26`), the archive must match the running OS and architecture, and a verified archive is copied into `GOS_CACHE_DIR` for later reuse.
+
+### Proxies
+
+gos delegates downloads to `curl`, or `wget` when curl is absent. Set `https_proxy` and `no_proxy` for portable HTTPS proxy configuration. curl also supports `HTTPS_PROXY`, `ALL_PROXY`/`all_proxy` fallback, and `NO_PROXY`; HTTP-only proxy variables do not select a proxy for gos's HTTPS endpoints. `gos doctor` reports the applicable variable name, never its potentially secret value. This is a configuration hint, not proof that a request used the proxy: exclusions and downloader configuration may override it. For integrity, use a trusted digest or `GOS_REQUIRE_CHECKSUM=feed`; a proxy trusted by your TLS configuration that rewrites both metadata and archives is outside that checksum trust boundary.
+
 ## How It Works
 
 1. Queries the [official Go downloads API](https://go.dev/dl/?mode=json) for available versions
@@ -656,6 +681,7 @@ the Windows launcher. Use the symptom-specific checks below for those cases.
 | Password prompt on every install | `GOS_INSTALL_DIR` is root-owned (`/usr/local/go`) | Set `GOS_INSTALL_DIR` under your home directory; gos only escalates for the directory it writes |
 | `checksum verification required but ...` (exit 4) | `GOS_REQUIRE_CHECKSUM` is set and `jq`/`python3` or a SHA256 tool is missing | Install `jq` or `python3` plus `sha256sum`/`shasum`, then retry; check feed availability and the diagnostic before changing verification policy |
 | `could not fetch ...` (exit 3) | go.dev, the mirror, or a proxy is unreachable | Check `HTTPS_PROXY`; `GOS_DOWNLOAD_MIRROR` moves only archive downloads, metadata always comes from go.dev |
+| No network at all | Air-gapped host | Copy the archive over and run `gos install <version> --from-file <archive> --sha256 <digest>` (see [Air-gapped installs](#air-gapped-installs)) |
 | `gos requires Git Bash` on Windows | Only the WSL launcher `bash.exe` is installed | Install Git for Windows, or run gos inside WSL |
 | `go 1.24` in `go.mod` but the hook says it is not installed | No `go1.24.x` is installed, or several are | `gos use` installs one; with several installed, pin an exact version with `gos pin` |
 | `GOTOOLCHAIN` warning in `gos doctor` | The Go toolchain may run a per-module version instead of the one on `PATH` | Expected; set `GOTOOLCHAIN=local` to always use the managed Go |
@@ -665,6 +691,21 @@ the Windows launcher. Use the symptom-specific checks below for those cases.
 Security reporting instructions, supported versions, and installer trust
 assumptions are documented in [SECURITY.md](SECURITY.md). Do not open public
 issues for sensitive vulnerability details.
+
+### Verifying what you run
+
+Two commands re-check what is already on disk against the published sources of truth:
+
+```bash
+# Compare every file the official go1.26.1 archive ships with the installed copy
+gos verify            # the managed Go
+gos verify 1.25.3     # any side-by-side version
+
+# Compare the running gos script with the checksums (and build attestation) of its release
+gos self-verify
+```
+
+`gos verify` obtains the archive the same way an install does (cache first, checksum from the go.dev feed), extracts it to a temporary directory, and lists every shipped file that is modified or missing; extra files the install gained (build caches) are ignored. `gos self-verify` fetches the `checksums.txt` of the release matching the running version, and, when the GitHub CLI is installed and authenticated, also runs `gh attestation verify`. Both exit `4` when something does not match and support `--json`.
 
 ---
 

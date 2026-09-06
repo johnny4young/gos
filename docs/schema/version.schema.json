@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/version.schema.json",
+  "title": "gos version --json",
+  "description": "Running gos version.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "gos_version": {
+      "type": "string",
+      "description": "Version without v prefix.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    }
+  },
+  "required": [
+    "gos_version"
+  ]
+}

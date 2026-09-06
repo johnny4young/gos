@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/doctor.schema.json",
+  "title": "gos doctor [--fix] --json",
+  "description": "Diagnostic report. Exit status is 1 when problems > 0.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "description": "ok or problem.",
+      "enum": [
+        "ok",
+        "problem"
+      ]
+    },
+    "problems": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Checks with status problem."
+    },
+    "warnings": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Checks with status warn."
+    },
+    "checks": {
+      "type": "array",
+      "description": "Every check, in execution order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "status",
+          "message"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Check identifier (platform, install-dir, go, path-order, gotoolchain, download, proxy, ...)."
+          },
+          "status": {
+            "type": "string",
+            "description": "ok, warn, or problem.",
+            "enum": [
+              "ok",
+              "warn",
+              "problem"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "What was found."
+          },
+          "fix": {
+            "type": "string",
+            "description": "How to fix it; present for warn and problem checks that have a remedy."
+          }
+        }
+      }
+    },
+    "fixed": {
+      "type": "array",
+      "description": "Only with --fix: what was created or repaired.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "path_setup": {
+      "type": "string",
+      "description": "Only with --fix: the shell line that puts Go on PATH."
+    }
+  },
+  "required": [
+    "status",
+    "problems",
+    "warnings",
+    "checks"
+  ]
+}

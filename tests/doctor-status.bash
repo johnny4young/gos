@@ -10,6 +10,7 @@ script="${repo_root}/gos.sh"
 # shellcheck source=tests/lib-features.bash
 . "${repo_root}/tests/lib-features.bash"
 
+unset HTTPS_PROXY https_proxy HTTP_PROXY http_proxy ALL_PROXY all_proxy NO_PROXY no_proxy
 case_dir="${test_root}/doctor"
 run_gos "$case_dir" bash "$script" doctor --json
 [ "$status" -eq 0 ] || fail "doctor --json failed: ${output}"
@@ -19,6 +20,14 @@ assert_contains "$output" '"name":"checksum-hash"' "doctor json checks"
 assert_contains "$output" '"name":"residue","status":"ok"' "doctor json residue check"
 assert_contains "$output" '"name":"lock","status":"ok"' "doctor json lock check"
 assert_contains "$output" '"name":"gotoolchain","status":"ok"' "doctor gotoolchain ok without override"
+assert_not_contains "$output" '"name":"proxy"' "doctor omits the proxy check without proxy variables"
+HTTPS_PROXY="http://proxy.corp.test:3128" run_gos "$case_dir" bash "$script" doctor --json
+[ "$status" -eq 0 ] || fail "doctor with HTTPS_PROXY set must not fail: ${output}"
+assert_contains "$output" '"name":"proxy","status":"ok"' "doctor proxy check"
+assert_contains "$output" 'HTTPS proxy configured via HTTPS_PROXY' "doctor proxy variable"
+assert_not_contains "$output" 'proxy.corp.test' "doctor hides proxy value"
+https_proxy="http://lower.corp.test:3128" run_gos "$case_dir" bash "$script" doctor
+assert_contains "$output" 'HTTPS proxy configured via https_proxy' "doctor lowercase proxy variable"
 GOTOOLCHAIN="auto" run_gos "$case_dir" bash "$script" doctor
 [ "$status" -eq 0 ] || fail "doctor with GOTOOLCHAIN set must not fail: ${output}"
 assert_contains "$output" "warn - gotoolchain: GOTOOLCHAIN=auto may run a per-module toolchain" "doctor warns on GOTOOLCHAIN override"
@@ -248,3 +257,24 @@ GOS_TEST_INSTALL_DIR="${case_dir}/nested/go" run_gos "$case_dir" bash "$script" 
 assert_contains "$output" "fix - no safe automatic fixes needed" "doctor fix idempotent"
 assert_contains "$output" "fix - shell setup: export PATH='${case_dir}/nested/go/bin':\"\$PATH\"" "doctor fix shell setup"
 pass "doctor --fix applies only safe idempotent setup fixes"
+
+for mode in text json; do
+  args=()
+  [ "$mode" != json ] || args=(--json)
+  HTTPS_PROXY='http://user:dummy-secret@proxy.invalid:3128/token?key=secret' \
+    run_gos "$case_dir" bash "$script" doctor ${args[@]+"${args[@]}"}
+  assert_not_contains "$output" dummy-secret "${mode} proxy credentials hidden"
+  assert_not_contains "$output" proxy.invalid "${mode} proxy URL hidden"
+  assert_contains "$output" 'configured via HTTPS_PROXY' "${mode} HTTPS proxy selected"
+done
+HTTP_PROXY=http://http-only.invalid http_proxy=http://http-only.invalid run_gos "$case_dir" bash "$script" doctor --json
+assert_not_contains "$output" '"name":"proxy"' "HTTP-only variables do not affect HTTPS"
+HTTPS_PROXY=http://upper.invalid https_proxy=http://lower.invalid run_gos "$case_dir" bash "$script" doctor --json
+assert_contains "$output" 'configured via https_proxy' "lowercase HTTPS proxy precedence"
+ALL_PROXY=http://all.invalid run_gos "$case_dir" bash "$script" doctor --json
+assert_contains "$output" 'configured via ALL_PROXY' "curl ALL_PROXY fallback"
+GOS_TEST_DOWNLOADER=wget HTTPS_PROXY=http://upper.invalid ALL_PROXY=http://all.invalid run_gos "$case_dir" bash "$script" doctor --json
+assert_not_contains "$output" '"name":"proxy"' "wget ignores curl-only proxy variables"
+GOS_TEST_DOWNLOADER=wget https_proxy=http://lower.invalid run_gos "$case_dir" bash "$script" doctor --json
+assert_contains "$output" 'configured via https_proxy' "wget lowercase HTTPS proxy"
+pass "doctor hides proxy secrets and reports downloader-specific HTTPS configuration"

@@ -46,6 +46,9 @@ GOS_OUTPUT_JSON=0
 GOS_JSON_REPORT_EMITTED=0
 GOS_TMP_DIR=""
 GOS_COMPLETED_PARTIAL=""
+# gos install --from-file: a local archive (and optional digest) that replaces the download.
+GOS_ARCHIVE_FROM_FILE=""
+GOS_ARCHIVE_SHA256=""
 GOS_LOCK_DIR=""
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -54,6 +57,8 @@ GOS_LOCK_DIR=""
 # The EXIT trap restores it if gos dies between the backup mv and the
 # activation mv, so an interrupt cannot leave the machine with no Go at all.
 GOS_ACTIVATION_BACKUP=""
+GOS_REPLACEMENT_BACKUP=""
+GOS_REPLACEMENT_TARGET=""
 
 _gos_discard_completed_partial() {
   if [ -n "$GOS_COMPLETED_PARTIAL" ]; then
@@ -83,6 +88,13 @@ _gos_cleanup_tmp() {
       else
         _gos_warning "could not restore ${GOS_ACTIVATION_BACKUP}; move it back to ${GOS_INSTALL_DIR} manually."
       fi
+    fi
+  fi
+  # A local repair of an existing version directory has its own transaction.
+  if [ -n "$GOS_REPLACEMENT_BACKUP" ] && { [ -e "$GOS_REPLACEMENT_BACKUP" ] || [ -L "$GOS_REPLACEMENT_BACKUP" ]; }; then
+    if ! _gos_sudo_for "$GOS_REPLACEMENT_TARGET" rm -rf "$GOS_REPLACEMENT_TARGET" \
+      || ! _gos_sudo_for "$GOS_REPLACEMENT_TARGET" mv "$GOS_REPLACEMENT_BACKUP" "$GOS_REPLACEMENT_TARGET"; then
+      _gos_warning "could not restore ${GOS_REPLACEMENT_BACKUP}; move it back to ${GOS_REPLACEMENT_TARGET} manually."
     fi
   fi
   _gos_discard_completed_partial
@@ -951,7 +963,7 @@ _gos_try_cache() {
   local pkg="$1" expected_sha="$2"
   local cache_file actual_sha
 
-  cache_file=$(_gos_cache_path "$pkg")
+  cache_file="${3:-$(_gos_cache_path "$pkg")}"
   [ -f "$cache_file" ] || return 1
 
   if [ -z "$expected_sha" ]; then
@@ -1642,32 +1654,22 @@ _gos_activate_rollback() {
   echo "Rolled back! ${version_output}"
 }
 
-_gos_install_version() {
-  local version=$1
-  local include_all_checksums="${2:-false}"
-  local activate="${3:-true}"
-  local os arch ext pkg url tmp_dir tmp_file stage_dir staged_go_dir version_dir
-
-  _gos_validate_version "$version" || return 1
-
-  # Side-by-side fast path: the requested version is already installed, so
-  # switching is just a symlink flip — no network, no extraction.
-  if _gos_versions_mode; then
-    _gos_validate_versions_dir || return 1
-    version_dir=$(_gos_version_dir_for "$version")
-    if [ -x "${version_dir}/bin/go" ]; then
-      if [ "$activate" = "true" ]; then
-        _gos_progress "Using installed go${version} from ${version_dir}."
-        _gos_prepare_install_parent || return 1
-        _gos_activate_install link "$version_dir" || return 1
-      fi
-      return 0
-    fi
-  fi
-
-  if [ "$activate" != "true" ]; then
-    _gos_require_versions_mode "installing without activation" || return 1
-  fi
+# Obtain the verified archive for a version: resolve the platform package
+# name, the official checksum (feed, then the .sha256 companion, unless an
+# explicit --sha256 digest was given), and the archive bytes from the cache,
+# a resumable download, or GOS_ARCHIVE_FROM_FILE. On success sets
+# _gos_obtained_archive (path to extract), _gos_obtained_ext, _gos_obtained_pkg,
+# _gos_obtained_sha (empty when verification was skipped) and
+# _gos_obtained_sha_source (feed, file, explicit, or empty). Shared by install
+# and verify so both apply exactly the same trust rules.
+_gos_obtain_archive() {
+  local version="$1" include_all_checksums="$2" tmp_dir="$3" private="${4:-false}"
+  local os arch ext pkg url tmp_file
+  _gos_obtained_archive=""
+  _gos_obtained_ext=""
+  _gos_obtained_pkg=""
+  _gos_obtained_sha=""
+  _gos_obtained_sha_source=""
 
   os=$(_gos_os)
   arch=$(_gos_arch)
@@ -1682,25 +1684,21 @@ _gos_install_version() {
 
   pkg="go${version}.${os}-${arch}.${ext}"
   url="$(_gos_archive_base_url)/${pkg}"
-
-  # Use a unique temp directory to prevent symlink/TOCTOU attacks.
-  # The EXIT/INT/TERM trap removes it on every exit path.
-  tmp_dir=$(mktemp -d) || {
-    _gos_error "failed to create temp directory."
-    return 1
-  }
-  GOS_TMP_DIR="$tmp_dir"
   tmp_file="${tmp_dir}/${pkg}"
-  stage_dir="${tmp_dir}/stage"
-  staged_go_dir="${stage_dir}/go"
 
   # Resolve checksum metadata before consulting the local archive cache.
   # The feed cache is warmed here, in the parent shell, so the command
   # substitution below reuses it instead of re-downloading the feed.
-  local expected_sha actual_sha cache_hit sha_source feed_json
+  local expected_sha actual_sha cache_hit sha_source feed_json from_file
   expected_sha=""
   sha_source=""
-  if _gos_has_checksum_parser; then
+  from_file="$GOS_ARCHIVE_FROM_FILE"
+  if [ -n "$GOS_ARCHIVE_SHA256" ]; then
+    # gos install --from-file ... --sha256 <hex>: the operator vouches for the
+    # digest (air-gapped hosts have no feed to ask), so no lookup is attempted.
+    expected_sha="$GOS_ARCHIVE_SHA256"
+    sha_source="explicit"
+  elif _gos_has_checksum_parser; then
     # Try the small default feed first — it lists the last two minors, which is
     # the common install — and escalate to the multi-megabyte include=all feed
     # only when the requested version is older than that. Each feed is warmed
@@ -1734,7 +1732,7 @@ _gos_install_version() {
       return 1
     fi
   fi
-  if _gos_require_feed_checksum && [ "$sha_source" != "feed" ]; then
+  if _gos_require_feed_checksum && [ "$sha_source" != "feed" ] && [ "$sha_source" != "explicit" ]; then
     _gos_fail verification "GOS_REQUIRE_CHECKSUM=feed but no checksum was found in the go.dev downloads feed for ${pkg}."
     echo "Install jq or python3 so feed metadata can be parsed, or use GOS_REQUIRE_CHECKSUM=1 to accept the .sha256 fallback." >&2
     return 1
@@ -1753,10 +1751,33 @@ _gos_install_version() {
   cache_hit="false"
 
   # archive_file is what gets extracted: the cache file on a hit (no copy), a
-  # persistent .partial that can resume across runs, or the ephemeral temp file.
+  # persistent .partial that can resume across runs, the ephemeral temp file,
+  # or the operator-supplied file for air-gapped installs.
   local archive_file cache_file partial=""
   cache_file=$(_gos_cache_path "$pkg")
-  if _gos_try_cache "$pkg" "$expected_sha"; then
+  if [ -n "$from_file" ]; then
+    # Hash and extract the same private snapshot, never the mutable input path.
+    archive_file="$tmp_file"
+    if ! cp -- "$from_file" "$archive_file"; then
+      _gos_error "could not snapshot local archive: ${from_file}."
+      return 1
+    fi
+    _gos_progress "Using ${from_file} as ${pkg}."
+  elif [ "$private" = "true" ]; then
+    # verify has no mutation lock: snapshot cache hits, never use/write shared
+    # partials, and keep new downloads private so concurrent installs are safe.
+    if [ -f "$cache_file" ] && cp "$cache_file" "$tmp_file" \
+      && _gos_try_cache "$pkg" "$expected_sha" "$tmp_file"; then
+      cache_hit="true"
+    else
+      _gos_progress "Downloading ${pkg}..."
+      if ! _gos_download "$url" "$tmp_file"; then
+        _gos_fail network "download of ${pkg} failed."
+        return 1
+      fi
+    fi
+    archive_file="$tmp_file"
+  elif _gos_try_cache "$pkg" "$expected_sha"; then
     cache_hit="true"
     archive_file="$cache_file"
   elif [ -n "$expected_sha" ] && mkdir -p "$GOS_CACHE_DIR" 2>/dev/null && [ -w "$GOS_CACHE_DIR" ]; then
@@ -1799,7 +1820,13 @@ _gos_install_version() {
         echo "Install sha256sum or shasum, or unset GOS_DOWNLOAD_MIRROR." >&2
         return 1
       fi
+      if [ -n "$GOS_ARCHIVE_SHA256" ]; then
+        _gos_fail verification "no SHA256 tool output was available to verify the explicit --sha256 digest."
+        return 1
+      fi
       _gos_checksum_unavailable "no SHA256 tool output was available" || return 1
+      expected_sha=""
+      sha_source=""
     elif [ "$actual_sha" != "$expected_sha" ]; then
       # A resumed partial that fails is corrupt beyond repair (resume never
       # rewrites earlier bytes), so discard it to force a clean re-download.
@@ -1826,8 +1853,8 @@ _gos_install_version() {
           _gos_warning "could not write Go archive cache at ${cache_file}; this download will not be reused."
           GOS_COMPLETED_PARTIAL="$partial"
         fi
-      else
-        _gos_store_cache "$pkg" "$tmp_file" "$expected_sha"
+      elif [ -z "$from_file" ] && [ "$private" != "true" ]; then
+        _gos_store_cache "$pkg" "$archive_file" "$expected_sha"
       fi
     fi
   else
@@ -1837,8 +1864,61 @@ _gos_install_version() {
     else
       reason="no checksum source was available (jq/python3 missing and the ${pkg}.sha256 lookup failed)"
     fi
+    if [ -n "$from_file" ]; then
+      reason="${reason}; pass --sha256 <hex> to verify a local archive offline"
+    fi
     _gos_checksum_unavailable "$reason" || return 1
   fi
+
+  _gos_obtained_archive="$archive_file"
+  _gos_obtained_ext="$ext"
+  _gos_obtained_pkg="$pkg"
+  _gos_obtained_sha="$expected_sha"
+  _gos_obtained_sha_source="$sha_source"
+}
+
+_gos_install_version() {
+  local version=$1
+  local include_all_checksums="${2:-false}"
+  local activate="${3:-true}"
+  local ext tmp_dir stage_dir staged_go_dir version_dir
+
+  _gos_validate_version "$version" || return 1
+
+  # Side-by-side fast path: the requested version is already installed, so
+  # switching is just a symlink flip — no network, no extraction.
+  if _gos_versions_mode; then
+    _gos_validate_versions_dir || return 1
+    version_dir=$(_gos_version_dir_for "$version")
+    if [ -z "$GOS_ARCHIVE_FROM_FILE" ] && [ -x "${version_dir}/bin/go" ]; then
+      if [ "$activate" = "true" ]; then
+        _gos_progress "Using installed go${version} from ${version_dir}."
+        _gos_prepare_install_parent || return 1
+        _gos_activate_install link "$version_dir" || return 1
+      fi
+      return 0
+    fi
+  fi
+
+  if [ "$activate" != "true" ]; then
+    _gos_require_versions_mode "installing without activation" || return 1
+  fi
+
+  # Use a unique temp directory to prevent symlink/TOCTOU attacks.
+  # The EXIT/INT/TERM trap removes it on every exit path.
+  tmp_dir=$(mktemp -d) || {
+    _gos_error "failed to create temp directory."
+    return 1
+  }
+  GOS_TMP_DIR="$tmp_dir"
+  stage_dir="${tmp_dir}/stage"
+  staged_go_dir="${stage_dir}/go"
+
+  # Resolve the platform archive, its official checksum, and its bytes (cache,
+  # resumable download, or a local file); shared with gos verify.
+  _gos_obtain_archive "$version" "$include_all_checksums" "$tmp_dir" || return 1
+  ext="$_gos_obtained_ext"
+  local archive_file="$_gos_obtained_archive"
 
   _gos_progress "Extracting..."
   if ! mkdir -p "$stage_dir" || ! _gos_extract_archive "$ext" "$archive_file" "$stage_dir"; then
@@ -1849,6 +1929,21 @@ _gos_install_version() {
   _gos_discard_completed_partial
 
   _gos_validate_staged_install "$staged_go_dir" || return 1
+  if [ -n "$GOS_ARCHIVE_FROM_FILE" ]; then
+    # A digest binds bytes, not the version/platform requested by the operator.
+    # Suppress Go's per-project toolchain selection when identifying those bytes.
+    local reported expected_platform
+    expected_platform="$(_gos_os)/$(_gos_arch)"
+    [ "$expected_platform" != "linux/armv6l" ] || expected_platform="linux/arm"
+    reported=$(GOTOOLCHAIN=local "${staged_go_dir}/bin/go" version 2>/dev/null) || reported=""
+    reported="${reported%$'\r'}"
+    if [ "$reported" != "go version go${version} ${expected_platform}" ]; then
+      _gos_fail verification "local archive does not provide go${version} for ${expected_platform}."
+      return 1
+    fi
+    # Do not poison the named cache with an archive for another package.
+    _gos_store_cache "$_gos_obtained_pkg" "$archive_file" "$_gos_obtained_sha"
+  fi
 
   _gos_prepare_install_parent || return 1
 
@@ -1858,10 +1953,19 @@ _gos_install_version() {
       _gos_error "failed to create GOS_VERSIONS_DIR: ${GOS_VERSIONS_DIR}"
       return 1
     fi
-    # A partial or broken previous copy (no executable bin/go) is replaced.
-    if [ -e "$version_dir" ] && ! _gos_sudo_for "$version_dir" rm -rf "$version_dir"; then
-      _gos_error "failed to replace existing ${version_dir}."
-      return 1
+    # Preserve a previous copy until replacement and activation both succeed.
+    if [ -e "$version_dir" ] || [ -L "$version_dir" ]; then
+      local replacement_backup="${version_dir}.gos-backup.$$"
+      if [ -e "$replacement_backup" ] || [ -L "$replacement_backup" ]; then
+        _gos_error "backup path already exists: ${replacement_backup}"
+        return 1
+      fi
+      GOS_REPLACEMENT_TARGET="$version_dir"
+      GOS_REPLACEMENT_BACKUP="$replacement_backup"
+      if ! _gos_sudo_for "$version_dir" mv "$version_dir" "$replacement_backup"; then
+        _gos_error "failed to back up existing ${version_dir}."
+        return 1
+      fi
     fi
     if ! _gos_sudo_for "$version_dir" mv "$staged_go_dir" "$version_dir"; then
       _gos_error "failed to move new Go installation into ${GOS_VERSIONS_DIR}."
@@ -1877,6 +1981,15 @@ _gos_install_version() {
     _gos_activate_install move "$staged_go_dir" || return 1
   fi
 
+  if [ -n "$GOS_REPLACEMENT_BACKUP" ]; then
+    # Activation has committed. A cleanup failure must not roll back to an
+    # old tree that rm may already have partially deleted.
+    local completed_backup="$GOS_REPLACEMENT_BACKUP"
+    GOS_REPLACEMENT_BACKUP=""
+    GOS_REPLACEMENT_TARGET=""
+    _gos_sudo_for "$completed_backup" rm -rf "$completed_backup" \
+      || _gos_warning "could not remove replaced Go backup at ${completed_backup}."
+  fi
   rm -rf "$tmp_dir"
   GOS_TMP_DIR=""
 }
@@ -2336,16 +2449,73 @@ cmd_check() {
 }
 
 cmd_install() {
-  local version="${1:-}"
+  local version="" arg from_file="" sha256=""
+  GOS_ARCHIVE_FROM_FILE=""
+  GOS_ARCHIVE_SHA256=""
+  while [ "$#" -gt 0 ]; do
+    arg="$1"
+    case "$arg" in
+      --from-file)
+        if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+          _gos_fail usage "--from-file needs the path of a Go archive."
+          _gos_usage install "e.g. gos install 1.26.1 --from-file ./go1.26.1.linux-amd64.tar.gz"
+          return 1
+        fi
+        from_file="$2"
+        shift 2
+        ;;
+      --sha256)
+        if [ "$#" -lt 2 ]; then
+          _gos_fail usage "--sha256 needs a 64-character hex digest."
+          _gos_usage install
+          return 1
+        fi
+        sha256=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')
+        case "$sha256" in
+          '' | *[!0-9a-f]*)
+            _gos_fail usage "--sha256 must be a 64-character hex digest, got '${2}'."
+            return 1
+            ;;
+        esac
+        if [ "${#sha256}" -ne 64 ]; then
+          _gos_fail usage "--sha256 must be a 64-character hex digest, got '${2}'."
+          return 1
+        fi
+        shift 2
+        ;;
+      *)
+        if [ -n "$version" ] || [ "$arg" != "${arg#-}" ]; then
+          _gos_fail usage "unexpected argument for gos install: ${arg}"
+          _gos_usage install "e.g. gos install 1.26.1"
+          return 1
+        fi
+        version="$arg"
+        shift
+        ;;
+    esac
+  done
   if [ -z "$version" ]; then
     _gos_fail usage "gos install requires a version."
     _gos_usage install "e.g. gos install 1.26.1"
     return 1
   fi
-  if [ "$#" -gt 1 ]; then
-    _gos_fail usage "unexpected argument for gos install: ${2}"
-    _gos_usage install "e.g. gos install 1.26.1"
+  if [ -n "$sha256" ] && [ -z "$from_file" ]; then
+    _gos_fail usage "--sha256 only applies together with --from-file."
     return 1
+  fi
+  if [ -n "$from_file" ]; then
+    if [ ! -f "$from_file" ]; then
+      _gos_fail usage "--from-file: ${from_file} is not a file."
+      return 1
+    fi
+    # Air-gapped installs: the archive is already on disk, so a bare X.Y
+    # cannot be resolved against the feed; the exact version must be named.
+    if _gos_version_is_bare_minor "${version#go}"; then
+      _gos_fail usage "--from-file needs the exact version of the archive (e.g. 1.26.1, not 1.26)."
+      return 1
+    fi
+    GOS_ARCHIVE_FROM_FILE="$from_file"
+    GOS_ARCHIVE_SHA256="$sha256"
   fi
 
   # Strip leading 'go' prefix if provided e.g. go1.26.1 -> 1.26.1
@@ -2372,7 +2542,7 @@ cmd_install() {
 
   local current
   current=$(_gos_current)
-  if [ "$current" = "$version" ]; then
+  if [ -z "$from_file" ] && [ "$current" = "$version" ]; then
     if _gos_active_install_matches "$version"; then
       echo "Already on Go ${version}, nothing to do."
       return 0
@@ -2964,6 +3134,319 @@ cmd_which() {
   fi
 
   printf '%s\n' "$go_path"
+}
+
+# Re-verify an installed Go tree against the official release: obtain the
+# archive for that version through the same trust path as an install (cache
+# or download, checksum from the go.dev feed), extract it to a temp dir, and
+# compare every file the archive ships with the installed copy. Files the
+# install has gained since (build caches, editor droppings) are ignored; a
+# modified or missing shipped file is a verification failure (exit 4).
+cmd_verify() {
+  local version="" arg target_dir installed tmp_dir stage_dir staged_go_dir
+  local checked=0 modified_count=0 missing_count=0 modified="" missing="" rel
+  local modified_json="" missing_json=""
+
+  for arg in "$@"; do
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      -*)
+        _gos_fail usage "unknown option for gos verify: ${arg}"
+        _gos_usage verify
+        return 1
+        ;;
+      *)
+        if [ -z "$version" ]; then
+          version="${arg#go}"
+        else
+          _gos_fail usage "unexpected argument for gos verify: ${arg}"
+          _gos_usage verify
+          return 1
+        fi
+        ;;
+    esac
+  done
+  # Progress lines belong to the human report; a JSON consumer gets one document.
+  if _gos_json_enabled; then
+    GOS_PROGRESS_FD=2
+  fi
+
+  if [ -n "$version" ]; then
+    _gos_validate_version "$version" || return 1
+    version=$(_gos_resolve_installed_version "$version")
+    if _gos_versions_mode; then
+      _gos_validate_versions_dir || return 1
+      target_dir=$(_gos_version_dir_for "$version")
+      if [ ! -x "${target_dir}/bin/go" ]; then
+        _gos_error "go${version} is not installed under ${GOS_VERSIONS_DIR}."
+        echo "Run 'gos list --installed' to see the installed versions." >&2
+        return 1
+      fi
+    else
+      target_dir="$GOS_INSTALL_DIR"
+      installed=$(_gos_go_version_of "${target_dir}/bin/go" 2>/dev/null) || installed=""
+      if [ "$installed" != "$version" ]; then
+        _gos_error "go${version} is not the managed Go at ${GOS_INSTALL_DIR} (found go${installed:-none})."
+        echo "Set GOS_VERSIONS_DIR to keep several versions and verify any of them." >&2
+        return 1
+      fi
+    fi
+  else
+    target_dir="$GOS_INSTALL_DIR"
+    if [ ! -x "${target_dir}/bin/go" ]; then
+      _gos_error "no managed Go installation at ${GOS_INSTALL_DIR}."
+      echo "Run 'gos latest' or 'gos install <version>' first." >&2
+      return 1
+    fi
+    version=$(_gos_go_version_of "${target_dir}/bin/go" 2>/dev/null) || version=""
+    if [ -z "$version" ]; then
+      _gos_error "could not read the Go version reported by ${target_dir}/bin/go."
+      return 1
+    fi
+  fi
+
+  _gos_progress "Verifying go${version} at ${target_dir}..."
+  tmp_dir=$(mktemp -d) || {
+    _gos_error "failed to create temp directory."
+    return 1
+  }
+  GOS_TMP_DIR="$tmp_dir"
+  stage_dir="${tmp_dir}/stage"
+  staged_go_dir="${stage_dir}/go"
+
+  _gos_obtain_archive "$version" true "$tmp_dir" true || return 1
+  if [ -z "$_gos_obtained_sha" ]; then
+    _gos_fail verification "no official checksum is available for ${_gos_obtained_pkg}, so go${version} cannot be verified."
+    echo "Install jq or python3 so the go.dev downloads feed can be parsed." >&2
+    return 1
+  fi
+
+  _gos_progress "Extracting..."
+  if ! mkdir -p "$stage_dir" || ! _gos_extract_archive "$_gos_obtained_ext" "$_gos_obtained_archive" "$stage_dir"; then
+    _gos_discard_completed_partial
+    _gos_error "extraction failed."
+    return 1
+  fi
+  _gos_discard_completed_partial
+  if [ ! -d "$staged_go_dir" ]; then
+    _gos_error "the archive ${_gos_obtained_pkg} does not contain a go/ directory."
+    return 1
+  fi
+
+  _gos_progress "Comparing files..."
+  # Check the producer separately: a heredoc substitution hides find failures.
+  if ! (cd "$staged_go_dir" && find . -type f -print0) >"${tmp_dir}/files" || [ ! -s "${tmp_dir}/files" ]; then
+    _gos_fail verification "could not enumerate the official archive files."
+    return 1
+  fi
+  while IFS= read -r -d '' rel; do
+    rel="${rel#./}"
+    [ -n "$rel" ] || continue
+    checked=$((checked + 1))
+    if [ ! -f "${target_dir}/${rel}" ]; then
+      missing="${missing}${rel}"$'\n'
+      missing_json="${missing_json}${missing_json:+,}$(_gos_json_string "$rel")"
+      missing_count=$((missing_count + 1))
+    elif [ -L "${target_dir}/${rel}" ] || ! cmp -s "${staged_go_dir}/${rel}" "${target_dir}/${rel}"; then
+      modified="${modified}${rel}"$'\n'
+      modified_json="${modified_json}${modified_json:+,}$(_gos_json_string "$rel")"
+      modified_count=$((modified_count + 1))
+    fi
+  done <"${tmp_dir}/files"
+  rm -rf "$tmp_dir"
+  GOS_TMP_DIR=""
+
+  local ok="true"
+  if [ "$modified_count" -ne 0 ] || [ "$missing_count" -ne 0 ]; then
+    ok="false"
+  fi
+
+  if _gos_json_enabled; then
+    printf '{"version":'
+    _gos_json_string "go${version}"
+    printf ',"install_dir":'
+    _gos_json_string "$target_dir"
+    printf ',"archive":{"filename":'
+    _gos_json_string "$_gos_obtained_pkg"
+    printf ',"sha256":'
+    _gos_json_string "$_gos_obtained_sha"
+    printf ',"source":'
+    _gos_json_string "$_gos_obtained_sha_source"
+    printf '},"files":{"checked":%s,"modified":' "$checked"
+    printf '[%s]' "$modified_json"
+    printf ',"missing":'
+    printf '[%s]' "$missing_json"
+    printf '},"ok":%s}\n' "$ok"
+    GOS_JSON_REPORT_EMITTED=1
+    if [ "$ok" != "true" ]; then
+      GOS_EXIT_CODE="$GOS_EXIT_VERIFICATION"
+      GOS_EXIT_CLASS="verification"
+      return 1
+    fi
+    return 0
+  fi
+
+  printf '%s files checked, %s modified, %s missing (archive %s, sha256 from %s).\n' \
+    "$checked" "$modified_count" "$missing_count" "$_gos_obtained_pkg" "$_gos_obtained_sha_source"
+  if [ "$ok" = "true" ]; then
+    if _gos_fd_color_enabled 1; then
+      printf '%s %s\n' "$(_gos_color_text 32 '✓')" "$(_gos_color_text 32 "go${version} at ${target_dir} matches the official release.")"
+    else
+      printf 'go%s at %s matches the official release.\n' "$version" "$target_dir"
+    fi
+    return 0
+  fi
+  [ -z "$modified" ] || printf '%s\n' "$modified" | sed '/^$/d; s/^/  modified: /'
+  [ -z "$missing" ] || printf '%s\n' "$missing" | sed '/^$/d; s/^/  missing:  /'
+  _gos_fail verification "go${version} at ${target_dir} differs from the official release (${modified_count} modified, ${missing_count} missing)."
+  echo "Reinstall from the matching official archive: gos install ${version} --from-file <archive> --sha256 <official-digest>." >&2
+  return 1
+}
+
+# URL of an asset published with a specific gos release tag.
+_gos_release_asset_url() {
+  local tag="$1" asset="$2"
+  printf '%s/download/%s/%s\n' "${GOS_RELEASE_BASE_URL%/latest/download}" "$tag" "$asset"
+}
+
+# Verify the running script against the checksums published with its own
+# release, and, when the GitHub CLI can do it, against the release's build
+# attestation. A checksum mismatch or a failed attestation exits 4; a missing
+# or unauthenticated gh only downgrades the attestation to "unavailable".
+cmd_self_verify() {
+  local arg script_path tmp_dir checksums release_url expected_candidates expected_count expected actual
+  local checksum_state attestation="unavailable" attestation_detail="" gh_output ok="true"
+
+  for arg in "$@"; do
+    case "$arg" in
+      --json) GOS_OUTPUT_JSON=1 ;;
+      *)
+        _gos_fail usage "unexpected argument for gos self-verify: ${arg}"
+        _gos_usage self-verify
+        return 1
+        ;;
+    esac
+  done
+
+  script_path=$(_gos_self_path) || {
+    _gos_error "could not resolve the path of the running gos script."
+    return 1
+  }
+  actual=$(_gos_sha256 "$script_path") || actual=""
+  if [ -z "$actual" ]; then
+    _gos_fail verification "no SHA256 tool is available to hash ${script_path}."
+    echo "Install sha256sum or shasum." >&2
+    return 1
+  fi
+
+  tmp_dir=$(mktemp -d) || {
+    _gos_error "failed to create temp directory."
+    return 1
+  }
+  GOS_TMP_DIR="$tmp_dir"
+  checksums="${tmp_dir}/checksums.txt"
+  release_url=$(_gos_release_asset_url "v${GOS_VERSION}" checksums.txt)
+  _gos_json_enabled || echo "Fetching the checksums of gos v${GOS_VERSION}..."
+  if ! _gos_download "$release_url" "$checksums" 2>/dev/null; then
+    _gos_fail network "could not download the checksums of gos v${GOS_VERSION} from ${release_url}."
+    echo "A git checkout or an unreleased build has no release to compare against." >&2
+    return 1
+  fi
+  expected_candidates=$(awk '{ f=$2; sub(/^\*/, "", f); if (f == "gos.sh") print $1 }' "$checksums")
+  expected_count=$(printf '%s\n' "$expected_candidates" | grep -c . || true)
+  if [ "$expected_count" -ne 1 ] || ! printf '%s\n' "$expected_candidates" \
+    | LC_ALL=C grep -qE '^[0-9a-fA-F]{64}$'; then
+    _gos_fail verification "checksums.txt of gos v${GOS_VERSION} must contain exactly one valid SHA256 entry for gos.sh."
+    return 1
+  fi
+  expected=$(printf '%s' "$expected_candidates" | tr '[:upper:]' '[:lower:]')
+  rm -rf "$tmp_dir"
+  GOS_TMP_DIR=""
+
+  if [ "$actual" = "$expected" ]; then
+    checksum_state="match"
+  else
+    checksum_state="mismatch"
+    ok="false"
+  fi
+
+  # Provenance: only meaningful once the bytes are the released ones.
+  if [ "$checksum_state" = "match" ] && command -v gh &>/dev/null; then
+    if gh_output=$(gh attestation verify "$script_path" --repo johnny4young/gos 2>&1); then
+      attestation="verified"
+    else
+      attestation_detail=$(printf '%s\n' "$gh_output" | sed '/^$/d' | tail -1)
+      case "$gh_output" in
+        *'unknown command "attestation"'* | *'unknown command "verify" for "gh attestation"'* | *"auth login"* | *"GH_TOKEN"* | *"not logged in"* | *"authentication"* | *"could not resolve host"* | *"connect"*)
+          attestation="unavailable"
+          ;;
+        *)
+          attestation="failed"
+          ok="false"
+          ;;
+      esac
+    fi
+  fi
+
+  if _gos_json_enabled; then
+    printf '{"version":'
+    _gos_json_string "$GOS_VERSION"
+    printf ',"path":'
+    _gos_json_string "$script_path"
+    printf ',"sha256":'
+    _gos_json_string "$actual"
+    printf ',"expected_sha256":'
+    _gos_json_string "$expected"
+    printf ',"checksum":'
+    _gos_json_string "$checksum_state"
+    printf ',"attestation":'
+    _gos_json_string "$attestation"
+    printf ',"attestation_detail":'
+    _gos_json_string "$attestation_detail"
+    printf ',"ok":%s}\n' "$ok"
+    GOS_JSON_REPORT_EMITTED=1
+    if [ "$ok" != "true" ]; then
+      GOS_EXIT_CODE="$GOS_EXIT_VERIFICATION"
+      GOS_EXIT_CLASS="verification"
+      return 1
+    fi
+    return 0
+  fi
+
+  printf 'gos v%s at %s\n' "$GOS_VERSION" "$script_path"
+  if [ "$checksum_state" = "match" ]; then
+    printf 'Checksum:    matches release v%s (%s)\n' "$GOS_VERSION" "$actual"
+  else
+    printf 'Checksum:    MISMATCH (expected %s, got %s)\n' "$expected" "$actual"
+  fi
+  case "$attestation" in
+    verified) printf 'Attestation: verified by gh attestation (johnny4young/gos)\n' ;;
+    failed) printf 'Attestation: FAILED (%s)\n' "$attestation_detail" ;;
+    *)
+      if [ "$checksum_state" != "match" ]; then
+        printf 'Attestation: not checked (checksum mismatch)\n'
+      elif command -v gh &>/dev/null; then
+        printf 'Attestation: not checked (%s)\n' "${attestation_detail:-gh could not verify}"
+      else
+        printf 'Attestation: not checked (install the GitHub CLI and run: gh attestation verify %s --repo johnny4young/gos)\n' "$script_path"
+      fi
+      ;;
+  esac
+  if [ "$ok" = "true" ]; then
+    if _gos_fd_color_enabled 1; then
+      printf '%s %s\n' "$(_gos_color_text 32 '✓')" "$(_gos_color_text 32 "gos v${GOS_VERSION} is the released script.")"
+    else
+      printf 'gos v%s is the released script.\n' "$GOS_VERSION"
+    fi
+    return 0
+  fi
+  if [ "$checksum_state" != "match" ]; then
+    _gos_fail verification "the running gos does not match release v${GOS_VERSION}."
+    echo "A git checkout or a locally edited script differs on purpose; otherwise reinstall with the installer or 'gos self-update'." >&2
+  else
+    _gos_fail verification "the build attestation of gos v${GOS_VERSION} could not be verified."
+  fi
+  return 1
 }
 
 cmd_status() {
@@ -4082,6 +4565,27 @@ cmd_doctor() {
     _gos_doctor_check "problem" "download" "neither curl nor wget is available" "Install curl or wget."
   fi
 
+  # Report only variable names: URLs may contain credentials, tokens or paths.
+  # This is configuration, not proof a request used a proxy (NO_PROXY/config
+  # files may override it). curl prefers lowercase; wget uses https_proxy.
+  local proxy_name=""
+  if command -v curl &>/dev/null; then
+    if [ -n "${https_proxy:-}" ]; then
+      proxy_name="https_proxy"
+    elif [ -n "${HTTPS_PROXY:-}" ]; then
+      proxy_name="HTTPS_PROXY"
+    elif [ -n "${all_proxy:-}" ]; then
+      proxy_name="all_proxy"
+    elif [ -n "${ALL_PROXY:-}" ]; then
+      proxy_name="ALL_PROXY"
+    fi
+  elif command -v wget &>/dev/null && [ -n "${https_proxy:-}" ]; then
+    proxy_name="https_proxy"
+  fi
+  if [ -n "$proxy_name" ]; then
+    _gos_doctor_check "ok" "proxy" "HTTPS proxy configured via ${proxy_name} (value hidden; no_proxy/NO_PROXY and downloader configuration may exempt hosts)"
+  fi
+
   if [ -n "$GOS_DOWNLOAD_MIRROR" ]; then
     if mirror_error=$(_gos_validate_mirror 2>&1); then
       _gos_doctor_check "ok" "mirror" "archive downloads use ${GOS_DOWNLOAD_MIRROR}"
@@ -4244,7 +4748,7 @@ _gos_completion_bash() {
 _gos_completions() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   # gos-commands:bash:begin
-  local fallback_commands="latest install rollback uninstall use pin run each check current list platforms status which prune doctor env completions self-update version help"
+  local fallback_commands="latest install rollback uninstall use pin run each check current list platforms status which verify prune doctor env completions self-update self-verify version help"
   # gos-commands:bash:end
   local commands="$fallback_commands"
   local cmd_index=1 cmd words="" line slot
@@ -4275,7 +4779,7 @@ _gos_completions() {
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions --remote-cached 2>/dev/null || true)
         fi
-        words="$versions"
+        words="--from-file --sha256 $versions"
         [ "$cmd" = "platforms" ] && words="--json $versions"
         ;;
       run | each)
@@ -4316,11 +4820,14 @@ _gos_completions() {
         fi
         words="--inactive --dry-run $versions"
         ;;
-      which)
+      which | verify)
         if command -v gos >/dev/null 2>&1; then
           versions=$(gos __versions 2>/dev/null || true)
         fi
         words="--json $versions"
+        ;;
+      self-verify)
+        words="--json"
         ;;
       list)
         words="--installed --minor --json"
@@ -4382,7 +4889,7 @@ _gos() {
   # gos-commands:zsh:begin
   commands=(
     'latest:Install the latest stable Go version'
-    'install:Install a specific Go version'
+    'install:Install a specific Go version, optionally from a local archive (air-gapped) verified by an explicit digest'
     'rollback:Restore the previous Go installation, if available; --dry-run only previews the swap'
     'uninstall:Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
@@ -4395,11 +4902,13 @@ _gos() {
     'platforms:List supported OS/arch archives for a Go version'
     'status:Show an offline dashboard for gos and the active Go'
     'which:Show the active or side-by-side Go binary path'
+    'verify:Re-verify an installed Go file by file against the official go.dev archive and its checksum'
     'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
     'doctor:Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
     'env:Print the PATH setup line or an opt-in per-shell auto-switch hook'
     'completions:Print a Bash, Zsh, or Fish completion script (or install it with --install)'
     'self-update:Update gos itself to the latest verified release'
+    'self-verify:Verify the running gos script against its release checksums and build attestation'
     'version:Show gos version'
     'help:Show this help message, or usage for one command'
   )
@@ -4417,9 +4926,13 @@ _gos() {
           _arguments '--rollback[Also remove the rollback installation]' '--dry-run[Preview removals without deleting]' '--json[Output machine-readable JSON]'
           ;;
         install)
+          versions=()
           if command -v gos >/dev/null 2>&1; then
-            _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
+            versions=(${(f)"$(gos __versions --remote-cached 2>/dev/null)"})
           fi
+          _arguments '--from-file[Install from a local Go archive instead of downloading]:archive:_files' \
+            '--sha256[Expected SHA256 digest of the local archive]:digest:' \
+            "1:Go version:(${versions[*]})"
           ;;
         run | each)
           # _arguments shifts words to start with run/each for the args
@@ -4462,11 +4975,14 @@ _gos() {
             _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
           fi
           ;;
-        which)
+        which | verify)
           _arguments '--json[Output machine-readable JSON]'
           if command -v gos >/dev/null 2>&1; then
             _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
           fi
+          ;;
+        self-verify)
+          _arguments '--json[Output machine-readable JSON]'
           ;;
         list)
           _arguments '--installed[List locally installed versions]' '--minor[Keep only the newest version per minor]' '--json[Output machine-readable JSON]'
@@ -4557,7 +5073,7 @@ end
 
 # gos-commands:fish:begin
 complete -c gos -n '__gos_needs_command' -a 'latest' -d 'Install the latest stable Go version'
-complete -c gos -n '__gos_needs_command' -a 'install' -d 'Install a specific Go version'
+complete -c gos -n '__gos_needs_command' -a 'install' -d 'Install a specific Go version, optionally from a local archive (air-gapped) verified by an explicit digest'
 complete -c gos -n '__gos_needs_command' -a 'rollback' -d 'Restore the previous Go installation, if available; --dry-run only previews the swap'
 complete -c gos -n '__gos_needs_command' -a 'uninstall' -d 'Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
 complete -c gos -n '__gos_needs_command' -a 'use' -d 'Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
@@ -4570,17 +5086,19 @@ complete -c gos -n '__gos_needs_command' -a 'list' -d 'List available Go version
 complete -c gos -n '__gos_needs_command' -a 'platforms' -d 'List supported OS/arch archives for a Go version'
 complete -c gos -n '__gos_needs_command' -a 'status' -d 'Show an offline dashboard for gos and the active Go'
 complete -c gos -n '__gos_needs_command' -a 'which' -d 'Show the active or side-by-side Go binary path'
+complete -c gos -n '__gos_needs_command' -a 'verify' -d 'Re-verify an installed Go file by file against the official go.dev archive and its checksum'
 complete -c gos -n '__gos_needs_command' -a 'prune' -d 'Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
 complete -c gos -n '__gos_needs_command' -a 'doctor' -d 'Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
 complete -c gos -n '__gos_needs_command' -a 'env' -d 'Print the PATH setup line or an opt-in per-shell auto-switch hook'
 complete -c gos -n '__gos_needs_command' -a 'completions' -d 'Print a Bash, Zsh, or Fish completion script (or install it with --install)'
 complete -c gos -n '__gos_needs_command' -a 'self-update' -d 'Update gos itself to the latest verified release'
+complete -c gos -n '__gos_needs_command' -a 'self-verify' -d 'Verify the running gos script against its release checksums and build attestation'
 complete -c gos -n '__gos_needs_command' -a 'version' -d 'Show gos version'
 complete -c gos -n '__gos_needs_command' -a 'help' -d 'Show this help message, or usage for one command'
 # gos-commands:fish:end
 # --json only where gos actually supports it (leading flag or per command).
 complete -c gos -n '__gos_needs_command' -l json -d 'Output machine-readable JSON where supported'
-complete -c gos -n '__gos_using_command check current list platforms status which doctor prune env version use' -l json -d 'Output machine-readable JSON'
+complete -c gos -n '__gos_using_command check current list platforms status which verify self-verify doctor prune env version use' -l json -d 'Output machine-readable JSON'
 complete -c gos -n '__gos_using_command prune' -l rollback -d 'Also remove the rollback installation'
 complete -c gos -n '__gos_using_command prune' -l dry-run -d 'Preview removals without deleting'
 complete -c gos -n '__gos_using_command rollback' -l dry-run -d 'Preview the rollback without switching'
@@ -4590,11 +5108,13 @@ complete -c gos -n '__gos_using_command help' -a '(gos __commands 2>/dev/null)' 
 complete -c gos -n '__gos_using_command list' -l installed -d 'List locally installed versions'
 complete -c gos -n '__gos_using_command list' -l minor -d 'Keep only the newest version per minor'
 complete -c gos -n '__gos_using_command install platforms' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
+complete -c gos -n '__gos_using_command install' -l from-file -r -F -d 'Install from a local Go archive instead of downloading'
+complete -c gos -n '__gos_using_command install' -l sha256 -r -d 'Expected SHA256 digest of the local archive'
 complete -c gos -n '__gos_using_command run each; and __gos_wants_version' -a '(gos __versions --remote-cached 2>/dev/null)' -d 'Go version'
 complete -c gos -n '__gos_using_command run; and __gos_wants_version' -a -- -d 'Use the project Go version'
 complete -c gos -n '__gos_using_command run each; and not __gos_wants_version' -a '(__gos_complete_command)'
 complete -c gos -n '__gos_using_command pin' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
-complete -c gos -n '__gos_using_command uninstall which' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
+complete -c gos -n '__gos_using_command uninstall which verify' -a '(gos __versions 2>/dev/null)' -d 'Installed Go version'
 complete -c gos -n '__gos_using_command uninstall' -l inactive -d 'Remove all inactive versions'
 complete -c gos -n '__gos_using_command uninstall' -l dry-run -d 'Preview removals without deleting'
 complete -c gos -n '__gos_using_command env' -l fish -d 'Emit fish shell syntax'
@@ -4692,7 +5212,7 @@ _gos_command_manifest() {
     printf '%s|%s|%s|%s\n' "$name" "$usage" "$description" "$group"
   done <<'GOS_COMMANDS'
 latest|latest|Install the latest stable Go version|Install & switch
-install|install <version>|Install a specific Go version|Install & switch
+install|install <version> [--from-file <archive> [--sha256 <hex>]]|Install a specific Go version, optionally from a local archive (air-gapped) verified by an explicit digest|Install & switch
 rollback|rollback [--dry-run]|Restore the previous Go installation, if available; --dry-run only previews the swap|Install & switch
 uninstall|uninstall <version or --inactive> [--dry-run]|Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback|Install & switch
 use|use [--print [--json]] [path]|Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it|Project
@@ -4705,11 +5225,13 @@ list|list [--installed] [--minor]|List available Go versions (or locally install
 platforms|platforms [version]|List supported OS/arch archives for a Go version|Inspect
 status|status|Show an offline dashboard for gos and the active Go|Inspect
 which|which [version]|Show the active or side-by-side Go binary path|Inspect
+verify|verify [version]|Re-verify an installed Go file by file against the official go.dev archive and its checksum|Inspect
 prune|prune [--rollback] [--dry-run]|Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews|Maintain
 doctor|doctor [--fix]|Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line|Maintain
 env|env [--fish] [--auto]|Print the PATH setup line or an opt-in per-shell auto-switch hook|Maintain
 completions|completions <shell> [--install]|Print a Bash, Zsh, or Fish completion script (or install it with --install)|Maintain
 self-update|self-update|Update gos itself to the latest verified release|Maintain
+self-verify|self-verify|Verify the running gos script against its release checksums and build attestation|Maintain
 version|version|Show gos version|Meta
 help|help [command]|Show this help message, or usage for one command|Meta
 GOS_COMMANDS
@@ -5042,7 +5564,7 @@ _gos_suggest_command() {
 # for the others it used to be swallowed silently (disabling color and
 # progress, then printing human text), and it bypassed run/each's own
 # rejection of the flag.
-GOS_JSON_COMMANDS=" check current list platforms status which env doctor prune version __commands __env "
+GOS_JSON_COMMANDS=" check current list platforms status which verify self-verify env doctor prune version __commands __env "
 
 # Preconditions a command needs before it runs, named so every dispatcher
 # line reads as a list. The mutation lock is not among them for commands
@@ -5206,6 +5728,12 @@ main() {
       ;;
     status) cmd_status "$@" ;;
     which) cmd_which "$@" ;;
+    verify)
+      # Read-only: archives are downloaded or snapshotted into private staging.
+      _gos_preflight checksum-policy install-dir cache-dir versions-dir || return 1
+      cmd_verify "$@"
+      ;;
+    self-verify | selfverify) cmd_self_verify "$@" ;;
     __versions) cmd___versions "$@" ;;
     doctor) cmd_doctor "$@" ;;
     version | --version | -V) cmd_version "$@" ;;

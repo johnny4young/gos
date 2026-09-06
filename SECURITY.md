@@ -112,6 +112,11 @@ For `gos` installer assets:
   gh attestation verify gos.sh --repo johnny4young/gos
   gh attestation verify checksums.txt --repo johnny4young/gos
   ```
+
+  `gos self-verify` automates that check for the running script: it compares
+  its SHA256 with the `checksums.txt` of its own release and runs
+  `gh attestation verify` when the GitHub CLI is available. `gos verify`
+  re-checks an installed Go tree file by file against the official archive.
 - The Homebrew tap publish step pins GitHub's SSH host keys, fetched over
   TLS from the GitHub meta API (an independent trust channel), instead of
   trusting the first key the SSH connection presents.

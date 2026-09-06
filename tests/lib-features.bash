@@ -36,7 +36,7 @@ tools_bin="${test_root}/tools-bin"
 parser_jq_bin="${test_root}/parser-jq"
 parser_python3_bin="${test_root}/parser-python3"
 mkdir -p "$tools_bin" "$parser_jq_bin" "$parser_python3_bin"
-for tool in bash sh env uname grep sed awk sort cut tr head tail wc mktemp tar mkdir rm mv cp ln readlink dirname basename date stat cat du uniq realpath chmod touch id; do
+for tool in bash sh env uname grep sed awk sort cut tr head tail wc mktemp tar mkdir rm mv cp ln readlink dirname basename date stat cat du uniq realpath chmod touch id find cmp; do
   tool_path="$(command -v "$tool" 2>/dev/null)" || continue
   case "$tool_path" in /*) ln -s "$tool_path" "${tools_bin}/${tool}" ;; esac
 done
@@ -123,7 +123,11 @@ case "$url" in
     fi
     cat "$GOS_TEST_SELFUPDATE_SCRIPT" >"$output"
     ;;
-  https://github.com/johnny4young/gos/releases/latest/download/checksums.txt)
+  https://github.com/johnny4young/gos/releases/latest/download/checksums.txt | https://github.com/johnny4young/gos/releases/download/v*/checksums.txt)
+    if [ "${GOS_TEST_DOWNLOAD_MODE:-ok}" = "fail-checksums" ]; then
+      echo "checksums download disabled" >&2
+      exit 22
+    fi
     if [ -n "${GOS_TEST_SELFUPDATE_CHECKSUMS_FILE:-}" ]; then
       cat "$GOS_TEST_SELFUPDATE_CHECKSUMS_FILE" >"$output"
     else
@@ -235,6 +239,12 @@ fi
 
 if grep -q GOS-TEST-CORRUPT "$1" 2>/dev/null; then
   printf 'corruptsha  %s\n' "$1"
+  exit 0
+fi
+
+# Digest reported for every file when set; --sha256 needs real 64-hex values.
+if [ -n "${GOS_TEST_SHA256_VALUE:-}" ]; then
+  printf '%s  %s\n' "$GOS_TEST_SHA256_VALUE" "$1"
   exit 0
 fi
 
@@ -471,6 +481,7 @@ run_gos() {
       GOS_TEST_GOS_RELEASE_EFFECTIVE_URL="${GOS_TEST_GOS_RELEASE_EFFECTIVE_URL:-}" \
       GOS_TEST_MV_FAIL_DEST="${GOS_TEST_MV_FAIL_DEST:-}" \
       GOS_TEST_SHA256_FAIL="${GOS_TEST_SHA256_FAIL:-0}" \
+      GOS_TEST_SHA256_VALUE="${GOS_TEST_SHA256_VALUE:-}" \
       GOS_TEST_REAL_MV="$real_mv" \
       GOS_TEST_REAL_CP="$real_cp" \
       GOS_TEST_CP_FAIL_DEST="${GOS_TEST_CP_FAIL_DEST:-}" \

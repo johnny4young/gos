@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/johnny4young/gos/main/docs/schema/check.schema.json",
+  "title": "gos check --json",
+  "description": "Whether newer stable Go or gos releases are available.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "current": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+      "description": "Active Go version, or null when no go binary is on PATH."
+    },
+    "latest": {
+      "type": "string",
+      "pattern": "^go[0-9]+\\.[0-9]+(\\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?$",
+      "description": "Latest stable Go version published by go.dev."
+    },
+    "up_to_date": {
+      "type": "boolean",
+      "description": "True when the active Go is the latest stable release (or newer)."
+    },
+    "gos": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "current",
+        "latest",
+        "up_to_date"
+      ],
+      "properties": {
+        "current": {
+          "type": "string",
+          "description": "Running gos version, v-prefixed.",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "latest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Latest gos release tag, or null when the lookup failed.",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "up_to_date": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "True when the running gos is the latest release; null when the lookup failed."
+        }
+      }
+    }
+  },
+  "required": [
+    "current",
+    "latest",
+    "up_to_date",
+    "gos"
+  ]
+}

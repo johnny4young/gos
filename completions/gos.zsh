@@ -9,7 +9,7 @@ _gos() {
   # gos-commands:zsh:begin
   commands=(
     'latest:Install the latest stable Go version'
-    'install:Install a specific Go version'
+    'install:Install a specific Go version, optionally from a local archive (air-gapped) verified by an explicit digest'
     'rollback:Restore the previous Go installation, if available; --dry-run only previews the swap'
     'uninstall:Remove an installed version (side-by-side mode); --inactive removes all but the active and rollback'
     'use:Install the Go version requested by .go-version, .tool-versions, or go.mod; --print only resolves it'
@@ -22,11 +22,13 @@ _gos() {
     'platforms:List supported OS/arch archives for a Go version'
     'status:Show an offline dashboard for gos and the active Go'
     'which:Show the active or side-by-side Go binary path'
+    'verify:Re-verify an installed Go file by file against the official go.dev archive and its checksum'
     'prune:Remove cached Go archives; --rollback also removes the rollback copy, --dry-run only previews'
     'doctor:Diagnose gos, Go, PATH, and local tool dependencies; --fix creates safe missing directories and prints the shell setup line'
     'env:Print the PATH setup line or an opt-in per-shell auto-switch hook'
     'completions:Print a Bash, Zsh, or Fish completion script (or install it with --install)'
     'self-update:Update gos itself to the latest verified release'
+    'self-verify:Verify the running gos script against its release checksums and build attestation'
     'version:Show gos version'
     'help:Show this help message, or usage for one command'
   )
@@ -44,9 +46,13 @@ _gos() {
           _arguments '--rollback[Also remove the rollback installation]' '--dry-run[Preview removals without deleting]' '--json[Output machine-readable JSON]'
           ;;
         install)
+          versions=()
           if command -v gos >/dev/null 2>&1; then
-            _values 'Go version' ${(f)"$(gos __versions --remote-cached 2>/dev/null)"}
+            versions=(${(f)"$(gos __versions --remote-cached 2>/dev/null)"})
           fi
+          _arguments '--from-file[Install from a local Go archive instead of downloading]:archive:_files' \
+            '--sha256[Expected SHA256 digest of the local archive]:digest:' \
+            "1:Go version:(${versions[*]})"
           ;;
         run | each)
           # _arguments shifts words to start with run/each for the args
@@ -89,11 +95,14 @@ _gos() {
             _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
           fi
           ;;
-        which)
+        which | verify)
           _arguments '--json[Output machine-readable JSON]'
           if command -v gos >/dev/null 2>&1; then
             _values 'Installed Go version' ${(f)"$(gos __versions 2>/dev/null)"}
           fi
+          ;;
+        self-verify)
+          _arguments '--json[Output machine-readable JSON]'
           ;;
         list)
           _arguments '--installed[List locally installed versions]' '--minor[Keep only the newest version per minor]' '--json[Output machine-readable JSON]'
