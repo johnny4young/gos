@@ -420,18 +420,20 @@ pass "embedded completions stay in sync, validate, and install to XDG dirs"
 
 # A completion directory that exists but is not writable makes the redirection
 # fail: the user gets gos's own message, never bash's redirection error too.
-if [ "$(id -u)" -eq 0 ]; then
-  echo "ok - unwritable completion dir case skipped: root writes into a read-only directory anyway"
+# This suite also runs on Windows, where the read-only bit is not enforced.
+readonly_root="${test_root}/xdg-readonly"
+readonly_completions="${readonly_root}/data/bash-completion/completions"
+mkdir -p "$readonly_completions"
+if ! readonly_bit_enforced "$readonly_completions"; then
+  echo "ok - unwritable completion dir case skipped: this filesystem does not enforce the read-only bit"
 else
-  readonly_root="${test_root}/xdg-readonly"
-  mkdir -p "${readonly_root}/data/bash-completion/completions"
-  chmod 555 "${readonly_root}/data/bash-completion/completions"
+  chmod 555 "$readonly_completions"
   set +e
   install_stderr="$(XDG_DATA_HOME="${readonly_root}/data" XDG_CONFIG_HOME="${readonly_root}/config" \
     bash "$script" completions bash --install 2>&1 >/dev/null)"
   status=$?
   set -e
-  chmod 755 "${readonly_root}/data/bash-completion/completions"
+  chmod 755 "$readonly_completions"
   [ "$status" -ne 0 ] || fail "completions --install should fail when the target is not writable"
   assert_contains "$install_stderr" "could not write completion file" "unwritable completion error"
   assert_not_contains "$install_stderr" "Permission denied" "unwritable completion redirection leak"

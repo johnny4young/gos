@@ -82,8 +82,9 @@ pass "mutating commands use a clear mkdir-based gos lock"
 # writing the pid inside it fails. The fallback has to record the pid through
 # sudo without letting bash's own redirection error reach the terminal.
 case_dir="${test_root}/lock-pid-root-owned"
-if [ "$(id -u)" -eq 0 ]; then
-  echo "ok - root-owned lock pid case skipped: root writes into a read-only directory anyway"
+mkdir -p "${case_dir}/probe"
+if ! readonly_bit_enforced "${case_dir}/probe"; then
+  echo "ok - root-owned lock pid case skipped: this filesystem does not enforce the read-only bit"
 else
   mkdir -p "${case_dir}/bin" "${case_dir}/go.gos-rollback"
   cat >"${case_dir}/bin/mkdir" <<'FAKE_MKDIR'
