@@ -1339,7 +1339,12 @@ _gos_acquire_lock() {
   fi
 
   GOS_LOCK_DIR="$lock_dir"
-  if ! printf '%s\n' "$$" >"$pid_file" 2>/dev/null; then
+  # The brace group applies 2>/dev/null before the inner redirection is tried:
+  # bash reports a failed redirection on the stderr in effect at that moment, so
+  # `>"$pid_file" 2>/dev/null` still leaks "Permission denied" for a lock
+  # directory created by root (the sudo escalation under a protected parent
+  # like /usr/local).
+  if ! { printf '%s\n' "$$" >"$pid_file"; } 2>/dev/null; then
     if [ "$(_gos_os)" != "windows" ] && command -v sudo &>/dev/null; then
       printf '%s\n' "$$" | sudo tee "$pid_file" >/dev/null 2>&1 || true
     fi
@@ -5264,7 +5269,9 @@ cmd_completions() {
     _gos_error "could not create completion directory: ${target_dir}"
     return 1
   fi
-  if ! "$emitter" >"$target" 2>/dev/null; then
+  # Brace-grouped so the redirection failure itself is silenced too, leaving
+  # only the message below. See _gos_acquire_lock for the ordering rule.
+  if ! { "$emitter" >"$target"; } 2>/dev/null; then
     _gos_error "could not write completion file: ${target}"
     return 1
   fi

@@ -418,6 +418,26 @@ printed_bash="$(bash "$script" completions bash)"
 
 pass "embedded completions stay in sync, validate, and install to XDG dirs"
 
+# A completion directory that exists but is not writable makes the redirection
+# fail: the user gets gos's own message, never bash's redirection error too.
+if [ "$(id -u)" -eq 0 ]; then
+  echo "ok - unwritable completion dir case skipped: root writes into a read-only directory anyway"
+else
+  readonly_root="${test_root}/xdg-readonly"
+  mkdir -p "${readonly_root}/data/bash-completion/completions"
+  chmod 555 "${readonly_root}/data/bash-completion/completions"
+  set +e
+  install_stderr="$(XDG_DATA_HOME="${readonly_root}/data" XDG_CONFIG_HOME="${readonly_root}/config" \
+    bash "$script" completions bash --install 2>&1 >/dev/null)"
+  status=$?
+  set -e
+  chmod 755 "${readonly_root}/data/bash-completion/completions"
+  [ "$status" -ne 0 ] || fail "completions --install should fail when the target is not writable"
+  assert_contains "$install_stderr" "could not write completion file" "unwritable completion error"
+  assert_not_contains "$install_stderr" "Permission denied" "unwritable completion redirection leak"
+  pass "completions --install reports an unwritable target without leaking a redirection error"
+fi
+
 # Execute completion functions with a stub gos: no network or real toolchain
 # state is consulted, and candidates must follow the current argument slot.
 (
