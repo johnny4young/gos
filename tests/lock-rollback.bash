@@ -9,6 +9,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="${repo_root}/gos.sh"
 # shellcheck source=tests/lib-features.bash
 . "${repo_root}/tests/lib-features.bash"
+real_mkdir="$(command -v mkdir)"
+real_chmod="$(command -v chmod)"
 
 case_dir="${test_root}/lock-held"
 mkdir -p "${case_dir}/go.gos-lock"
@@ -74,6 +76,73 @@ assert_contains "$output" "stale gos lock found" "stale lock error"
 assert_contains "$output" "rm -rf \"${case_dir}/go.gos-lock\"" "stale lock removal hint"
 [ -d "${case_dir}/go.gos-lock" ] || fail "stale lock should not be auto-removed"
 pass "mutating commands use a clear mkdir-based gos lock"
+
+# A lock directory created by root - the sudo escalation gos takes under a
+# protected parent such as /usr/local - is not writable from the user shell, so
+# writing the pid inside it fails. The fallback has to record the pid through
+# sudo without letting bash's own redirection error reach the terminal.
+case_dir="${test_root}/lock-pid-root-owned"
+mkdir -p "${case_dir}/probe"
+if ! readonly_bit_enforced "${case_dir}/probe"; then
+  echo "ok - root-owned lock pid case skipped: this filesystem does not enforce the read-only bit"
+else
+  mkdir -p "${case_dir}/bin" "${case_dir}/go.gos-rollback"
+  cat >"${case_dir}/bin/mkdir" <<'FAKE_MKDIR'
+#!/usr/bin/env bash
+# Leave every .gos-lock directory read-only, the way a lock that root created
+# on the caller's behalf looks from the user shell that asked for it.
+set -uo pipefail
+
+"$GOS_TEST_REAL_MKDIR" "$@" || exit $?
+for arg in "$@"; do
+  case "$arg" in
+    *.gos-lock) "$GOS_TEST_REAL_CHMOD" 555 "$arg" ;;
+  esac
+done
+FAKE_MKDIR
+  cat >"${case_dir}/bin/sudo" <<'FAKE_SUDO'
+#!/usr/bin/env bash
+# Stand in for root without ever invoking the real sudo: lift the write bit on
+# whichever .gos-lock directory the command touches, run it, and restore the
+# read-only mode if that directory is still there afterwards.
+set -uo pipefail
+
+printf '%s\n' "$*" >>"$GOS_TEST_SUDO_LOG"
+lock=""
+for arg in "$@"; do
+  case "$arg" in
+    *.gos-lock) lock="$arg" ;;
+    *.gos-lock/*) lock="${arg%/*}" ;;
+  esac
+done
+[ -z "$lock" ] || "$GOS_TEST_REAL_CHMOD" 755 "$lock"
+set +e
+"$@"
+status=$?
+set -e
+if [ -n "$lock" ] && [ -d "$lock" ]; then
+  "$GOS_TEST_REAL_CHMOD" 555 "$lock"
+fi
+exit "$status"
+FAKE_SUDO
+  chmod +x "${case_dir}/bin/mkdir" "${case_dir}/bin/sudo"
+  GOS_TEST_STDERR_FILE="${case_dir}/stderr" run_gos "$case_dir" \
+    env PATH="${case_dir}/bin:${fake_bin}:${original_path}" \
+    GOS_TEST_REAL_MKDIR="$real_mkdir" \
+    GOS_TEST_REAL_CHMOD="$real_chmod" \
+    GOS_TEST_SUDO_LOG="${case_dir}/sudo.log" \
+    bash "$script" prune --rollback
+  [ "$status" -eq 0 ] || fail "prune --rollback failed on a root-owned lock: ${output}$(<"${case_dir}/stderr")"
+  lock_stderr="$(<"${case_dir}/stderr")"
+  assert_not_contains "$lock_stderr" "Permission denied" "root-owned lock pid stderr"
+  assert_not_contains "$lock_stderr" "go.gos-lock/pid" "root-owned lock pid path in stderr"
+  assert_not_contains "$output" "go.gos-lock/pid" "root-owned lock pid path in stdout"
+  grep -q "tee ${case_dir}/go.gos-lock/pid" "${case_dir}/sudo.log" \
+    || fail "the pid write did not fall back to sudo: $(<"${case_dir}/sudo.log")"
+  [ ! -e "${case_dir}/go.gos-lock" ] || fail "the root-owned lock was not released"
+  [ ! -d "${case_dir}/go.gos-rollback" ] || fail "prune --rollback kept the rollback installation"
+  pass "a root-owned lock records its pid through sudo without leaking a redirection error"
+fi
 
 case_dir="${test_root}/rollback"
 mkdir -p "$case_dir"

@@ -74,3 +74,22 @@ sha256_file() {
     shasum -a 256 "$1" | cut -d' ' -f1
   fi
 }
+
+# True when this filesystem actually denies a write into a mode 555 directory,
+# leaving the directory writable again either way. Cases that turn a denied
+# write into an assertion have to probe first: root ignores the bit, and the
+# Windows filesystems the completions suite runs on do not carry it at all.
+readonly_bit_enforced() {
+  local dir="$1" probe="${1}/.gos-write-probe" probe_wrote="false"
+  chmod 555 "$dir" 2>/dev/null || return 1
+  # Brace-grouped for the same reason gos.sh groups its pid write: bash reports
+  # a failed redirection on the stderr in effect when it is attempted.
+  if { : >"$probe"; } 2>/dev/null; then
+    rm -f "$probe"
+    probe_wrote="true"
+  fi
+  chmod 755 "$dir" 2>/dev/null || true
+  # A probe that went through means the mode was ignored, so the bit is not
+  # enforced. This test is the function's exit status.
+  [ "$probe_wrote" = "false" ]
+}

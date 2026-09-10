@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Fixed
+
+- Taking the mutation lock no longer prints bash's own `Permission denied` line when the lock directory belongs to root (the sudo escalation gos takes under a protected parent such as `/usr/local`). The `2>/dev/null` meant to silence the failed pid write sat after the redirection it was guarding, so bash reported the failure on the stderr still in effect; the write is now brace-grouped, and the sudo fallback that records the pid is unchanged. `gos completions <shell> --install` had the same ordering on an unwritable target and now prints only its own error.
+
+### Changed
+
+- Pinned GitHub Actions dependencies bumped by Dependabot: `actions/attest` 4.2.1 to 4.2.2, `softprops/action-gh-release` 3.0.2 to 3.0.3, and `github/codeql-action/upload-sarif`.
+
 ## [1.11.0] - 2026-09-06
 
 ### Added
