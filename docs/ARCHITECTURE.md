@@ -166,6 +166,11 @@ into a `sudo sh -c`.
   when `gh` can, its build attestation.
 - All downloads are HTTPS-only across redirects with a TLS 1.2 floor and are
   bounded (`--max-time` for metadata, stall detection for archives).
+- The PowerShell bootstrap's `-PackagePath` follows the same snapshot rule for
+  local gos ZIP packages: copy into its temporary directory, hash that copy,
+  and extract that copy. Copy or checksum failures happen before `Install-Payload`,
+  preserving any existing installation. Its `finally` block removes the
+  snapshot and staging on success or failure.
 
 Version probes and activation checks use `GOTOOLCHAIN=local` to identify the
 bundled binary without Go selecting or downloading a different toolchain. This

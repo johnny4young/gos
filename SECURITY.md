@@ -107,6 +107,11 @@ For `gos` installer assets:
   publication.
 - Release `install.ps1` is patched with the expected `gos-windows.zip` SHA256
   before publication.
+- Local PowerShell `-PackagePath` archives are copied into the installer's
+  temporary directory before hashing. Verification and extraction use that
+  same snapshot, which is removed on success or failure. The source archive
+  is left in place, and checksum requirements still follow `-ExpectedSha256`
+  and `GOS_REQUIRE_CHECKSUM`.
 - `checksums.txt` is published with `gos.sh`, `install.sh`, `install.ps1`, and
   `gos-windows.zip`.
 - Release assets and `checksums.txt` receive GitHub artifact attestations.
