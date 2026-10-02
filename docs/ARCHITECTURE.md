@@ -87,9 +87,12 @@ one:
    `include=all` feed for older versions, then the `.sha256` companion file next
    to the archive. `GOS_REQUIRE_CHECKSUM=1` refuses to continue without one;
    `=feed` additionally refuses the same-origin companion file.
-3. Reuse a cached archive if its hash matches; otherwise download to a
-   resumable `.partial` in the cache (curl `-C -`), verify, and promote it to
-   the cache entry.
+3. Snapshot a cached archive into private staging and reuse it if its hash
+   matches; otherwise download to a resumable `.partial` in the cache
+   (curl `-C -`), snapshot the completed transfer, and verify the snapshot.
+   Hashing and extraction always use the same private file. Publish verified
+   bytes through a temporary sibling and atomic rename; a cache write failure
+   only warns and never prevents installing the verified snapshot.
 4. Extract into a temp staging directory (`mktemp -d`, removed by the EXIT
    trap) and check that `go/bin/go` exists.
 5. Activate. Flat layout: rename the staged tree into `GOS_INSTALL_DIR`.
@@ -156,12 +159,19 @@ into a `sudo sh -c`.
 - `gos verify` re-runs `_gos_obtain_archive` for the installed version and
   compares every file the archive ships with the installed tree (`cmp`); it
   refuses to report success without an actually verified official checksum.
-  It snapshots cached archives and downloads privately without writing shared
-  cache entries or resumable partials (verification takes no mutation lock). `gos self-verify`
+  Like installs, it snapshots cached archives before hashing; it downloads
+  privately without writing shared cache entries or resumable partials
+  (verification takes no mutation lock). `gos self-verify`
   fetches the `checksums.txt` of the running version's own release tag and,
   when `gh` can, its build attestation.
 - All downloads are HTTPS-only across redirects with a TLS 1.2 floor and are
   bounded (`--max-time` for metadata, stall detection for archives).
+
+Version probes and activation checks use `GOTOOLCHAIN=local` to identify the
+bundled binary without Go selecting or downloading a different toolchain. This
+includes the GitHub Action output and `verify`'s choice of reference archive.
+The override is scoped to each probe: `gos run` and `gos each` preserve the
+caller's toolchain policy for the user command.
 
 ## On-disk state
 
@@ -175,7 +185,7 @@ gos has no database; its state is the filesystem:
 | `$GOS_INSTALL_DIR.gos-lock/pid` | The mutation lock. |
 | `<resolved gos script>.gos-lock/pid` | The path-scoped self-update lock. |
 | `$GOS_VERSIONS_DIR/go<version>/` | Installed versions in side-by-side mode. |
-| `$GOS_CACHE_DIR/go*.tar.gz`, `go*.zip`, `*.partial` | Verified archive cache and resumable partial downloads. |
+| `$GOS_CACHE_DIR/go*.tar.gz`, `go*.zip`, `*.partial`, `*.partial.*` | Verified archive cache, resumable partial downloads, and temporary cache publication files (also reclaimed by prune). |
 | `$GOS_CACHE_DIR/feed-default.json`, `feed-all.json` | Discovery feed cache. |
 | `./.go-version` | Written by `gos pin`, read (with `.tool-versions` and `go.mod`) by `gos use`, `gos run --`, `gos status`, and the auto-switch hook. |
 
