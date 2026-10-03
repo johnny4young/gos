@@ -148,7 +148,15 @@ if ($resolvedInstallDir.Length -gt [IO.Path]::GetPathRoot($resolvedInstallDir).L
 }
 
 if (Test-Path -LiteralPath $resolvedInstallDir) {
-  $ownedFiles = @(Get-GosOwnedFiles -Directory $resolvedInstallDir)
+  # An empty directory is what a failed final delete leaves behind; retrying
+  # must still remove it and clean PATH instead of refusing it as unowned.
+  $installItem = Get-Item -LiteralPath $resolvedInstallDir -Force
+  if ($installItem.PSIsContainer -and -not ($installItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+      @(Get-ChildItem -LiteralPath $resolvedInstallDir -Force).Count -eq 0) {
+    $ownedFiles = @()
+  } else {
+    $ownedFiles = @(Get-GosOwnedFiles -Directory $resolvedInstallDir)
+  }
   # Validate the whole list before deleting anything. The receipt comes last,
   # so an interrupted removal can safely be retried even with missing files.
   foreach ($file in $ownedFiles) {
@@ -156,14 +164,15 @@ if (Test-Path -LiteralPath $resolvedInstallDir) {
     if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
   }
   if (@(Get-ChildItem -LiteralPath $resolvedInstallDir -Force).Count -eq 0) {
-    [IO.Directory]::Delete($resolvedInstallDir)
+    try { [IO.Directory]::Delete($resolvedInstallDir) } catch {
+      Write-Warning "Could not remove empty install directory ${resolvedInstallDir}: $($_.Exception.Message)"
+    }
   } else {
     Write-Host "Preserved unrelated files in $resolvedInstallDir"
   }
   Write-Host "Removed gos from $resolvedInstallDir"
 } else {
   Write-Host "gos install directory not found: $resolvedInstallDir"
-  return
 }
 
 if (-not $KeepPath) {

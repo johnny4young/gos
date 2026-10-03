@@ -122,6 +122,51 @@ try {
         Assert-True (Test-Path -LiteralPath (Join-Path $linkTarget 'gos.sh')) 'Linked target was modified'
       } finally { [IO.Directory]::Delete($link) }
       Write-Host 'ok - linked install directories are refused without touching their targets'
+
+      # Run the real uninstaller against a registry substitute: aliases take
+      # precedence over the functions the script defines.
+      $pathState = [pscustomobject]@{ Value = '' }
+      $pathKey = [pscustomobject]@{ State = $pathState }
+      $pathKey | Add-Member ScriptMethod GetValueNames { return 'Path' }
+      $pathKey | Add-Member ScriptMethod GetValue { param($name, $default, $options) return $this.State.Value }
+      $pathKey | Add-Member ScriptMethod GetValueKind { param($name) return [Microsoft.Win32.RegistryValueKind]::ExpandString }
+      $pathKey | Add-Member ScriptMethod SetValue { param($name, $value, $kind) $this.State.Value = $value }
+      $pathKey | Add-Member ScriptMethod Close { }
+      function Get-TestPathKey { return $pathKey }
+      function Skip-EnvironmentChange { }
+      Set-Alias Open-UserEnvironmentKey Get-TestPathKey
+      Set-Alias Send-EnvironmentChange Skip-EnvironmentChange
+      try {
+        $missing = Join-Path $tmp 'already removed'
+        $pathState.Value = "C:\Other;$missing"
+        & $uninstaller -InstallDir $missing
+        Assert-True ($pathState.Value -ceq 'C:\Other') 'Uninstall skipped PATH cleanup for a missing install directory'
+        Write-Host 'ok - uninstall cleans PATH even when the install directory is already gone'
+
+        $stuckParent = Join-Path $tmp 'stuck parent'
+        $stuck = Join-Path $stuckParent 'gos'
+        & $installer -InstallDir $stuck -NoPath -PackagePath $zip -ExpectedSha256 $digest
+        $pathState.Value = "C:\Other;$stuck"
+        # Block only the final delete: Windows keeps a process working directory,
+        # and Unix cannot unlink an entry from a read-only parent.
+        $onWindows = [Environment]::OSVersion.Platform -eq 'Win32NT'
+        $savedCwd = [Environment]::CurrentDirectory
+        if ($onWindows) { [Environment]::CurrentDirectory = $stuck } else { [IO.File]::SetUnixFileMode($stuckParent, 'UserRead, UserExecute') }
+        try {
+          & $uninstaller -InstallDir $stuck 3>$null
+        } finally {
+          if ($onWindows) { [Environment]::CurrentDirectory = $savedCwd } else { [IO.File]::SetUnixFileMode($stuckParent, 'UserRead, UserWrite, UserExecute') }
+        }
+        Assert-True (Test-Path -LiteralPath $stuck) 'The directory delete failure was not simulated'
+        Assert-True ($pathState.Value -ceq 'C:\Other') 'A failed directory delete skipped PATH cleanup'
+        $pathState.Value = "C:\Other;$stuck"
+        & $uninstaller -InstallDir $stuck
+        Assert-True (-not (Test-Path -LiteralPath $stuck)) 'Retry did not remove the empty install directory'
+        Assert-True ($pathState.Value -ceq 'C:\Other') 'Retry did not clean PATH'
+        Write-Host 'ok - a failed final directory delete still cleans PATH and can be retried'
+      } finally {
+        Remove-Item -LiteralPath Alias:Open-UserEnvironmentKey, Alias:Send-EnvironmentChange -ErrorAction SilentlyContinue
+      }
     }
   }
 

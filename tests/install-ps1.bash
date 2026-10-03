@@ -74,3 +74,13 @@ assert_file_not_contains packaging/chocolatey/tools/chocolateyUninstall.ps1 "Inv
 assert_file tests/install-ps1.ps1
 
 pass "PowerShell installer and package files are present and guarded"
+
+# The bootstrap and the shipped uninstaller each carry a copy of the ownership
+# and registry helpers; a receipt written by one must be accepted by the other.
+for function_name in Get-GosOwnedFiles Open-UserEnvironmentKey; do
+  installer_copy=$(sed -n "/^function ${function_name} {/,/^}/p" install.ps1)
+  uninstaller_copy=$(sed -n "/^function ${function_name} {/,/^}/p" packaging/windows/uninstall.ps1)
+  [ -n "$installer_copy" ] || fail "install.ps1 must define ${function_name}"
+  [ "$installer_copy" = "$uninstaller_copy" ] || fail "${function_name} differs between install.ps1 and uninstall.ps1"
+done
+pass "install.ps1 and uninstall.ps1 share identical ownership and registry helpers"

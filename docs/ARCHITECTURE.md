@@ -137,7 +137,9 @@ not an atomic multi-file swap or a guarantee against process termination.
 The receipt permits only `gos.sh`, `gos.cmd`, `uninstall.ps1`, and optional
 `LICENSE`. Both bootstrap and uninstaller validate it before touching existing
 files. Receipts also allow a partially removed installation to be uninstalled
-again. Pre-receipt installs are recognized by the three gos scripts, and their
+again, and an empty directory left by a failed final delete is removed on
+retry. PATH cleanup runs even when the directory is already gone.
+Pre-receipt installs are recognized by the three gos scripts, and their
 LICENSE is conservatively left unowned. Neither install nor uninstall recurses
 through unrelated target contents; link and non-file collisions are refused.
 
