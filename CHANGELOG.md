@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Windows uninstall validates ownership, removes only known installed files, and preserves unrelated contents instead of recursively deleting the target directory. Existing installations without a receipt remain supported, with their ambiguous `LICENSE` left in place.
+- Windows installs stage replacements on the destination filesystem and restore previous files on publication failure. Failed fresh installs remove partial payloads; failed restoration keeps recovery files and reports their location.
+- Windows PATH edits refresh a stale process even when the registry already contains gos, remove process entries on uninstall, and preserve registry value types and unrelated entries. Tests use registry substitutes and a disposable native Windows key.
 - Installs hash and extract the same private archive snapshot, including cache hits and resumable downloads, so concurrent cache replacement cannot change the bytes installed after verification. Cache publication is atomic, preserves existing entries on copy failure, and avoids writing through cache symlinks or non-regular partial paths.
 - PowerShell `-PackagePath` installs also hash and extract a private archive snapshot. Replacing the original ZIP after hashing cannot change the installed payload; failed or corrupted snapshot copies preserve the previous installation and clean temporary files.
 - Local PowerShell validation passes filenames to a temporary parser script with `-File`; `-Command` previously treated them as executable code instead of parser arguments. The gate checks every file without running installer bodies and rejects syntax errors before functional tests.

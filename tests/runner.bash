@@ -188,7 +188,7 @@ if command -v pwsh >/dev/null 2>&1 || command -v powershell >/dev/null 2>&1; the
   mkdir -p "${powershell_fixture}/scripts" "${powershell_fixture}/tests" \
     "${powershell_fixture}/packaging/chocolatey/tools" "${powershell_fixture}/packaging/windows"
   sed '/^require_tool ruby /,$d' "${repo_root}/scripts/validate-local.bash" >"${powershell_fixture}/scripts/functions.bash"
-  for file in install.ps1 packaging/chocolatey/tools/chocolateyInstall.ps1 packaging/chocolatey/tools/chocolateyUninstall.ps1 packaging/windows/uninstall.ps1; do
+  for file in install.ps1 packaging/chocolatey/tools/chocolateyInstall.ps1 packaging/chocolatey/tools/chocolateyUninstall.ps1 packaging/windows/uninstall.ps1 tests/windows-lifecycle.ps1; do
     printf "throw 'PARSE_ONLY_FILE_EXECUTED'\n" >"${powershell_fixture}/${file}"
   done
   printf "Write-Output 'POWERSHELL_TEST_REACHED'\n" >"${powershell_fixture}/tests/install-ps1.ps1"

@@ -222,6 +222,13 @@ To update `gos`, run the same PowerShell installer again:
 irm https://github.com/johnny4young/gos/releases/latest/download/install.ps1 | iex
 ```
 
+The installer stages replacement files before updating an existing installation
+and restores the previous files if replacement fails. If restoration also
+fails, the error names the retained recovery directory. Existing unrelated
+files, including a pre-existing `LICENSE`, are preserved. Re-running the
+installer also refreshes the current process's `PATH` when the user registry
+already contains the installation directory.
+
 For development testing before that release asset exists:
 
 ```powershell
@@ -685,6 +692,12 @@ if ([string]::IsNullOrWhiteSpace($gosHome)) {
 # If you installed with -InstallDir, set $gosHome to that original directory.
 & (Join-Path $gosHome 'uninstall.ps1') -InstallDir $gosHome
 ```
+
+The uninstaller removes only files owned by the Windows installer and removes
+the directory only when it is empty. It refuses unrecognized or linked targets
+and leaves unrelated files and subdirectories in place. Older installations
+without an ownership receipt are recognized by their gos scripts; their
+pre-existing `LICENSE` is retained because its ownership is ambiguous.
 
 **If installed via git clone:** inspect your original clone location and any
 uncommitted work before removing it (the quick-start example uses `$HOME/.gos`).

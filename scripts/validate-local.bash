@@ -80,6 +80,7 @@ powershell_files=(
   packaging/chocolatey/tools/chocolateyUninstall.ps1
   packaging/windows/uninstall.ps1
   tests/install-ps1.ps1
+  tests/windows-lifecycle.ps1
 )
 
 print_command() {
