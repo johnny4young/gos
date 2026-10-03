@@ -110,6 +110,30 @@ for kind in symlink directory; do
 done
 pass "non-regular partial paths are bypassed without mutation"
 
+# Publication goes through mktemp (0600); entries must keep the umask mode so
+# a cache shared between accounts stays readable.
+case_dir="${test_root}/cache-mode"
+(umask 022 && run_gos "$case_dir" bash "$script" install 1.21.6 --from-file "${test_root}/approved.tar.gz" --sha256 "$digest" \
+  && [ "$status" -eq 0 ]) || fail "install for cache mode check failed"
+# GNU stat uses -c, BSD/macOS stat uses -f.
+mode=$(stat -c '%a' "${case_dir}/cache/${pkg}" 2>/dev/null || stat -f '%Lp' "${case_dir}/cache/${pkg}")
+[ "$mode" = 644 ] || fail "cache publication must follow the umask, got mode ${mode}"
+pass "published cache entries follow the umask instead of mktemp's 0600"
+
+# An unreadable cache entry is a cache miss, not raw cp noise on stderr.
+if [ "$(id -u)" != 0 ]; then
+  case_dir="${test_root}/cache-unreadable"
+  mkdir -p "${case_dir}/cache"
+  cp "${test_root}/approved.tar.gz" "${case_dir}/cache/${pkg}"
+  chmod 000 "${case_dir}/cache/${pkg}"
+  run_gos "$case_dir" bash "$script" install 1.21.6
+  chmod 644 "${case_dir}/cache/${pkg}"
+  assert_status 0 "$status" "unreadable cache entry" "$output"
+  assert_contains "$output" "could not be read; downloading a fresh archive" "unreadable cache warning"
+  assert_not_contains "$output" "cp:" "unreadable cache cp noise"
+  pass "an unreadable cache entry falls back to a download without cp noise"
+fi
+
 # A failed staging copy must leave an existing cache entry intact, and remove
 # its incomplete private publication file. No download or mock digest involved.
 case_dir="${test_root}/publication-failure"

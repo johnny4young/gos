@@ -108,3 +108,23 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 assert_contains "$output" "could not write Go archive cache" "cache write warning"
 [ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "install with unwritable cache did not complete"
 pass "an unwritable cache warns but never blocks an install"
+
+# Without checksum metadata the cache cannot be trusted, so it must not even
+# be snapshotted: copying a ~70 MB archive only to reject it is wasted I/O.
+case_dir="${test_root}/cache-no-metadata"
+mkdir -p "${case_dir}/cache"
+printf 'cached' >"${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+cp_log="${case_dir}/cp.log"
+cp "${fake_bin}/cp" "${test_root}/fake-cp"
+cat >"${fake_bin}/cp" <<FAKE_CP
+#!/usr/bin/env bash
+printf '%s\\n' "\$*" >>"${cp_log}"
+exec "${test_root}/fake-cp" "\$@"
+FAKE_CP
+chmod +x "${fake_bin}/cp"
+GOS_TEST_PARSERS=none GOS_TEST_DOWNLOAD_MODE="fail-checksums" run_gos "$case_dir" bash "$script" install 1.21.6
+mv "${test_root}/fake-cp" "${fake_bin}/cp"
+assert_status 0 "$status" "install without checksum metadata" "$output"
+assert_contains "$output" "was not reused because checksum metadata is unavailable" "unverifiable cache warning"
+! grep -Fq "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz " "$cp_log" 2>/dev/null || fail "an unverifiable cache entry must not be copied: $(cat "$cp_log")"
+pass "an unverifiable cache entry is rejected before it is copied"

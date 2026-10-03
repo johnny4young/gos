@@ -964,9 +964,11 @@ _gos_store_cache() (
   trap 'exit 143' TERM
 
   # Keep XXXXXX last for both BSD and GNU mktemp; prune reclaims crash residue.
+  # mktemp creates 0600, so restore the umask mode a shared cache relies on.
   if mkdir -p "$GOS_CACHE_DIR" 2>/dev/null && [ ! -d "$cache_file" ] \
     && tmp_file=$(mktemp "${cache_file}.partial.XXXXXX" 2>/dev/null) \
     && cp "$archive" "$tmp_file" 2>/dev/null \
+    && chmod "$(printf '%o' $((0666 & ~$(umask))))" "$tmp_file" 2>/dev/null \
     && [ ! -d "$cache_file" ] && mv -f "$tmp_file" "$cache_file" 2>/dev/null; then
     return 0
   fi
@@ -974,13 +976,12 @@ _gos_store_cache() (
   _gos_warning "could not write Go archive cache at ${GOS_CACHE_DIR}."
 )
 
-# Validate the caller's private cache snapshot. Hashing and extracting the
+# Validate a private snapshot of the cache entry. Hashing and extracting the
 # same private file prevents concurrent cache writes from changing trusted bytes.
 _gos_try_cache() {
-  local pkg="$1" expected_sha="$2"
-  local cache_file actual_sha
+  local pkg="$1" expected_sha="$2" cache_file="$3" snapshot="$4"
+  local actual_sha
 
-  cache_file="$3"
   [ -f "$cache_file" ] || return 1
 
   if [ -z "$expected_sha" ]; then
@@ -988,7 +989,12 @@ _gos_try_cache() {
     return 1
   fi
 
-  actual_sha=$(_gos_sha256 "$cache_file") || actual_sha=""
+  if ! cp "$cache_file" "$snapshot" 2>/dev/null; then
+    _gos_warning "cached ${pkg} could not be read; downloading a fresh archive."
+    return 1
+  fi
+
+  actual_sha=$(_gos_sha256 "$snapshot") || actual_sha=""
   if [ -z "$actual_sha" ]; then
     _gos_warning "cached ${pkg} was not reused because no SHA256 tool output was available."
     return 1
@@ -1786,8 +1792,7 @@ _gos_obtain_archive() {
       return 1
     fi
     _gos_progress "Using ${from_file} as ${pkg}."
-  elif [ -f "$cache_file" ] && cp "$cache_file" "$tmp_file" \
-    && _gos_try_cache "$pkg" "$expected_sha" "$tmp_file"; then
+  elif _gos_try_cache "$pkg" "$expected_sha" "$cache_file" "$tmp_file"; then
     cache_hit="true"
     archive_file="$tmp_file"
   elif [ "$private" != "true" ] && [ -n "$expected_sha" ] \
