@@ -197,6 +197,7 @@ TERM="xterm-256color" \
 GOS_INSTALL_DIR="${case_dir}/active-go" \
 GOS_CACHE_DIR="${case_dir}/cache" \
 GOS_TEST_REAL_MV="${real_mv}" \
+GOS_TEST_REAL_CP="${real_cp}" \
 GOS_TEST_URL_LOG="${case_dir}/warning-urls.log" \
 GOS_TEST_CURL_ARGS_LOG="${case_dir}/warning-curl-args.log" \
 GOS_TEST_DOWNLOAD_MODE="ok" \

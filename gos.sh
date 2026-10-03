@@ -950,28 +950,38 @@ _gos_cache_path() {
   printf '%s/%s' "$GOS_CACHE_DIR" "$pkg"
 }
 
-_gos_store_cache() {
+# Publish a complete file by rename in the cache filesystem. Direct cp to the
+# public name can expose incomplete bytes or overwrite an unrelated symlink
+# target. The subshell owns its temporary file and cleanup, including signals.
+_gos_store_cache() (
   local pkg="$1" archive="$2" expected_sha="$3"
-  local cache_file
+  local cache_file tmp_file=""
 
   [ -n "$expected_sha" ] || return 0
   cache_file=$(_gos_cache_path "$pkg")
+  trap '[ -z "$tmp_file" ] || rm -f "$tmp_file"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
-  if mkdir -p "$GOS_CACHE_DIR" 2>/dev/null && cp "$archive" "$cache_file" 2>/dev/null; then
+  # Keep XXXXXX last for both BSD and GNU mktemp; prune reclaims crash residue.
+  # mktemp creates 0600, so restore the umask mode a shared cache relies on.
+  if mkdir -p "$GOS_CACHE_DIR" 2>/dev/null && [ ! -d "$cache_file" ] \
+    && tmp_file=$(mktemp "${cache_file}.partial.XXXXXX" 2>/dev/null) \
+    && cp "$archive" "$tmp_file" 2>/dev/null \
+    && chmod "$(printf '%o' $((0666 & ~$(umask))))" "$tmp_file" 2>/dev/null \
+    && [ ! -d "$cache_file" ] && mv -f "$tmp_file" "$cache_file" 2>/dev/null; then
     return 0
   fi
 
   _gos_warning "could not write Go archive cache at ${GOS_CACHE_DIR}."
-}
+)
 
-# Validate a cached archive in place. On success the caller extracts straight
-# from the cache file, so nothing is copied and the archive is hashed only
-# once here (not again by the shared verification block below).
+# Validate a private snapshot of the cache entry. Hashing and extracting the
+# same private file prevents concurrent cache writes from changing trusted bytes.
 _gos_try_cache() {
-  local pkg="$1" expected_sha="$2"
-  local cache_file actual_sha
+  local pkg="$1" expected_sha="$2" cache_file="$3" snapshot="$4"
+  local actual_sha
 
-  cache_file="${3:-$(_gos_cache_path "$pkg")}"
   [ -f "$cache_file" ] || return 1
 
   if [ -z "$expected_sha" ]; then
@@ -979,7 +989,12 @@ _gos_try_cache() {
     return 1
   fi
 
-  actual_sha=$(_gos_sha256 "$cache_file") || actual_sha=""
+  if ! cp "$cache_file" "$snapshot" 2>/dev/null; then
+    _gos_warning "cached ${pkg} could not be read; downloading a fresh archive."
+    return 1
+  fi
+
+  actual_sha=$(_gos_sha256 "$snapshot") || actual_sha=""
   if [ -z "$actual_sha" ]; then
     _gos_warning "cached ${pkg} was not reused because no SHA256 tool output was available."
     return 1
@@ -1072,10 +1087,12 @@ _gos_fetch_checksum_file() {
 }
 
 # Extract the bare version (e.g. 1.22.0, 1.23rc1) that a `go` binary reports.
+# Identify the bundled binary, independent of project directives or the caller's
+# GOTOOLCHAIN. Probing installed versions must not download or run another Go.
 # The parse lives here once so the rc/beta regex cannot drift between callers.
 _gos_go_version_of() {
   local go_bin="$1"
-  "$go_bin" version 2>/dev/null \
+  GOTOOLCHAIN=local "$go_bin" version 2>/dev/null \
     | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' \
     | head -1 | sed 's/^go//'
 }
@@ -1574,7 +1591,7 @@ _gos_activate_install() {
     return 1
   fi
 
-  if ! version_output=$("$go_bin" version 2>&1); then
+  if ! version_output=$(GOTOOLCHAIN=local "$go_bin" version 2>&1); then
     _gos_error "activated Go failed validation: ${version_output}"
     # Disarm the trap only if the restore succeeded: a failed restore leaves
     # the slot empty with the backup intact, exactly the state the EXIT trap
@@ -1650,7 +1667,7 @@ _gos_activate_rollback() {
     return 1
   fi
 
-  if ! version_output=$("$go_bin" version 2>&1); then
+  if ! version_output=$(GOTOOLCHAIN=local "$go_bin" version 2>&1); then
     _gos_error "rollback Go failed validation: ${version_output}"
     _gos_restore_backup "$current_backup" && GOS_ACTIVATION_BACKUP=""
     return 1
@@ -1763,9 +1780,8 @@ _gos_obtain_archive() {
   fi
   cache_hit="false"
 
-  # archive_file is what gets extracted: the cache file on a hit (no copy), a
-  # persistent .partial that can resume across runs, the ephemeral temp file,
-  # or the operator-supplied file for air-gapped installs.
+  # Always hash and extract private bytes. Install locks are scoped to the Go
+  # root, so another root may share (and replace or prune) this cache.
   local archive_file cache_file partial=""
   cache_file=$(_gos_cache_path "$pkg")
   if [ -n "$from_file" ]; then
@@ -1776,29 +1792,19 @@ _gos_obtain_archive() {
       return 1
     fi
     _gos_progress "Using ${from_file} as ${pkg}."
-  elif [ "$private" = "true" ]; then
-    # verify has no mutation lock: snapshot cache hits, never use/write shared
-    # partials, and keep new downloads private so concurrent installs are safe.
-    if [ -f "$cache_file" ] && cp "$cache_file" "$tmp_file" \
-      && _gos_try_cache "$pkg" "$expected_sha" "$tmp_file"; then
-      cache_hit="true"
-    else
-      _gos_progress "Downloading ${pkg}..."
-      if ! _gos_download "$url" "$tmp_file"; then
-        _gos_fail network "download of ${pkg} failed."
-        return 1
-      fi
-    fi
-    archive_file="$tmp_file"
-  elif _gos_try_cache "$pkg" "$expected_sha"; then
+  elif _gos_try_cache "$pkg" "$expected_sha" "$cache_file" "$tmp_file"; then
     cache_hit="true"
-    archive_file="$cache_file"
-  elif [ -n "$expected_sha" ] && mkdir -p "$GOS_CACHE_DIR" 2>/dev/null && [ -w "$GOS_CACHE_DIR" ]; then
+    archive_file="$tmp_file"
+  elif [ "$private" != "true" ] && [ -n "$expected_sha" ] \
+    && mkdir -p "$GOS_CACHE_DIR" 2>/dev/null && [ -w "$GOS_CACHE_DIR" ] \
+    && [ ! -L "${cache_file}.partial" ] \
+    && { [ ! -e "${cache_file}.partial" ] || [ -f "${cache_file}.partial" ]; }; then
     # With a checksum to validate the result and a writable cache, download to a
     # persistent .partial so an interrupted ~70 MB transfer resumes instead of
-    # restarting. A verified partial is promoted straight to the cache entry.
+    # restarting. Snapshot the completed transfer before hashing and publishing.
+    # Non-regular partial paths above are bypassed without writing through them.
     partial="${cache_file}.partial"
-    archive_file="$partial"
+    archive_file="$tmp_file"
     # Only curl resumes (wget -O restarts the file), so only promise it there.
     if [ -s "$partial" ] && command -v curl &>/dev/null; then
       _gos_progress "Resuming download of ${pkg}..."
@@ -1810,6 +1816,11 @@ _gos_obtain_archive() {
       echo "The network may be down or go.dev/the mirror may be temporarily unavailable; the partial was kept, so 'gos install ${version}' resumes it." >&2
       return 1
     }
+    GOS_COMPLETED_PARTIAL="$partial"
+    if ! cp "$partial" "$archive_file"; then
+      _gos_error "could not snapshot downloaded archive: ${partial}."
+      return 1
+    fi
   else
     archive_file="$tmp_file"
     _gos_progress "Downloading ${pkg}..."
@@ -1849,26 +1860,10 @@ _gos_obtain_archive() {
       return 1
     else
       _gos_progress "Checksum verified."
-      if [ -n "$partial" ]; then
-        # Promote the verified partial to the cache entry directly. If rename
-        # is unavailable (for example because another process briefly locks
-        # the destination), copy it so the completed partial is not resumed on
-        # the next install.
-        if mv "$partial" "$cache_file" 2>/dev/null; then
-          archive_file="$cache_file"
-        elif cp "$partial" "$cache_file" 2>/dev/null; then
-          archive_file="$cache_file"
-          rm -f "$partial" || _gos_warning "could not remove completed partial at ${partial}."
-        else
-          # Neither rename nor copy worked (disk full, permissions): extract
-          # from the partial and discard it afterwards, so the next install
-          # starts clean instead of "resuming" a complete file forever.
-          _gos_warning "could not write Go archive cache at ${cache_file}; this download will not be reused."
-          GOS_COMPLETED_PARTIAL="$partial"
-        fi
-      elif [ -z "$from_file" ] && [ "$private" != "true" ]; then
+      if [ -z "$from_file" ] && [ "$private" != "true" ]; then
         _gos_store_cache "$pkg" "$archive_file" "$expected_sha"
       fi
+      _gos_discard_completed_partial
     fi
   else
     local reason
@@ -4383,7 +4378,7 @@ cmd_prune() {
   # files left by an interrupted (resumable) download. GOS_CACHE_DIR is
   # user-controlled, so prune never runs rm -rf against it.
   if [ -d "$GOS_CACHE_DIR" ]; then
-    for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip "$GOS_CACHE_DIR"/go*.partial; do
+    for file in "$GOS_CACHE_DIR"/go*.tar.gz "$GOS_CACHE_DIR"/go*.zip "$GOS_CACHE_DIR"/go*.partial "$GOS_CACHE_DIR"/go*.partial.*; do
       [ -f "$file" ] || continue
       size=$(_gos_file_size_bytes "$file")
       [ "$dry_run" = "true" ] || rm -f "$file"
@@ -4605,7 +4600,7 @@ cmd_doctor() {
   fi
 
   if go_path=$(command -v go 2>/dev/null); then
-    go_version=$(go version 2>/dev/null || true)
+    go_version=$(GOTOOLCHAIN=local go version 2>/dev/null || true)
     _gos_doctor_check "ok" "go" "${go_path} reports: ${go_version}"
   else
     _gos_doctor_check "problem" "go" "go is not on PATH" "Run gos latest or add ${GOS_INSTALL_DIR}/bin to PATH after installing Go."

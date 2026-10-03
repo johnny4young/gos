@@ -62,6 +62,10 @@ compatibility, but it is a different job than gos does, and the two compose:
 Run `gos doctor` and it will tell you when `GOTOOLCHAIN` is active so the
 interaction is never a surprise.
 
+Gos identifies installed versions and validates installs with `GOTOOLCHAIN=local`,
+so those checks report the bundled binary and never auto-download another Go.
+User commands launched by `gos run` and `gos each` keep your `GOTOOLCHAIN` setting.
+
 ---
 
 ## Table of Contents
@@ -591,7 +595,7 @@ gos delegates downloads to `curl`, or `wget` when curl is absent. Set `https_pro
 2. Detects your OS via `uname -s` and architecture via `uname -m`
 3. Downloads the matching archive from `https://go.dev/dl/`, resuming an interrupted transfer instead of restarting it
 4. Verifies the SHA256 checksum against the Go downloads feed (uses `jq` or `python3`) — checking the small default feed first and only fetching the full history for older versions — with the archive's published `.sha256` companion file as a fallback when the feed cannot be parsed
-5. Reuses a verified cached archive in place when one is present, without re-downloading
+5. Snapshots a cached archive into private staging and verifies it before reuse, without re-downloading
 6. Extracts the new version into a temporary staging directory
 7. Validates the staged `go/bin/go` before touching `$GOS_INSTALL_DIR`
 8. Backs up the previous Go installation, activates the staged version, and rolls back automatically if activation fails

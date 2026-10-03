@@ -497,6 +497,7 @@ GOS_CACHE_DIR="${case_dir}/cache" \
 GOS_DOWNLOAD_MIRROR="" \
 GOS_VERSIONS_DIR="" \
 GOS_TEST_REAL_MV="${real_mv}" \
+GOS_TEST_REAL_CP="${real_cp}" \
 GOS_TEST_URL_LOG="${case_dir}/urls.log" \
 GOS_TEST_CURL_ARGS_LOG="${case_dir}/curl-args.log" \
 GOS_TEST_DOWNLOAD_MODE="ok" \

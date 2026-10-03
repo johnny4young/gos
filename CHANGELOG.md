@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Installs hash and extract the same private archive snapshot, including cache hits and resumable downloads, so concurrent cache replacement cannot change the bytes installed after verification. Cache publication is atomic, preserves existing entries on copy failure, and avoids writing through cache symlinks or non-regular partial paths.
+- PowerShell `-PackagePath` installs also hash and extract a private archive snapshot. Replacing the original ZIP after hashing cannot change the installed payload; failed or corrupted snapshot copies preserve the previous installation and clean temporary files.
+- Local PowerShell validation passes filenames to a temporary parser script with `-File`; `-Command` previously treated them as executable code instead of parser arguments. The gate checks every file without running installer bodies and rejects syntax errors before functional tests.
+- Version probes, activation and rollback checks, and GitHub Action outputs identify the bundled Go with `GOTOOLCHAIN=local`. Project toolchain directives and caller overrides no longer trigger downloads, mask an outdated install, or choose the wrong reference archive for `gos verify`; `run` and `each` retain the caller's setting for child commands.
 - Taking the mutation lock no longer prints bash's own `Permission denied` line when the lock directory belongs to root (the sudo escalation gos takes under a protected parent such as `/usr/local`). The `2>/dev/null` meant to silence the failed pid write sat after the redirection it was guarding, so bash reported the failure on the stderr still in effect; the write is now brace-grouped, and the sudo fallback that records the pid is unchanged. `gos completions <shell> --install` had the same ordering on an unwritable target and now prints only its own error.
 
 ### Changed

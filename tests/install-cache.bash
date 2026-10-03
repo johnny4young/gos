@@ -23,10 +23,10 @@ cached_inode_before="$(cache_inode "$cached_archive")"
 GOS_TEST_DOWNLOAD_MODE="fail-archives" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "cached install failed: ${output}"
 assert_contains "$output" "Using cached go1.21.6.darwin-arm64.tar.gz." "cache reuse"
-# The cache file is extracted in place, so it is neither consumed nor rewritten.
+# Snapshotting leaves the original cache entry untouched.
 [ -f "$cached_archive" ] || fail "cache reuse must leave the cached archive in place"
 [ "$(cache_inode "$cached_archive")" = "$cached_inode_before" ] || fail "cache reuse must not rewrite the cached archive"
-pass "install reuses verified cached archives without copying them"
+pass "install reuses verified cached archives without rewriting them"
 
 # An interrupted archive download leaves a .partial that a retry
 # resumes instead of restarting.
@@ -44,36 +44,21 @@ assert_contains "$output" "Resuming download of go1.21.6" "second attempt resume
 [ -f "$resume_cached" ] || fail "the verified partial should be promoted to the cache"
 pass "interrupted archive downloads resume instead of restarting"
 
-# A verified partial still becomes a reusable cache entry when an atomic rename
-# is unavailable; otherwise a later retry would resume an already-complete file.
-case_dir="${test_root}/resume-promotion-fallback"
-fallback_partial="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
-fallback_cached="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
-GOS_TEST_MV_FAIL_DEST="$fallback_cached" run_gos "$case_dir" bash "$script" install 1.21.6
-[ "$status" -eq 0 ] || fail "install with cache promotion rename failure failed: ${output}"
-[ ! -f "$fallback_partial" ] || fail "cache promotion fallback must remove the completed .partial"
-[ -f "$fallback_cached" ] || fail "cache promotion fallback must create the reusable cache entry"
-rm -rf "${case_dir}/go"
-GOS_TEST_DOWNLOAD_MODE="fail-archives" run_gos "$case_dir" bash "$script" install 1.21.6
-[ "$status" -eq 0 ] || fail "install did not reuse the fallback cache entry: ${output}"
-assert_contains "$output" "Using cached go1.21.6.darwin-arm64.tar.gz." "fallback cache reuse"
-pass "verified partials fall back to copy when cache promotion rename fails"
-
-# When neither rename nor copy can promote the verified partial (disk full),
-# the install still completes from it and the partial is discarded so the
+# When atomic publication fails, the install still completes from its private
+# snapshot and the completed partial is discarded so the
 # next run does not "resume" a complete file forever.
 case_dir="${test_root}/resume-promotion-impossible"
 stuck_partial="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
 stuck_cached="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
-GOS_TEST_MV_FAIL_DEST="$stuck_cached" GOS_TEST_CP_FAIL_DEST="$stuck_cached" run_gos "$case_dir" bash "$script" install 1.21.6
+GOS_TEST_MV_FAIL_DEST="$stuck_cached" run_gos "$case_dir" bash "$script" install 1.21.6
 [ "$status" -eq 0 ] || fail "install must still complete when the cache cannot be written: ${output}"
 assert_contains "$output" "could not write Go archive cache" "cache promotion impossible warning"
 assert_contains "$output" "Done! go version go1.21.6" "cache promotion impossible still installs"
 [ ! -f "$stuck_partial" ] || fail "an unpromotable completed partial must be discarded"
 [ ! -f "$stuck_cached" ] || fail "no cache entry should exist when promotion failed"
-pass "an unpromotable verified partial is used once and discarded"
+pass "cache publication failure preserves installation and discards the completed partial"
 
-# The one-shot completed partial must also be discarded when extraction or
+# The completed partial must also be discarded when extraction or
 # staged validation fails; otherwise the next run tries to resume a file that
 # was already complete.
 for extract_mode in fail invalid interrupt; do
@@ -81,7 +66,6 @@ for extract_mode in fail invalid interrupt; do
   failed_partial="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz.partial"
   failed_cached="${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
   GOS_TEST_MV_FAIL_DEST="$failed_cached" \
-    GOS_TEST_CP_FAIL_DEST="$failed_cached" \
     GOS_TEST_EXTRACT_MODE="$extract_mode" \
     run_gos "$case_dir" bash "$script" install 1.21.6
   [ "$status" -ne 0 ] || fail "${extract_mode} after an unpromotable partial should fail"
@@ -124,3 +108,23 @@ run_gos "$case_dir" bash "$script" install 1.21.6
 assert_contains "$output" "could not write Go archive cache" "cache write warning"
 [ "$(<"${case_dir}/go/VERSION_MARKER")" = "new-1.21.6" ] || fail "install with unwritable cache did not complete"
 pass "an unwritable cache warns but never blocks an install"
+
+# Without checksum metadata the cache cannot be trusted, so it must not even
+# be snapshotted: copying a ~70 MB archive only to reject it is wasted I/O.
+case_dir="${test_root}/cache-no-metadata"
+mkdir -p "${case_dir}/cache"
+printf 'cached' >"${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz"
+cp_log="${case_dir}/cp.log"
+cp "${fake_bin}/cp" "${test_root}/fake-cp"
+cat >"${fake_bin}/cp" <<FAKE_CP
+#!/usr/bin/env bash
+printf '%s\\n' "\$*" >>"${cp_log}"
+exec "${test_root}/fake-cp" "\$@"
+FAKE_CP
+chmod +x "${fake_bin}/cp"
+GOS_TEST_PARSERS=none GOS_TEST_DOWNLOAD_MODE="fail-checksums" run_gos "$case_dir" bash "$script" install 1.21.6
+mv "${test_root}/fake-cp" "${fake_bin}/cp"
+assert_status 0 "$status" "install without checksum metadata" "$output"
+assert_contains "$output" "was not reused because checksum metadata is unavailable" "unverifiable cache warning"
+! grep -Fq "${case_dir}/cache/go1.21.6.darwin-arm64.tar.gz " "$cp_log" 2>/dev/null || fail "an unverifiable cache entry must not be copied: $(cat "$cp_log")"
+pass "an unverifiable cache entry is rejected before it is copied"

@@ -20,7 +20,7 @@ case "$1" in
     [ "$GOS_CACHE_DIR" = "$HOME/.cache/gos" ] || exit 24
     [ -z "$GOS_VERSIONS_DIR" ] || exit 25
     mkdir -p "$GOS_INSTALL_DIR/bin"
-    printf '#!/usr/bin/env bash\nprintf "go version go%s test/amd64\\n"\n' "$2" >"$GOS_INSTALL_DIR/bin/go"
+    printf '#!/usr/bin/env bash\n[ "${GOTOOLCHAIN:-}" = local ] || exit 42\nprintf "go version go%s test/amd64\\n"\n' "$2" >"$GOS_INSTALL_DIR/bin/go"
     chmod +x "$GOS_INSTALL_DIR/bin/go"
     ;;
 esac
@@ -71,6 +71,7 @@ GOS_INSTALL_DIR=$(sed -n 's/^install-dir=//p' "$GITHUB_OUTPUT")
 export GOS_VERSION_TO_INSTALL=1.25.7 GOS_REQUIRE_CHECKSUM=feed GOS_CACHE_DIR=/wrong/cache GOS_VERSIONS_DIR=/wrong/versions
 : >"$GITHUB_OUTPUT"
 bash "$test_root/install.bash" >"$test_root/log" 2>&1 || fail "Windows action install: $(cat "$test_root/log")"
+grep -Fxq 'go-version=1.25.7' "$GITHUB_OUTPUT" || fail "action did not identify the bundled Go version"
 for launcher in gos gos.sh gos.cmd; do
   [ -f "$HOME/.gos/bin/$launcher" ] || fail "action omitted Windows launcher $launcher"
 done
