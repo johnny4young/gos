@@ -175,7 +175,15 @@ foreach ($file in $args) {
 }
 '
 
-  run "${powershell_args[@]}" -Command "$powershell_parse_script" "${powershell_files[@]}"
+  # -Command appends remaining argv to the command text instead of binding
+  # $args. A temporary -File script keeps filenames as data on both Windows
+  # PowerShell and pwsh, and parses every file without executing installers.
+  (
+    powershell_parse_dir=$(mktemp -d)
+    trap 'rm -rf "$powershell_parse_dir"' EXIT
+    printf '%s\n' "$powershell_parse_script" >"${powershell_parse_dir}/parse.ps1"
+    run "${powershell_args[@]}" -File "${powershell_parse_dir}/parse.ps1" "${powershell_files[@]}"
+  )
   run "${powershell_args[@]}" -File tests/install-ps1.ps1
 }
 

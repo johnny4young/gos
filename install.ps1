@@ -422,12 +422,18 @@ function Get-PayloadFromLocalPackage {
   param(
     [string]$LocalPackagePath,
     [string]$ExpectedPackageSha256,
+    [string]$TempDir,
     [string]$StageDir
   )
 
   $resolvedPackagePath = (Resolve-Path -LiteralPath $LocalPackagePath).Path
-  Assert-Sha256 -Path $resolvedPackagePath -ExpectedSha256 $ExpectedPackageSha256
-  Expand-Archive -LiteralPath $resolvedPackagePath -DestinationPath $StageDir -Force
+  # Hash and extract the same private copy: the caller may replace or edit the
+  # original archive at any time. The entrypoint's finally removes this copy
+  # along with staging on success, checksum rejection, or a failed copy.
+  $snapshotPath = Join-Path $TempDir 'gos-windows.zip'
+  Copy-Item -LiteralPath $resolvedPackagePath -Destination $snapshotPath
+  Assert-Sha256 -Path $snapshotPath -ExpectedSha256 $ExpectedPackageSha256
+  Expand-Archive -LiteralPath $snapshotPath -DestinationPath $StageDir -Force
 
   $payloadDir = Join-Path $StageDir 'gos'
   if (Test-Path -LiteralPath (Join-Path $payloadDir 'gos.sh') -PathType Leaf) {
@@ -469,7 +475,7 @@ $stageDir = Join-Path $tempDir 'stage'
 
 try {
   if (-not [string]::IsNullOrWhiteSpace($PackagePath)) {
-    $payloadDir = Get-PayloadFromLocalPackage -LocalPackagePath $PackagePath -ExpectedPackageSha256 $ExpectedSha256 -StageDir $stageDir
+    $payloadDir = Get-PayloadFromLocalPackage -LocalPackagePath $PackagePath -ExpectedPackageSha256 $ExpectedSha256 -TempDir $tempDir -StageDir $stageDir
   } elseif ($GosReleaseTag -ne 'UPDATE_ON_RELEASE') {
     $payloadDir = Get-PayloadFromRelease -TempDir $tempDir -StageDir $stageDir
   } else {

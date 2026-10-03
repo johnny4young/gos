@@ -138,6 +138,87 @@ try {
     Pass 'invalid checksum policies fail closed, while an unset policy permits a local unverified package'
   }
 
+  # Replace the caller's archive immediately after a real hash calculation.
+  # Hashing and extraction must use the same private copy, not that mutable path.
+  & {
+    $sourceZip = Join-Path $tmpRoot 'local package [snapshot].zip'
+    $replacementZip = Join-Path $tmpRoot 'replacement.zip'
+    $replacementRoot = Join-Path $tmpRoot 'replacement'
+    $replacementPayload = Join-Path $replacementRoot 'gos'
+    New-Item -ItemType Directory -Path $replacementPayload -Force | Out-Null
+    foreach ($file in @('gos.sh', 'gos.cmd', 'uninstall.ps1')) {
+      Copy-Item -LiteralPath (Join-Path $payloadDir $file) -Destination (Join-Path $replacementPayload $file)
+    }
+    Set-Content -LiteralPath (Join-Path $replacementPayload 'gos.sh') -Value 'unapproved replacement'
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($replacementRoot, $replacementZip)
+    Copy-Item -LiteralPath $zipPath -Destination $sourceZip
+    $snapshotDir = Join-Path $tmpRoot 'snapshot install'
+    $probe = @{ HashPath = ''; ExtractPath = ''; HashCalls = 0; ExtractCalls = 0 }
+    function Get-FileHash {
+      param([string]$LiteralPath, [string]$Algorithm)
+      $result = Microsoft.PowerShell.Utility\Get-FileHash -LiteralPath $LiteralPath -Algorithm $Algorithm
+      $probe.HashPath = $LiteralPath
+      $probe.HashCalls++
+      Copy-Item -LiteralPath $replacementZip -Destination $sourceZip -Force
+      return $result
+    }
+    function Expand-Archive {
+      param([string]$LiteralPath, [string]$DestinationPath, [switch]$Force)
+      $probe.ExtractPath = $LiteralPath
+      $probe.ExtractCalls++
+      Microsoft.PowerShell.Archive\Expand-Archive -LiteralPath $LiteralPath -DestinationPath $DestinationPath -Force:$Force
+    }
+    & $installer -InstallDir $snapshotDir -NoPath -PackagePath $sourceZip -ExpectedSha256 $zipSha256
+    $expectedPayloadHash = (Microsoft.PowerShell.Utility\Get-FileHash -LiteralPath (Join-Path $payloadDir 'gos.sh') -Algorithm SHA256).Hash
+    $installedPayloadHash = (Microsoft.PowerShell.Utility\Get-FileHash -LiteralPath (Join-Path $snapshotDir 'gos.sh') -Algorithm SHA256).Hash
+    if ($installedPayloadHash -ne $expectedPayloadHash) { Fail 'source replacement after hashing changed the installed Windows payload' }
+    if ($probe.HashCalls -ne 1 -or $probe.ExtractCalls -ne 1) { Fail 'snapshot regression did not exercise real hashing and extraction' }
+    if ($probe.HashPath -eq $sourceZip -or $probe.HashPath -ne $probe.ExtractPath) { Fail 'local package hash and extraction must use the same private snapshot' }
+    if (Test-Path -LiteralPath (Split-Path -Parent $probe.HashPath)) { Fail 'successful local install leaked its private snapshot directory' }
+    Assert-File $sourceZip
+    Pass 'PowerShell local packages install verified snapshot bytes despite source replacement after hashing'
+
+    # A partial or corrupted copy must fail before extraction and preserve an
+    # existing installation. The installer finally block must remove staging.
+    foreach ($mode in @('copy-failure', 'corrupt-copy')) {
+      Microsoft.PowerShell.Management\Copy-Item -LiteralPath $zipPath -Destination $sourceZip -Force
+      $probe.HashPath = ''
+      $probe.ExtractPath = ''
+      $probe.HashCalls = 0
+      $probe.ExtractCalls = 0
+      $probe.CopyPath = ''
+      function Copy-Item {
+        param([string]$LiteralPath, [string]$Destination, [switch]$Force)
+        if ($LiteralPath -eq $sourceZip) {
+          $probe.CopyPath = $Destination
+          if ($mode -eq 'copy-failure') {
+            Set-Content -LiteralPath $Destination -Value 'incomplete copy'
+            throw 'simulated snapshot copy failure'
+          }
+          Microsoft.PowerShell.Management\Copy-Item -LiteralPath $replacementZip -Destination $Destination -Force:$Force
+          return
+        }
+        Microsoft.PowerShell.Management\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
+      }
+      $caught = $null
+      try {
+        & $installer -InstallDir $snapshotDir -NoPath -PackagePath $sourceZip -ExpectedSha256 $zipSha256
+      } catch {
+        $caught = $_.Exception.Message
+      }
+      $expectedError = if ($mode -eq 'copy-failure') { 'simulated snapshot copy failure' } else { 'Checksum mismatch' }
+      if ($null -eq $caught -or $caught -notlike "*$expectedError*") { Fail "$mode did not reject the local package: $caught" }
+      if ($probe.CopyPath -eq '' -or $probe.ExtractCalls -ne 0) { Fail "$mode must fail after snapshotting and before extraction" }
+      if ($mode -eq 'copy-failure' -and $probe.HashCalls -ne 0) { Fail 'a failed copy must not be hashed' }
+      if ($mode -eq 'corrupt-copy' -and $probe.HashPath -ne $probe.CopyPath) { Fail 'the copied snapshot must be hashed' }
+      if (Test-Path -LiteralPath (Split-Path -Parent $probe.CopyPath)) { Fail "$mode leaked the private snapshot directory" }
+      $installedPayloadHash = (Microsoft.PowerShell.Utility\Get-FileHash -LiteralPath (Join-Path $snapshotDir 'gos.sh') -Algorithm SHA256).Hash
+      if ($installedPayloadHash -ne $expectedPayloadHash) { Fail "$mode changed the previous installation" }
+      Assert-File $sourceZip
+      Pass "PowerShell local package $mode preserves the previous install and cleans private staging"
+    }
+  }
+
   & $installer -InstallDir $installDir -NoPath -PackagePath $zipPath -ExpectedSha256 $zipSha256
 
   Assert-File (Join-Path $installDir 'gos.sh')

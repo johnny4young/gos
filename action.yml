@@ -138,7 +138,7 @@ runs:
           printf 'GOS_CACHE_DIR=%s\n' "$GOS_CACHE_DIR"
           printf 'GOROOT=%s\n' "$(native "$GOS_INSTALL_DIR")"
         } >>"$GITHUB_ENV"
-        installed=$("${GOS_INSTALL_DIR}/bin/go" version | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' | head -1)
+        installed=$(GOTOOLCHAIN=local "${GOS_INSTALL_DIR}/bin/go" version | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' | head -1)
         {
           printf 'go-version=%s\n' "${installed#go}"
           printf 'go-root=%s\n' "$(native "$GOS_INSTALL_DIR")"

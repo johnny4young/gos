@@ -85,7 +85,11 @@ For Go toolchain installs:
   verifies it against the release `checksums.txt` manifest, syntax-checks it,
   and only then replaces the running script. It refuses to overwrite
   Homebrew-managed or git-checkout installs.
-- Cached archives are reused only after their SHA256 matches Go metadata.
+- Cached archives and completed downloads are snapshotted into private staging
+  before hashing; extraction uses that same verified snapshot even if a shared
+  cache entry changes. Cache publication uses a temporary sibling and atomic
+  rename, so a failed copy preserves the previous entry and publication does
+  not write through a file symlink. Non-regular resumable paths are bypassed.
 - `GOS_REQUIRE_CHECKSUM=1` makes checksum metadata and local hash calculation
   mandatory, causing installs to fail closed when verification cannot run.
   `GOS_REQUIRE_CHECKSUM=feed` is stricter: the digest must come from the
@@ -112,6 +116,11 @@ For `gos` installer assets:
   Legacy installs are recognized by their gos scripts; their generic `LICENSE`
   is not claimed. Ownership checks prevent accidental deletion, not changes
   by an attacker who can already edit the installation and its receipt.
+- Local PowerShell `-PackagePath` archives are copied into the installer's
+  temporary directory before hashing. Verification and extraction use that
+  same snapshot, which is removed on success or failure. The source archive
+  is left in place, and checksum requirements still follow `-ExpectedSha256`
+  and `GOS_REQUIRE_CHECKSUM`.
 - `checksums.txt` is published with `gos.sh`, `install.sh`, `install.ps1`, and
   `gos-windows.zip`.
 - Release assets and `checksums.txt` receive GitHub artifact attestations.

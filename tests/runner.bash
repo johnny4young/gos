@@ -179,3 +179,31 @@ output="$("$BASH" "${syntax_fixture}/scripts/validate-local.bash" --required-onl
 assert_status 0 "$status" 'valid syntax fixture' "$output"
 assert_contains "$output" 'RUNNER_REACHED' 'valid syntax reaches suites'
 pass 'validate-local checks syntax of every tracked shell file before running suites'
+
+# PowerShell -Command treats trailing filenames as code, not $args. Exercise
+# the real optional gate: valid files must only be parsed, while a syntax
+# error in a later file must stop before the functional installer test.
+if command -v pwsh >/dev/null 2>&1 || command -v powershell >/dev/null 2>&1; then
+  powershell_fixture="${test_root}/powershell validator"
+  mkdir -p "${powershell_fixture}/scripts" "${powershell_fixture}/tests" \
+    "${powershell_fixture}/packaging/chocolatey/tools" "${powershell_fixture}/packaging/windows"
+  sed '/^require_tool ruby /,$d' "${repo_root}/scripts/validate-local.bash" >"${powershell_fixture}/scripts/functions.bash"
+  for file in install.ps1 packaging/chocolatey/tools/chocolateyInstall.ps1 packaging/chocolatey/tools/chocolateyUninstall.ps1 packaging/windows/uninstall.ps1; do
+    printf "throw 'PARSE_ONLY_FILE_EXECUTED'\n" >"${powershell_fixture}/${file}"
+  done
+  printf "Write-Output 'POWERSHELL_TEST_REACHED'\n" >"${powershell_fixture}/tests/install-ps1.ps1"
+  status=0
+  # shellcheck disable=SC2016 # The child shell expands its own arguments.
+  output="$("$BASH" -c 'helper=$1; shift; . "$helper"; run_optional_powershell' _ "${powershell_fixture}/scripts/functions.bash" 2>&1)" || status=$?
+  assert_status 0 "$status" 'valid PowerShell files are parsed without execution' "$output"
+  assert_contains "$output" 'POWERSHELL_TEST_REACHED' 'valid PowerShell reaches functional tests'
+  printf 'function Broken {\n' >"${powershell_fixture}/packaging/windows/uninstall.ps1"
+  status=0
+  # shellcheck disable=SC2016 # The child shell expands its own arguments.
+  output="$("$BASH" -c 'helper=$1; shift; . "$helper"; run_optional_powershell' _ "${powershell_fixture}/scripts/functions.bash" 2>&1)" || status=$?
+  assert_nonzero_status "$status" 'later PowerShell syntax error' "$output"
+  assert_not_contains "$output" 'POWERSHELL_TEST_REACHED' 'PowerShell syntax failure stops before functional tests'
+  pass 'validate-local parses every PowerShell file as data and fails closed before functional tests'
+else
+  pass 'PowerShell validator argument regression skipped: pwsh/powershell is not installed'
+fi
