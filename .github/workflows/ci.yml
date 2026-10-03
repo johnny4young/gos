@@ -114,7 +114,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           # shellcheck disable=SC2016 # PowerShell, not Bash, expands these variables.
-          powershell -NoProfile -ExecutionPolicy Bypass -Command '$files = @("install.ps1", "packaging/chocolatey/tools/chocolateyInstall.ps1", "packaging/chocolatey/tools/chocolateyUninstall.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1"); foreach ($file in $files) { $errors = $null; $tokens = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { $errors | Format-List; exit 1 } }'
+          powershell -NoProfile -ExecutionPolicy Bypass -Command '$files = @("install.ps1", "packaging/chocolatey/tools/chocolateyInstall.ps1", "packaging/chocolatey/tools/chocolateyUninstall.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1", "tests/windows-lifecycle.ps1"); foreach ($file in $files) { $errors = $null; $tokens = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { $errors | Format-List; exit 1 } }'
 
       # Static analysis of the PowerShell files beyond the AST parse above;
       # Error severity only, so style rules cannot turn the job red.
@@ -122,7 +122,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           # shellcheck disable=SC2016 # PowerShell, not Bash, expands these variables.
-          powershell -NoProfile -ExecutionPolicy Bypass -Command '$files = @("install.ps1", "packaging/chocolatey/tools/chocolateyInstall.ps1", "packaging/chocolatey/tools/chocolateyUninstall.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1"); Import-Module PSScriptAnalyzer -ErrorAction Stop; $findings = @(); foreach ($file in $files) { $findings += @(Invoke-ScriptAnalyzer -Path $file -Severity Error -ErrorAction Stop) }; if ($findings.Count) { $findings | Format-List; exit 1 }'
+          powershell -NoProfile -ExecutionPolicy Bypass -Command '$files = @("install.ps1", "packaging/chocolatey/tools/chocolateyInstall.ps1", "packaging/chocolatey/tools/chocolateyUninstall.ps1", "packaging/windows/uninstall.ps1", "tests/install-ps1.ps1", "tests/windows-lifecycle.ps1"); Import-Module PSScriptAnalyzer -ErrorAction Stop; $findings = @(); foreach ($file in $files) { $findings += @(Invoke-ScriptAnalyzer -Path $file -Severity Error -ErrorAction Stop) }; if ($findings.Count) { $findings | Format-List; exit 1 }'
 
       - name: PowerShell installer functional test
         if: runner.os == 'Windows'

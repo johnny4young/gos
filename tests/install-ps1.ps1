@@ -216,3 +216,5 @@ try {
     Remove-Item -LiteralPath $tmpRoot -Recurse -Force
   }
 }
+
+& (Join-Path $PSScriptRoot 'windows-lifecycle.ps1')

@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Windows uninstall validates ownership, removes only known installed files, and preserves unrelated contents instead of recursively deleting the target directory. Existing installations without a receipt remain supported, with their ambiguous `LICENSE` left in place.
+- Windows installs stage replacements on the destination filesystem and restore previous files on publication failure. Failed fresh installs remove partial payloads; failed restoration keeps recovery files and reports their location.
+- Windows PATH edits refresh a stale process even when the registry already contains gos, remove process entries on uninstall, and preserve registry value types and unrelated entries. Tests use registry substitutes and a disposable native Windows key.
+
 - Taking the mutation lock no longer prints bash's own `Permission denied` line when the lock directory belongs to root (the sudo escalation gos takes under a protected parent such as `/usr/local`). The `2>/dev/null` meant to silence the failed pid write sat after the redirection it was guarding, so bash reported the failure on the stderr still in effect; the write is now brace-grouped, and the sudo fallback that records the pid is unchanged. `gos completions <shell> --install` had the same ordering on an unwritable target and now prints only its own error.
 
 ### Changed

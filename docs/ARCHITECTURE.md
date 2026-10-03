@@ -121,6 +121,23 @@ resolved gos script path (`gos.sh.gos-lock/`): shells with different
 `GOS_INSTALL_DIR` values can still replace the same script. Read-only commands
 and dry runs never take a lock.
 
+The PowerShell bootstrap installs gos itself, separately from the Go activation
+transaction above. It stages incoming files and a `.gos-owned-files` receipt in
+a unique sibling directory on the target filesystem. Each replaced file is
+renamed into `backup/` before publishing its replacement; the receipt is
+published last. A caught failure restores every available backup and removes
+newly created files. An empty failed fresh-install directory is removed. If
+restoration fails, the transaction directory is retained and named in the error
+instead of deleting the remaining recovery copies. This is exception recovery,
+not an atomic multi-file swap or a guarantee against process termination.
+
+The receipt permits only `gos.sh`, `gos.cmd`, `uninstall.ps1`, and optional
+`LICENSE`. Both bootstrap and uninstaller validate it before touching existing
+files. Receipts also allow a partially removed installation to be uninstalled
+again. Pre-receipt installs are recognized by the three gos scripts, and their
+LICENSE is conservatively left unowned. Neither install nor uninstall recurses
+through unrelated target contents; link and non-file collisions are refused.
+
 ## Privilege
 
 gos never runs as root by itself. `_gos_sudo` escalates a single `mv`, `rm`,
@@ -227,6 +244,12 @@ failures, and kills gos between the two renames of a rollback, to prove the
 saga above. `tests/workflows.bash` asserts repository invariants (pinned
 actions, job timeouts, generated surfaces, doc fragments). The nightly canary
 workflow is the only thing that talks to the real go.dev.
+
+`tests/windows-lifecycle.ps1`, invoked by the PowerShell installer suite, covers
+shared-directory ownership, legacy installs, invalid receipts, link refusal,
+staging/backup/publication/receipt failures, recovery preservation, and PATH
+idempotency. PATH tests use a registry substitute on every host and a disposable
+HKCU key on Windows, never the user's `Environment` key.
 
 `scripts/validate-local.bash` runs everything CI runs; `--strict` fails when an
 optional tool CI requires is missing locally.

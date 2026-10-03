@@ -42,53 +42,128 @@ function Send-EnvironmentChange {
   }
 }
 
+function Open-UserEnvironmentKey {
+  return [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+}
+
 function Remove-UserPath {
   param([string]$Directory)
 
   # Read and write through the registry API: [Environment]::SetEnvironmentVariable
   # can flatten a REG_EXPAND_SZ user Path to REG_SZ, breaking %VAR% entries.
-  $envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
-  if ($null -eq $envKey) {
-    return $false
-  }
-
+  $envKey = Open-UserEnvironmentKey
   $normalizedDirectory = $Directory.TrimEnd('\')
+  $pathChanged = $false
   try {
-    if (@($envKey.GetValueNames()) -notcontains 'Path') {
-      return $false
+    if ($null -ne $envKey -and @($envKey.GetValueNames()) -contains 'Path') {
+      $currentPath = [string]$envKey.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+      $kind = $envKey.GetValueKind('Path')
+      $entries = @($currentPath -split ';' | Where-Object {
+        $_.TrimEnd('\') -ine $normalizedDirectory -and
+        [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ine $normalizedDirectory
+      })
+      $newPath = $entries -join ';'
+      if ($newPath -ne $currentPath) {
+        $envKey.SetValue('Path', $newPath, $kind)
+        $pathChanged = $true
+      }
     }
-    $currentPath = [string]$envKey.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-    $kind = $envKey.GetValueKind('Path')
-    if ([string]::IsNullOrWhiteSpace($currentPath)) {
-      return $false
-    }
-
-    $entries = @($currentPath -split ';' | Where-Object {
-      -not [string]::IsNullOrWhiteSpace($_) -and
-      $_.TrimEnd('\') -ine $normalizedDirectory -and
-      [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ine $normalizedDirectory
-    })
-
-    $newPath = $entries -join ';'
-    if ($newPath -ne $currentPath) {
-      $envKey.SetValue('Path', $newPath, $kind)
-      Send-EnvironmentChange
-      return $true
-    }
-
-    return $false
   } finally {
-    $envKey.Close()
+    if ($null -ne $envKey) { $envKey.Close() }
   }
+  if ($pathChanged) { Send-EnvironmentChange }
+  $env:Path = (@($env:Path -split ';' | Where-Object {
+    [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ine $normalizedDirectory
+  }) -join ';')
+  return $pathChanged
 }
 
-$resolvedInstallDir = Resolve-InstallDir -RequestedInstallDir $InstallDir
+# A receipt records only a fixed allowlist, never arbitrary paths from a file.
+# Older packages predate receipts; recognize their three gos files, but leave
+# their LICENSE alone because ownership of that generic filename is unknown.
+function Get-GosOwnedFiles {
+  param([string]$Directory)
+
+  $item = Get-Item -LiteralPath $Directory -Force
+  if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw "Refusing an unowned or linked gos directory: $Directory"
+  }
+  $required = @('gos.sh', 'gos.cmd', 'uninstall.ps1')
+  $receiptName = '.gos-owned-files'
+  $receiptPath = Join-Path $Directory $receiptName
+  $receipt = Get-Item -LiteralPath $receiptPath -Force -ErrorAction SilentlyContinue
+  if ($null -ne $receipt) {
+    if ($receipt.PSIsContainer -or ($receipt.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+      throw "Invalid gos ownership receipt: $receiptPath"
+    }
+    $lines = @(Get-Content -LiteralPath $receiptPath)
+    if ($lines.Count -lt 4 -or $lines[0] -cne 'gos-windows-install-v1') {
+      throw "Invalid gos ownership receipt: $receiptPath"
+    }
+    $files = @($lines | Select-Object -Skip 1)
+    if (@($files | Sort-Object -Unique).Count -ne $files.Count) {
+      throw "Invalid gos ownership receipt: $receiptPath"
+    }
+    foreach ($file in $files) {
+      if (@('gos.sh', 'gos.cmd', 'uninstall.ps1', 'LICENSE') -cnotcontains $file) {
+        throw "Invalid gos ownership receipt: $receiptPath"
+      }
+    }
+    foreach ($file in $required) {
+      if ($files -cnotcontains $file) { throw "Invalid gos ownership receipt: $receiptPath" }
+    }
+    $files += $receiptName
+  } else {
+    foreach ($file in $required) {
+      $path = Join-Path $Directory $file
+      $entry = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+      if ($null -eq $entry -or $entry.PSIsContainer -or ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Refusing an unowned gos directory: $Directory"
+      }
+    }
+    if (-not (Select-String -LiteralPath (Join-Path $Directory 'gos.sh') -Pattern '^GOS_VERSION="[0-9]' -Quiet) -or
+        -not (Select-String -LiteralPath (Join-Path $Directory 'gos.cmd') -SimpleMatch '%~dp0gos.sh' -Quiet) -or
+        -not (Select-String -LiteralPath (Join-Path $Directory 'uninstall.ps1') -Pattern '^function Remove-UserPath' -Quiet)) {
+      throw "Refusing an unowned gos directory: $Directory"
+    }
+    $files = $required
+  }
+  # A missing owned file is repairable/removable, but never recurse into an
+  # unexpected directory or follow a link occupying an owned filename.
+  foreach ($file in $files) {
+    $entry = Get-Item -LiteralPath (Join-Path $Directory $file) -Force -ErrorAction SilentlyContinue
+    if ($null -ne $entry -and ($entry.PSIsContainer -or ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint))) {
+      throw "Refusing a linked or non-file gos entry: $file"
+    }
+  }
+  return $files
+}
+
+$installProvider = $null
+$installDrive = $null
+$resolvedInstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath((Resolve-InstallDir -RequestedInstallDir $InstallDir), [ref]$installProvider, [ref]$installDrive)
+if ($installProvider.Name -ne 'FileSystem') { throw 'InstallDir must be a filesystem directory.' }
+if ($resolvedInstallDir.Length -gt [IO.Path]::GetPathRoot($resolvedInstallDir).Length) {
+  $resolvedInstallDir = $resolvedInstallDir.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+}
 
 if (Test-Path -LiteralPath $resolvedInstallDir) {
-  Remove-Item -LiteralPath $resolvedInstallDir -Recurse -Force
+  $ownedFiles = @(Get-GosOwnedFiles -Directory $resolvedInstallDir)
+  # Validate the whole list before deleting anything. The receipt comes last,
+  # so an interrupted removal can safely be retried even with missing files.
+  foreach ($file in $ownedFiles) {
+    $path = Join-Path $resolvedInstallDir $file
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+  }
+  if (@(Get-ChildItem -LiteralPath $resolvedInstallDir -Force).Count -eq 0) {
+    [IO.Directory]::Delete($resolvedInstallDir)
+  } else {
+    Write-Host "Preserved unrelated files in $resolvedInstallDir"
+  }
   Write-Host "Removed gos from $resolvedInstallDir"
 } else {
   Write-Host "gos install directory not found: $resolvedInstallDir"
+  return
 }
 
 if (-not $KeepPath) {

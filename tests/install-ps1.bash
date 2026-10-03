@@ -44,8 +44,7 @@ assert_file_contains install.ps1 "IsNullOrWhiteSpace(\$env:ProgramFiles)"
 assert_file_contains install.ps1 "IsNullOrWhiteSpace(\${env:ProgramFiles(x86)})"
 assert_file_contains install.ps1 "IsNullOrWhiteSpace(\$env:LocalAppData)"
 assert_file_contains install.ps1 '-TimeoutSec 60'
-# shellcheck disable=SC2016
-assert_file_contains packaging/windows/uninstall.ps1 'Remove-Item -LiteralPath $resolvedInstallDir -Recurse -Force'
+# Uninstall ownership and preservation are exercised by windows-lifecycle.ps1.
 # The uninstaller lives inside the directory it removes; it must find it from
 # there so a GOS_HOME install is removable from a fresh shell.
 # shellcheck disable=SC2016
