@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Project resolution skips `.tool-versions` files that only pin other languages, preserving `go.mod` and parent Go pins. Bash/Zsh auto-switching tracks both the unrelated manifest and the selected Go manifest so edits in the same directory invalidate the prompt cache. Incomplete explicit Go entries still fail closed.
 - Windows uninstall validates ownership, removes only known installed files, and preserves unrelated contents instead of recursively deleting the target directory. Existing installations without a receipt remain supported, with their ambiguous `LICENSE` left in place.
 - Windows installs stage replacements on the destination filesystem and restore previous files on publication failure. Failed fresh installs remove partial payloads; failed restoration keeps recovery files and reports their location.
 - Windows PATH edits refresh a stale process even when the registry already contains gos, remove process entries on uninstall, and preserve registry value types and unrelated entries. Tests use registry substitutes and a disposable native Windows key.

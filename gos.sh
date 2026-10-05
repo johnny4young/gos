@@ -2028,13 +2028,14 @@ _gos_read_tool_versions_file() {
     version="${2:-}"
     case "$tool" in
       go | golang)
-        [ -n "$version" ] || continue
+        [ -n "$version" ] || return 2
         version="${version#go}"
         printf '%s\n' "$version"
         return 0
         ;;
     esac
-  done <"$file"
+  done <"$file" || return 2
+  # A readable multi-tool manifest without Go is not a Go version pin.
   return 1
 }
 
@@ -2078,9 +2079,14 @@ _gos_resolve_project_version() {
 
     candidate="${dir%/}/.tool-versions"
     if [ -f "$candidate" ]; then
-      version=$(_gos_read_tool_versions_file "$candidate") || return 1
-      printf '%s|%s\n' "$version" "$candidate"
-      return 0
+      if version=$(_gos_read_tool_versions_file "$candidate"); then
+        printf '%s|%s\n' "$version" "$candidate"
+        return 0
+      else
+        # Status 1 means no Go entry: keep looking in go.mod and parents.
+        # An unreadable file or explicit incomplete Go entry must still fail.
+        [ "$?" -eq 1 ] || return 1
+      fi
     fi
 
     candidate="${dir%/}/go.mod"
@@ -4008,14 +4014,26 @@ __gos_auto_switch() {
   # directory still invalidates the cached PATH decision.
   local gos_version gos_bin gos_key gos_manifest="" gos_manifest_line
   local gos_dir="$PWD" gos_candidate gos_installed="$GOS_VERSIONS_DIR"
+  local gos_has_pin gos_tool_pattern='^[[:space:]]*(go|golang)([[:space:]]|$)'
   while :; do
     for gos_candidate in "${gos_dir%/}/.go-version" "${gos_dir%/}/.tool-versions" "${gos_dir%/}/go.mod"; do
       if [ -f "$gos_candidate" ]; then
-        gos_manifest="${gos_candidate}"$'\n'
-        while IFS= read -r gos_manifest_line || [ -n "$gos_manifest_line" ]; do
+        gos_manifest="${gos_manifest}${gos_candidate}"$'\n'
+        gos_has_pin=true
+        [ "${gos_candidate##*/}" != ".tool-versions" ] || gos_has_pin=false
+        if while IFS= read -r gos_manifest_line || [ -n "$gos_manifest_line" ]; do
           gos_manifest="${gos_manifest}${gos_manifest_line}"$'\n'
-        done <"$gos_candidate" 2>/dev/null || gos_manifest="unreadable:${gos_candidate}"
-        break 2
+          if [[ $gos_manifest_line =~ $gos_tool_pattern ]]; then
+            gos_has_pin=true
+          fi
+        done <"$gos_candidate" 2>/dev/null; then
+          # Include unrelated .tool-versions files in the snapshot, but keep
+          # following the resolver to the actual Go pin. Either can change.
+          [ "$gos_has_pin" = false ] || break 2
+        else
+          gos_manifest="${gos_manifest}unreadable:${gos_candidate}"
+          break 2
+        fi
       fi
     done
     [ "$gos_dir" = "/" ] && break

@@ -137,6 +137,36 @@ GOS_TEST_VERSIONS_DIR="${case_dir}/versions" run_gos "$case_dir" bash "$script" 
 [ "$output" = "1.21" ] || fail "__project-version should keep an ambiguous bare minor, got: ${output}"
 pass "__project-version resolves a bare go.mod minor against installed versions"
 
+# Multi-language repositories commonly pin Ruby/Node/Python with asdf while
+# Go comes from go.mod or a parent pin. A manifest without Go is not a pin.
+case_dir="${test_root}/project-tool-versions-fallback"
+mkdir -p "${case_dir}/project/child"
+printf 'nodejs 24.0.0\npython 3.13.0\n' >"${case_dir}/project/.tool-versions"
+printf 'module example.com/multitool\n\ngo 1.20\ntoolchain go1.21.6\n' >"${case_dir}/project/go.mod"
+run_gos "$case_dir" bash "$script" __project-version "${case_dir}/project"
+assert_status 0 "$status" 'non-Go tool manifest fallback' "$output"
+[ "$output" = "1.21.6" ] || fail "non-Go tool manifest masked go.mod: ${output}"
+printf 'ruby 3.3.0\n' >"${case_dir}/project/child/.tool-versions"
+run_gos "$case_dir" bash "$script" __project-version "${case_dir}/project/child"
+[ "$output" = "1.21.6" ] || fail "non-Go tool manifest masked a parent Go pin: ${output}"
+printf 'golang 1.20.0\n' >"${case_dir}/project/.tool-versions"
+run_gos "$case_dir" bash "$script" __project-version "${case_dir}/project"
+[ "$output" = "1.20.0" ] || fail "explicit Go tool version lost precedence: ${output}"
+printf 'golang\n' >"${case_dir}/project/.tool-versions"
+run_gos "$case_dir" bash "$script" use --print "${case_dir}/project"
+assert_nonzero_status "$status" 'incomplete Go entry must not fall back' "$output"
+printf 'ruby 3.3.0\n' >"${case_dir}/project/.tool-versions"
+chmod 000 "${case_dir}/project/.tool-versions"
+if [ ! -r "${case_dir}/project/.tool-versions" ]; then
+  run_gos "$case_dir" bash "$script" use --print "${case_dir}/project"
+  assert_nonzero_status "$status" 'unreadable tool manifest must not fall back' "$output"
+else
+  pass 'unreadable tool manifest check skipped: this host can read mode 000 files'
+fi
+chmod 600 "${case_dir}/project/.tool-versions"
+[ ! -s "${case_dir}/urls.log" ] || fail 'manifest fallback must remain offline'
+pass 'project resolution ignores unrelated tool versions but preserves explicit Go pins'
+
 case_dir="${test_root}/env-auto"
 mkdir -p "${case_dir}/project" "${case_dir}/missing" "${case_dir}/versions/go1.21.6/bin" "${case_dir}/versions/go1.20.0/bin" "${case_dir}/bin"
 printf '1.21.6\n' >"${case_dir}/project/.go-version"
@@ -190,6 +220,20 @@ rm .go-version
 printf 'module example.com/edit\n\ngo 1.21\n' >go.mod
 __gos_auto_switch
 case "$GOS_AUTO_BIN" in */go1.21.6/bin) ;; *) exit 12 ;; esac
+# An unrelated asdf file must not hide the go.mod used by the resolver or
+# keep its contents out of the prompt cache's invalidation snapshot.
+printf 'ruby 3.3.0\n' >.tool-versions
+__gos_auto_switch
+case "$GOS_AUTO_BIN" in */go1.21.6/bin) ;; *) exit 16 ;; esac
+printf 'module example.com/edit\n\ngo 1.20\n' >go.mod
+__gos_auto_switch
+case "$GOS_AUTO_BIN" in */go1.20.0/bin) ;; *) exit 17 ;; esac
+printf 'golang 1.21.6\n' >.tool-versions
+__gos_auto_switch
+case "$GOS_AUTO_BIN" in */go1.21.6/bin) ;; *) exit 18 ;; esac
+rm .tool-versions
+printf 'module example.com/edit\n\ngo 1.21\n' >go.mod
+__gos_auto_switch
 # Installing a second matching patch makes this bare minor ambiguous.
 mkdir -p "$GOS_VERSIONS_DIR/go1.21.7/bin"
 cat "$GOS_VERSIONS_DIR/go1.21.6/bin/go" >"$GOS_VERSIONS_DIR/go1.21.7/bin/go"
@@ -203,6 +247,21 @@ printf 'module example.com/edit\n\ngo 1.20\n' >go.mod
 __gos_auto_switch
 case "$GOS_AUTO_BIN" in */go1.20.0/bin) ;; *) exit 13 ;; esac
 rm go.mod
+__gos_auto_switch
+[ -z "${GOS_AUTO_BIN:-}" ]
+# A child manifest with no Go must also observe edits to a parent Go pin.
+mkdir -p nested
+printf 'ruby 3.3.0\n' >nested/.tool-versions
+printf '1.21.6\n' >.go-version
+cd nested
+__gos_auto_switch
+case "$GOS_AUTO_BIN" in */go1.21.6/bin) ;; *) exit 19 ;; esac
+printf '1.20.0\n' >../.go-version
+__gos_auto_switch
+case "$GOS_AUTO_BIN" in */go1.20.0/bin) ;; *) exit 20 ;; esac
+cd ..
+rm .go-version nested/.tool-versions
+rmdir nested
 __gos_auto_switch
 [ -z "${GOS_AUTO_BIN:-}" ]
 if [ -n "${ZSH_VERSION:-}" ]; then
