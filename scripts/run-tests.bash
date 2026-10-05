@@ -10,15 +10,16 @@ set -euo pipefail
 # (comma-separated lists of linux, macos, windows) and the runner reports the
 # skip instead of failing.
 #
-# Usage: scripts/run-tests.bash [--jobs N|auto] [--os linux|macos|windows] [--list] [suite ...]
+# Usage: scripts/run-tests.bash [--jobs N|auto] [--os linux|macos|windows] [--list] [--summary PATH] [suite ...]
 # A suite may be given as a path (tests/foo.bash) or a bare name (foo).
 
 usage() {
-  printf 'Usage: %s [--jobs N|auto] [--os linux|macos|windows] [--list] [suite ...]\n' "${0##*/}" >&2
+  printf 'Usage: %s [--jobs N|auto] [--os linux|macos|windows] [--list] [--summary PATH] [suite ...]\n' "${0##*/}" >&2
 }
 
 jobs="auto"
 list_only=0
+summary_path=""
 target_os=""
 requested=()
 while [ "$#" -gt 0 ]; do
@@ -37,6 +38,14 @@ while [ "$#" -gt 0 ]; do
         exit 2
       }
       target_os="$2"
+      shift 2
+      ;;
+    --summary)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || {
+        usage
+        exit 2
+      }
+      summary_path="$2"
       shift 2
       ;;
     --list)
@@ -104,8 +113,8 @@ fi
 discover_suites() {
   local path
   {
-    git -c core.quotePath=false ls-files 'tests/*.bash' 2>/dev/null || ls tests/*.bash
-  } | while IFS= read -r path; do
+    git ls-files -z 'tests/*.bash' 2>/dev/null || printf '%s\0' tests/*.bash
+  } | while IFS= read -r -d '' path; do
     case "${path##*/}" in
       lib*.bash) continue ;;
     esac
@@ -210,25 +219,134 @@ fi
 log_dir="$(mktemp -d)"
 trap 'rm -rf "$log_dir"' EXIT
 
+# Opt-in measurements use Bash's portable elapsed-seconds clock. Whole-second
+# resolution is explicit; this observes the existing waves, not a new scheduler.
+summary_count=0
+summary_paths=()
+summary_states=()
+summary_durations=()
+summary_statuses=()
+summary_reasons=()
+record_suite() {
+  [ -n "$summary_path" ] || return 0
+  summary_paths[summary_count]="$1"
+  summary_states[summary_count]="$2"
+  summary_durations[summary_count]="$3"
+  summary_statuses[summary_count]="$4"
+  summary_reasons[summary_count]="$5"
+  summary_count=$((summary_count + 1))
+}
+
 run_suite() {
-  # Writes the suite's combined output to its log and its status to a marker.
-  local path="$1" name status
+  # Writes the suite's combined output and status. No stdin: a suite must
+  # never consume the runner's input. Measurements never change pass criteria.
+  local path="$1" name status started
   name="$path"
   mkdir -p "${log_dir}/${name%/*}"
   status=0
-  # No stdin: a suite that reads it would otherwise eat the runner's own
-  # input (and CI has none anyway).
+  started=$SECONDS
   bash "$path" </dev/null >"${log_dir}/${name}.log" 2>&1 || status=$?
   printf '%s\n' "$status" >"${log_dir}/${name}.status"
+  if [ -n "$summary_path" ]; then
+    printf '%s\n' "$((SECONDS - started))" >"${log_dir}/${name}.duration"
+  fi
 }
 
 report_suite() {
-  local path="$1" name status
+  local path="$1" name status duration="null"
   name="$path"
-  status="$(cat "${log_dir}/${name}.status")" || return 1
+  if ! status="$(cat "${log_dir}/${name}.status")"; then
+    record_suite "$path" failed null null missing-status
+    return 1
+  fi
+  case "$status" in
+    '' | *[!0-9]*)
+      record_suite "$path" failed null null invalid-status
+      return 1
+      ;;
+  esac
+  if [ -n "$summary_path" ]; then
+    if ! duration="$(cat "${log_dir}/${name}.duration")"; then
+      record_suite "$path" failed null "$status" missing-duration
+      return 1
+    fi
+    case "$duration" in
+      '' | *[!0-9]*)
+        record_suite "$path" failed null "$status" invalid-duration
+        return 1
+        ;;
+    esac
+  fi
   printf '=== %s (%s) ===\n' "$path" "$([ "$status" -eq 0 ] && echo ok || echo "FAILED, status ${status}")"
-  cat "${log_dir}/${name}.log" || return 1
+  if ! cat "${log_dir}/${name}.log"; then
+    record_suite "$path" failed "$duration" "$status" missing-log
+    return 1
+  fi
+  if [ "$status" -eq 0 ]; then
+    record_suite "$path" passed "$duration" "$status" ""
+  else
+    record_suite "$path" failed "$duration" "$status" child-exit
+  fi
   [ "$status" -eq 0 ]
+}
+
+# JSON quoting uses Bash builtins, including ASCII control characters, so the
+# summary introduces no jq/Python/runtime dependency and preserves literal names.
+json_string() {
+  local value="$1" i char code LC_ALL=C
+  printf '"'
+  for ((i = 0; i < ${#value}; i++)); do
+    char="${value:i:1}"
+    case "$char" in
+      '"') printf '\\"' ;;
+      \\) printf '%s%s' "$char" "$char" ;;
+      *)
+        printf -v code '%d' "'$char"
+        if [ "$code" -lt 32 ]; then
+          printf '\\u%04x' "$code"
+        else
+          printf '%s' "$char"
+        fi
+        ;;
+    esac
+  done
+  printf '"'
+}
+
+write_summary() {
+  [ -n "$summary_path" ] || return 0
+  local head host temp i comma="" dirty=false
+  head="$(git rev-parse HEAD 2>/dev/null)" || head=""
+  if [ -n "$head" ] && ! git diff --quiet HEAD --; then dirty=true; fi
+  host="$(uname -s)"
+  mkdir -p "$(dirname "$summary_path")" || return 1
+  temp="$(mktemp "${summary_path}.XXXXXX")" || return 1
+  if ! {
+    printf '{"schemaVersion":1,"os":'
+    json_string "$target_os"
+    printf ',"hostOs":'
+    json_string "$host"
+    printf ',"shell":'
+    json_string "$BASH_VERSION"
+    printf ',"head":'
+    if [ -n "$head" ]; then json_string "$head"; else printf null; fi
+    printf ',"dirty":%s,"jobs":%s,"durationUnit":"seconds","suites":[' "$dirty" "$jobs"
+    for ((i = 0; i < summary_count; i++)); do
+      printf '%s{"path":' "$comma"
+      json_string "${summary_paths[i]}"
+      printf ',"status":'
+      json_string "${summary_states[i]}"
+      printf ',"durationSeconds":%s,"exitStatus":%s,"reason":' "${summary_durations[i]}" "${summary_statuses[i]}"
+      json_string "${summary_reasons[i]}"
+      printf '}'
+      comma=,
+    done
+    printf ']}\n'
+  } >"$temp"; then
+    rm -f "$temp"
+    return 1
+  fi
+  mv "$temp" "$summary_path"
 }
 
 to_run=()
@@ -239,6 +357,7 @@ while IFS= read -r path; do
   if [ -n "$reason" ]; then
     printf '=== %s (skipped on %s: %s) ===\n' "$path" "$target_os" "$reason"
     skipped=$((skipped + 1))
+    record_suite "$path" skipped null null "$reason"
     continue
   fi
   to_run=(${to_run[@]:+"${to_run[@]}"} "$path")
@@ -282,6 +401,10 @@ else
   flush_wave
 fi
 
+if ! write_summary; then
+  printf 'not ok - could not write test summary: %s\n' "$summary_path" >&2
+  exit 1
+fi
 if [ -n "$failed" ]; then
   printf 'not ok - test suites failed: %s\n' "$failed" >&2
   exit 1

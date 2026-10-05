@@ -144,6 +144,60 @@ run_runner --list invalid
 assert_status 2 "$status" 'tracked suite missing on disk' "$output"
 pass 'runner rejects malformed metadata and missing suites instead of reporting green'
 
+# Opt-in summaries preserve every selected result in deterministic order and
+# identify the exact interpreter/source rather than claiming scheduler savings.
+for mode in 1 2; do
+  summary="${test_root}/summary-${mode}.json"
+  run_runner --jobs "$mode" --summary "$summary" pass fail signal 'literal [x]' skipped
+  assert_status 1 "$status" "summary failure jobs=${mode}" "$output"
+  ruby -rjson -e '
+    report = JSON.parse(File.read(ARGV[0]))
+    abort "missing metadata" unless report.values_at("schemaVersion", "os", "hostOs", "durationUnit") == [1, "linux", ARGV[1], "seconds"]
+    abort "missing shell/head metadata" unless report["shell"].is_a?(String) && report.key?("head") && report.key?("dirty")
+    suites = report.fetch("suites")
+    states = suites.to_h { |suite| [suite.fetch("path"), suite.fetch("status")] }
+    abort "incorrect states" unless states == {"tests/pass.bash"=>"passed", "tests/fail.bash"=>"failed", "tests/signal.bash"=>"failed", "tests/literal [x].bash"=>"passed", "tests/skipped.bash"=>"skipped"}
+    abort "incorrect exit status" unless suites.find { |suite| suite["path"] == "tests/fail.bash" }["exitStatus"] == 7
+    abort "signal was lost" unless suites.find { |suite| suite["path"] == "tests/signal.bash" }["exitStatus"] > 128
+    suites.each do |suite|
+      duration = suite.fetch("durationSeconds")
+      abort "invalid duration" unless suite["status"] == "skipped" ? duration.nil? : duration.is_a?(Integer) && duration >= 0
+    end
+  ' "$summary" "$(uname -s)" || fail 'summary preserves metadata, statuses, signals and timing'
+done
+# Check escaped literal names and a duration long enough for second resolution.
+quoted='quote" and \name'
+printf '#!/usr/bin/env bash\nsleep 1\n' >"${fixture}/tests/${quoted}.bash"
+git -C "$fixture" add "tests/${quoted}.bash"
+run_runner --jobs 1 --summary "${test_root}/quoted.json" "$quoted"
+assert_status 0 "$status" 'quoted summary' "$output"
+ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").fetch(0); abort "name or timing lost" unless suite["path"] == ARGV[1] && suite["durationSeconds"] >= 1' "${test_root}/quoted.json" "tests/${quoted}.bash" || fail 'JSON quotes/backslashes and durations'
+for suffix in status log duration; do
+  GOS_TEST_RUNNER_REAL_CAT="$real_cat" GOS_TEST_RUNNER_FAIL_READ="$suffix" \
+    PATH="${test_root}/tools:${PATH}" run_runner --jobs 2 --summary "${test_root}/missing-${suffix}.json" pass 'literal [x]'
+  assert_status 1 "$status" "summary unreadable ${suffix}" "$output"
+  ruby -rjson -e 'report = JSON.parse(File.read(ARGV[0])); abort "missing failures" unless report["suites"].length == 2 && report["suites"].all? { |suite| suite["status"] == "failed" && suite["reason"].start_with?("missing-") }' "${test_root}/missing-${suffix}.json" || fail 'missing measurement/status/log fails closed in summary'
+done
+cat >"${test_root}/tools/cat" <<'TOOL'
+#!/usr/bin/env bash
+case "${1:-}" in
+  *."$GOS_TEST_RUNNER_FAIL_READ") printf 'corrupt\n'; exit 0 ;;
+esac
+exec "$GOS_TEST_RUNNER_REAL_CAT" "$@"
+TOOL
+for suffix in status duration; do
+  GOS_TEST_RUNNER_REAL_CAT="$real_cat" GOS_TEST_RUNNER_FAIL_READ="$suffix" \
+    PATH="${test_root}/tools:${PATH}" run_runner --jobs 1 --summary "${test_root}/corrupt-${suffix}.json" pass
+  assert_status 1 "$status" "summary corrupt ${suffix}" "$output"
+  ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").fetch(0); abort "corruption accepted" unless suite["status"] == "failed" && suite["reason"].start_with?("invalid-")' "${test_root}/corrupt-${suffix}.json" || fail 'corrupt markers fail closed'
+done
+run_runner --summary
+assert_status 2 "$status" 'missing summary argument' "$output"
+run_runner --summary "${test_root}/summary-${mode}.json/child" pass
+assert_status 1 "$status" 'unwritable summary destination' "$output"
+assert_contains "$output" 'could not write test summary' 'summary write fails closed'
+pass 'optional summaries preserve serial/parallel outcomes, timings, metadata and failure evidence'
+
 # Exported sources have no git metadata; they still discover suites on disk.
 exported="${test_root}/exported"
 mkdir -p "${exported}/scripts" "${exported}/tests"

@@ -108,7 +108,7 @@ jobs:
           ln -s /bin/bash "${RUNNER_TEMP}/bash32/bash"
           export PATH="${RUNNER_TEMP}/bash32:${PATH}"
           bash --version | head -n 1 | grep -F 'version 3.2'
-          bash scripts/run-tests.bash --jobs 2
+          bash scripts/run-tests.bash --jobs 2 --summary "${RUNNER_TEMP}/test-summary-bash32.json"
 
       - name: PowerShell syntax
         if: runner.os == 'Windows'
@@ -133,7 +133,7 @@ jobs:
       # says where it can run, so a new suite needs no workflow change.
       - name: Run test suites
         run: |
-          bash scripts/run-tests.bash --jobs 2
+          bash scripts/run-tests.bash --jobs 2 --summary "${RUNNER_TEMP}/test-summary-current.json"
 
       - name: Smoke gos commands
         run: |
@@ -149,6 +149,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           fish --no-config --no-execute completions/gos.fish
+
+      - name: Upload suite observations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: suite-observations-${{ matrix.os }}
+          path: ${{ runner.temp }}/test-summary-*.json
+          if-no-files-found: warn
 
   action:
     name: Action (${{ matrix.os }})
