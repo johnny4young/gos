@@ -97,6 +97,17 @@ jobs:
           command -v python3
           python3 --version
 
+      - name: Require JSON assertion parser
+        run: |
+          if command -v jq >/dev/null 2>&1; then
+            jq --version
+          elif command -v python3 >/dev/null 2>&1; then
+            python3 --version
+          else
+            echo 'JSON assertion validation requires jq or python3 on every CI OS.' >&2
+            exit 1
+          fi
+
       # `shell: bash` resolves to Homebrew's bash 5 on the macOS image, so the
       # bash 3.2 floor gos promises (stock macOS) would otherwise only ever be
       # exercised on contributors' Macs. Put the system bash first on PATH so

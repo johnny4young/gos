@@ -510,6 +510,9 @@ assert(bash_syntax["run"].to_s.include?("git ls-files -z '*.sh' '*.bash' | xargs
 tracked_powershell_files.each do |path|
   assert(smoke_runs.include?(path), "smoke job PowerShell syntax must cover tracked PowerShell file #{path}")
 end
+json_parser_step = step_named(smoke_steps, "Require JSON assertion parser")
+assert(json_parser_step && !json_parser_step.key?("if"), "every smoke OS, including Windows, must require a JSON assertion parser")
+assert(json_parser_step["run"].include?("command -v jq") && json_parser_step["run"].include?("command -v python3") && json_parser_step["run"].include?("exit 1"), "JSON assertions must fail CI prerequisites when no parser exists")
 summary_upload = step_named(smoke_steps, "Upload suite observations")
 assert(summary_upload && summary_upload["if"] == "always()", "suite summaries must survive failed suites")
 assert(summary_upload.dig("with", "name") == "suite-observations-${{ matrix.os }}", "summary artifact names must distinguish OS jobs")

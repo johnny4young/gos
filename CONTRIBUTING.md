@@ -136,3 +136,11 @@ status, duration or log evidence fails closed. Exported sources have a null HEAD
 CI retains separate current-Bash and native macOS Bash 3.2 observations.
 Compare unchanged source/fixtures and matching runner/interpreter classes before
 proposing scheduling changes; these coarse measurements are not a claimed saving.
+
+A suite with a skipped JSON assertion is reported as `partial`, separately from
+fully passed suites and file-level OS skips. The optional summary includes
+`skippedAssertions`; a nonzero child exit remains `failed`. Local runs may omit
+optional parsers, while every CI OS claiming JSON helper assertions requires
+`jq` or `python3`; full schema validation still requires Python on its existing
+non-Windows lanes. The Windows-excluded schema suite stays excluded. Product
+execution still does not require either parser.

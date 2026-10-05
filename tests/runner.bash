@@ -198,6 +198,45 @@ assert_status 1 "$status" 'unwritable summary destination' "$output"
 assert_contains "$output" 'could not write test summary' 'summary write fails closed'
 pass 'optional summaries preserve serial/parallel outcomes, timings, metadata and failure evidence'
 
+# A successful child with missing assertion prerequisites is partial coverage,
+# while a failing child stays failed even if it also records a skipped assertion.
+cp "${repo_root}/tests/lib.bash" "${fixture}/tests/lib.bash"
+cat >"${fixture}/tests/partial.bash" <<'SUITE'
+#!/usr/bin/env bash
+. "${0%/*}/lib.bash"
+PATH=/no-parsers assert_json '{malformed' 'optional local parser'
+SUITE
+cat >"${fixture}/tests/partial-fail.bash" <<'SUITE'
+#!/usr/bin/env bash
+. "${0%/*}/lib.bash"
+PATH=/no-parsers assert_json '{malformed' 'optional local parser'
+exit 7
+SUITE
+git -C "$fixture" add tests
+for mode in 1 2; do
+  summary="${test_root}/partial-${mode}.json"
+  run_runner --jobs "$mode" --summary "$summary" partial pass skipped
+  assert_status 0 "$status" "partial local run jobs=${mode}" "$output"
+  assert_contains "$output" 'tests/partial.bash (partial, 1 skipped assertion(s))' 'partial is visible'
+  assert_contains "$output" '1 test suite(s) passed, 1 partial (skipped assertions), 1 skipped' 'partial is not counted as passed'
+  ruby -rjson -e 'report = JSON.parse(File.read(ARGV[0])); suite = report.fetch("suites").find { |row| row["path"] == "tests/partial.bash" }; abort "skip lost" unless suite["status"] == "partial" && suite["skippedAssertions"] == 1 && suite["exitStatus"] == 0' "$summary" || fail 'summary distinguishes assertion skips from OS skips'
+  run_runner --jobs "$mode" --summary "$summary" partial-fail pass
+  assert_status 1 "$status" "failed partial run jobs=${mode}" "$output"
+  ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").find { |row| row["path"] == "tests/partial-fail.bash" }; abort "failure weakened" unless suite["status"] == "failed" && suite["exitStatus"] == 7 && suite["skippedAssertions"] == 1' "$summary" || fail 'assertion skips never hide child failure'
+  run_runner --jobs "$mode" partial
+  assert_status 0 "$status" 'partial reporting without summary' "$output"
+  assert_contains "$output" '0 test suite(s) passed, 1 partial' 'ordinary local runs also distinguish skips'
+done
+cat >"${fixture}/tests/invalid-skip-marker.bash" <<'SUITE'
+#!/usr/bin/env bash
+printf 'corrupt\n' >"$GOS_TEST_ASSERTION_SKIP_FILE"
+SUITE
+git -C "$fixture" add tests/invalid-skip-marker.bash
+run_runner --summary "${test_root}/invalid-skip-marker.json" invalid-skip-marker pass
+assert_status 1 "$status" 'corrupt assertion skip marker' "$output"
+ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").find { |row| row["path"] == "tests/invalid-skip-marker.bash" }; abort "corrupt skip evidence accepted" unless suite["status"] == "failed" && suite["reason"] == "invalid-assertion-skip-marker"' "${test_root}/invalid-skip-marker.json" || fail 'corrupt skip marker fails closed without losing suite evidence'
+pass 'missing optional parsers report partial coverage without weakening failures or OS exclusions'
+
 # Exported sources have no git metadata; they still discover suites on disk.
 exported="${test_root}/exported"
 mkdir -p "${exported}/scripts" "${exported}/tests"

@@ -227,6 +227,8 @@ summary_states=()
 summary_durations=()
 summary_statuses=()
 summary_reasons=()
+summary_assertion_skips=()
+suite_state="passed"
 record_suite() {
   [ -n "$summary_path" ] || return 0
   summary_paths[summary_count]="$1"
@@ -234,6 +236,7 @@ record_suite() {
   summary_durations[summary_count]="$3"
   summary_statuses[summary_count]="$4"
   summary_reasons[summary_count]="$5"
+  summary_assertion_skips[summary_count]="${6:-0}"
   summary_count=$((summary_count + 1))
 }
 
@@ -245,15 +248,25 @@ run_suite() {
   mkdir -p "${log_dir}/${name%/*}"
   status=0
   started=$SECONDS
-  bash "$path" </dev/null >"${log_dir}/${name}.log" 2>&1 || status=$?
+  GOS_TEST_ASSERTION_SKIP_FILE="${log_dir}/${name}.assertion-skips" bash "$path" </dev/null >"${log_dir}/${name}.log" 2>&1 || status=$?
   printf '%s\n' "$status" >"${log_dir}/${name}.status"
   if [ -n "$summary_path" ]; then
     printf '%s\n' "$((SECONDS - started))" >"${log_dir}/${name}.duration"
   fi
 }
 
+count_assertion_skips() {
+  local file="$1" count=0 marker
+  while IFS= read -r marker || [ -n "$marker" ]; do
+    [ "$marker" = skipped ] || return 1
+    count=$((count + 1))
+  done <"$file" || return 1
+  printf '%s' "$count"
+}
+
 report_suite() {
-  local path="$1" name status duration="null"
+  local path="$1" name status duration="null" assertion_skips=0 label
+  suite_state="failed"
   name="$path"
   if ! status="$(cat "${log_dir}/${name}.status")"; then
     record_suite "$path" failed null null missing-status
@@ -277,15 +290,28 @@ report_suite() {
         ;;
     esac
   fi
-  printf '=== %s (%s) ===\n' "$path" "$([ "$status" -eq 0 ] && echo ok || echo "FAILED, status ${status}")"
+  if [ -f "${log_dir}/${name}.assertion-skips" ]; then
+    if ! assertion_skips="$(count_assertion_skips "${log_dir}/${name}.assertion-skips")"; then
+      record_suite "$path" failed "$duration" "$status" invalid-assertion-skip-marker
+      return 1
+    fi
+  fi
+  label="FAILED, status ${status}"
+  if [ "$status" -eq 0 ]; then
+    label=ok
+    if [ "$assertion_skips" -gt 0 ]; then label="partial, ${assertion_skips} skipped assertion(s)"; fi
+  fi
+  printf '=== %s (%s) ===\n' "$path" "$label"
   if ! cat "${log_dir}/${name}.log"; then
     record_suite "$path" failed "$duration" "$status" missing-log
     return 1
   fi
   if [ "$status" -eq 0 ]; then
-    record_suite "$path" passed "$duration" "$status" ""
+    suite_state=passed
+    if [ "$assertion_skips" -gt 0 ]; then suite_state=partial; fi
+    record_suite "$path" "$suite_state" "$duration" "$status" "" "$assertion_skips"
   else
-    record_suite "$path" failed "$duration" "$status" child-exit
+    record_suite "$path" failed "$duration" "$status" child-exit "$assertion_skips"
   fi
   [ "$status" -eq 0 ]
 }
@@ -336,7 +362,7 @@ write_summary() {
       json_string "${summary_paths[i]}"
       printf ',"status":'
       json_string "${summary_states[i]}"
-      printf ',"durationSeconds":%s,"exitStatus":%s,"reason":' "${summary_durations[i]}" "${summary_statuses[i]}"
+      printf ',"durationSeconds":%s,"exitStatus":%s,"skippedAssertions":%s,"reason":' "${summary_durations[i]}" "${summary_statuses[i]}" "${summary_assertion_skips[i]}"
       json_string "${summary_reasons[i]}"
       printf '}'
       comma=,
@@ -364,12 +390,13 @@ while IFS= read -r path; do
 done <<<"$selected"
 
 passed=0
+partial=0
 failed=""
 if [ "$jobs" -eq 1 ]; then
   for path in ${to_run[@]:+"${to_run[@]}"}; do
     run_suite "$path"
     if report_suite "$path"; then
-      passed=$((passed + 1))
+      if [ "$suite_state" = partial ]; then partial=$((partial + 1)); else passed=$((passed + 1)); fi
     else
       failed="${failed}${path} "
     fi
@@ -387,7 +414,7 @@ else
     wait
     for path in "${wave[@]}"; do
       if report_suite "$path"; then
-        passed=$((passed + 1))
+        if [ "$suite_state" = partial ]; then partial=$((partial + 1)); else passed=$((passed + 1)); fi
       else
         failed="${failed}${path} "
       fi
@@ -409,4 +436,8 @@ if [ -n "$failed" ]; then
   printf 'not ok - test suites failed: %s\n' "$failed" >&2
   exit 1
 fi
-printf 'ok - %s test suite(s) passed, %s skipped on %s\n' "$passed" "$skipped" "$target_os"
+if [ "$partial" -gt 0 ]; then
+  printf 'ok - %s test suite(s) passed, %s partial (skipped assertions), %s skipped on %s\n' "$passed" "$partial" "$skipped" "$target_os"
+else
+  printf 'ok - %s test suite(s) passed, %s skipped on %s\n' "$passed" "$skipped" "$target_os"
+fi
