@@ -124,3 +124,7 @@ to enforce that floor.
 
 Participation in this project is covered by the
 [Code of Conduct](CODE_OF_CONDUCT.md).
+
+CI cancels superseded runs for the same workflow and PR/ref. Separate PRs and
+main remain independent, including stacked PRs targeting non-default branches.
+This does not change the serialized, non-cancelling live canary or release lane.

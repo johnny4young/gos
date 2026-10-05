@@ -6,6 +6,11 @@ on:
     branches:
       - main
 
+# Superseded review/main feedback must not occupy the current head's runners.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

@@ -432,6 +432,15 @@ assert(ci_on.dig("push", "branches")&.include?("main"), "CI must run on pushes t
 assert(ci.dig("permissions", "contents") == "read", "CI must use read-only contents permission")
 assert(ci.dig("defaults", "run", "shell") == "bash", "CI must default to bash shell")
 
+assert(ci.dig("concurrency", "group") == "ci-${{ github.workflow }}-${{ github.ref }}", "CI concurrency must isolate workflows and each PR/ref")
+assert(ci.dig("concurrency", "cancel-in-progress") == true, "CI must cancel superseded runs")
+assert(!(ci_on["pull_request"] || {}).to_h.key?("branches"), "CI must also qualify non-default stacked PR bases")
+# Model the exact configured group: revisions share a PR ref, other PRs do not.
+ci_group = ->(workflow_name, ref) { "ci-#{workflow_name}-#{ref}" }
+assert(ci_group.call("CI", "refs/pull/45/merge") == ci_group.call("CI", "refs/pull/45/merge"), "replacement PR commits must share a group")
+assert(ci_group.call("CI", "refs/pull/45/merge") != ci_group.call("CI", "refs/pull/46/merge"), "different PRs must remain independent")
+assert(ci_group.call("CI", "refs/heads/main") != ci_group.call("CI", "refs/pull/45/merge"), "main and PR feedback must remain independent")
+
 ci_jobs = ci.fetch("jobs") { fail!("CI must define jobs") }
 %w[shellcheck shfmt smoke workflow-validation actionlint].each do |job|
   assert(ci_jobs.key?(job), "CI must define #{job} job")
