@@ -165,13 +165,20 @@ for mode in 1 2; do
     end
   ' "$summary" "$(uname -s)" || fail 'summary preserves metadata, statuses, signals and timing'
 done
-# Check escaped literal names and a duration long enough for second resolution.
+# JSON string quoting must be tested without creating filenames Windows forbids.
+# Exercise the exact runner helper with an argument string, then use a portable
+# filename for the duration observation.
+helper="${test_root}/json-string.bash"
+sed -n '/^json_string() {/,/^}/p' "${fixture}/scripts/run-tests.bash" >"$helper"
 quoted='quote" and \name'
-printf '#!/usr/bin/env bash\nsleep 1\n' >"${fixture}/tests/${quoted}.bash"
-git -C "$fixture" add "tests/${quoted}.bash"
-run_runner --jobs 1 --summary "${test_root}/quoted.json" "$quoted"
-assert_status 0 "$status" 'quoted summary' "$output"
-ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").fetch(0); abort "name or timing lost" unless suite["path"] == ARGV[1] && suite["durationSeconds"] >= 1' "${test_root}/quoted.json" "tests/${quoted}.bash" || fail 'JSON quotes/backslashes and durations'
+# shellcheck disable=SC2016 # The child shell expands its own arguments.
+quoted_json="$("$BASH" -c '. "$1"; json_string "$2"' _ "$helper" "$quoted")"
+ruby -rjson -e 'abort "JSON quoting lost" unless JSON.parse(ARGV[0]) == ARGV[1]' "$quoted_json" "$quoted" || fail 'JSON quotes and backslashes'
+printf '#!/usr/bin/env bash\nsleep 1\n' >"${fixture}/tests/duration.bash"
+git -C "$fixture" add tests/duration.bash
+run_runner --jobs 1 --summary "${test_root}/duration.json" duration
+assert_status 0 "$status" 'duration summary' "$output"
+ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").fetch(0); abort "timing lost" unless suite["path"] == "tests/duration.bash" && suite["durationSeconds"] >= 1' "${test_root}/duration.json" || fail 'portable duration observation'
 for suffix in status log duration; do
   GOS_TEST_RUNNER_REAL_CAT="$real_cat" GOS_TEST_RUNNER_FAIL_READ="$suffix" \
     PATH="${test_root}/tools:${PATH}" run_runner --jobs 2 --summary "${test_root}/missing-${suffix}.json" pass 'literal [x]'
