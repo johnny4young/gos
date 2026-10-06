@@ -125,6 +125,8 @@ to enforce that floor.
 Participation in this project is covered by the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
-CI cancels superseded runs for the same workflow and PR/ref. Separate PRs and
-main remain independent, including stacked PRs targeting non-default branches.
-This does not change the serialized, non-cancelling live canary or release lane.
+CI cancels superseded runs of the same pull request. Separate PRs remain
+independent, including stacked PRs targeting non-default branches. Pushes to
+main use one group per commit and are never cancelled, so every merged commit
+keeps a complete result. This does not change the serialized, non-cancelling
+live canary or release lane.

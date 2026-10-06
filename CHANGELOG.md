@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
-- CI cancels superseded runs for the same workflow and PR/ref while retaining separate PRs, all OS/shell jobs, and existing canary/release serialization.
+- CI cancels superseded runs of the same pull request while retaining separate PRs, all OS/shell jobs, and existing canary/release serialization. Pushes to main are grouped per commit and never cancelled, so every merged commit keeps a complete CI result.
 
 - Pinned GitHub Actions dependencies bumped by Dependabot: `actions/attest` 4.2.1 to 4.2.2, `softprops/action-gh-release` 3.0.2 to 3.0.3, and `github/codeql-action/upload-sarif`.
 
