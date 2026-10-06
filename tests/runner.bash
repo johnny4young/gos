@@ -203,6 +203,15 @@ assert_status 2 "$status" 'missing summary argument' "$output"
 run_runner --summary "${test_root}/summary-${mode}.json/child" pass
 assert_status 1 "$status" 'unwritable summary destination' "$output"
 assert_contains "$output" 'could not write test summary' 'summary write fails closed'
+# The runner changes into the repository root; a relative summary path must
+# still land beside the caller instead of dirtying the checkout.
+relative_dir="${test_root}/relative-cwd"
+mkdir -p "$relative_dir"
+status=0
+output="$(cd "$relative_dir" && "$BASH" "${fixture}/scripts/run-tests.bash" --os linux --jobs 1 --summary relative.json pass 2>&1)" || status=$?
+assert_status 0 "$status" 'relative summary path' "$output"
+[ -f "${relative_dir}/relative.json" ] || fail 'relative summary path resolves against the caller directory'
+[ ! -e "${fixture}/relative.json" ] || fail 'relative summary path must not write into the repository'
 pass 'optional summaries preserve serial/parallel outcomes, timings, metadata and failure evidence'
 
 # Exported sources have no git metadata; they still discover suites on disk.
