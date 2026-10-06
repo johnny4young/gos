@@ -209,3 +209,56 @@ go_comparison_output="$(
 [ "$go_comparison_output" = "go-version-comparison-ok" ] \
   || fail "Go version comparison failed: ${go_comparison_output}"
 pass "Go version comparison orders beta, rc, release, and patch versions"
+
+# _gos_sudo_for_target captures a command's stdout/stderr with command
+# substitution, which strips trailing newlines. Replaying them must restore
+# the line ending, or the next progress/error line is glued onto the
+# command's last line (as seen in "...gos-backup.1234Activating go from ...").
+sudo_case="${test_root}/sudo-replay"
+mkdir -p "${sudo_case}/bin" "${sudo_case}/target"
+cat >"${sudo_case}/bin/sudo" <<'FAKE_REPLAY_SUDO'
+#!/usr/bin/env bash
+GOS_FAKE_UNDER_SUDO=1 exec "$@"
+FAKE_REPLAY_SUDO
+cat >"${sudo_case}/bin/denied-then-ok" <<'FAKE_DENIED_THEN_OK'
+#!/usr/bin/env bash
+if [ "${GOS_FAKE_UNDER_SUDO:-}" != 1 ]; then
+  echo "denied-then-ok: Permission denied" >&2
+  exit 1
+fi
+echo "moved"
+echo "sudo-warning" >&2
+FAKE_DENIED_THEN_OK
+cat >"${sudo_case}/bin/always-denied" <<'FAKE_ALWAYS_DENIED'
+#!/usr/bin/env bash
+echo "always-denied: Permission denied" >&2
+exit 4
+FAKE_ALWAYS_DENIED
+cat >"${sudo_case}/bin/plain-fail" <<'FAKE_PLAIN_FAIL'
+#!/usr/bin/env bash
+echo "partial-output"
+echo "plain-fail: boom" >&2
+exit 3
+FAKE_PLAIN_FAIL
+chmod +x "${sudo_case}/bin/"*
+PATH="${sudo_case}/bin:${fake_bin}:${original_path}" \
+  GOS_INSTALL_DIR="${sudo_case}/go" \
+  GOS_CACHE_DIR="${sudo_case}/cache" \
+  GOS_TEST_REAL_MV="$real_mv" \
+  bash -c '
+    set -euo pipefail
+    . "$1"
+    GOS_SUDO_TARGET="$2" _gos_sudo_for_target denied-then-ok
+    printf "after-retry\n"
+    printf "after-retry-err\n" >&2
+    GOS_SUDO_TARGET="$2" _gos_sudo_for_target always-denied || printf "status=%s\n" "$?"
+    printf "after-denied-err\n" >&2
+    GOS_SUDO_TARGET="$2" _gos_sudo_for_target plain-fail || printf "status=%s\n" "$?"
+    printf "after-fail-err\n" >&2
+  ' bash "$sourceable_script" "${sudo_case}/target" \
+  >"${sudo_case}/stdout" 2>"${sudo_case}/stderr" || fail "sudo replay harness failed: $(cat "${sudo_case}/stderr")"
+expected_sudo_stdout="$(printf '%s\n' moved after-retry status=4 partial-output status=3)"
+expected_sudo_stderr="$(printf '%s\n' sudo-warning after-retry-err 'always-denied: Permission denied' 'always-denied: Permission denied' after-denied-err 'plain-fail: boom' after-fail-err)"
+[ "$(cat "${sudo_case}/stdout")" = "$expected_sudo_stdout" ] || fail "sudo replay stdout lost line endings: $(cat "${sudo_case}/stdout")"
+[ "$(cat "${sudo_case}/stderr")" = "$expected_sudo_stderr" ] || fail "sudo replay stderr lost line endings: $(cat "${sudo_case}/stderr")"
+pass "sudo retry replays captured output with its line endings"
