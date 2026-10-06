@@ -67,6 +67,13 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# A relative --summary path names a file under the caller's directory, not
+# under the repository root the runner switches to below.
+case "$summary_path" in
+  '' | /* | [A-Za-z]:[/\\]*) ;;
+  *) summary_path="${PWD%/}/${summary_path}" ;;
+esac
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
