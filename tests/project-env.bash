@@ -155,6 +155,16 @@ run_gos "$case_dir" bash "$script" __project-version "${case_dir}/project"
 printf 'golang\n' >"${case_dir}/project/.tool-versions"
 run_gos "$case_dir" bash "$script" use --print "${case_dir}/project"
 assert_nonzero_status "$status" 'incomplete Go entry must not fall back' "$output"
+# Fields are split without pathname expansion: a stray file named like a
+# version in the caller's directory must not turn `golang *` into a pin.
+mkdir -p "${case_dir}/decoy"
+: >"${case_dir}/decoy/1.21.6"
+printf 'golang *\n' >"${case_dir}/project/.tool-versions"
+cd "${case_dir}/decoy"
+run_gos "$case_dir" bash "$script" use --print "${case_dir}/project"
+cd "$OLDPWD"
+assert_nonzero_status "$status" 'a glob version must not expand against the working directory' "$output"
+assert_not_contains "$output" '1.21.6' 'tool versions fields are not pathname-expanded'
 printf 'ruby 3.3.0\n' >"${case_dir}/project/.tool-versions"
 chmod 000 "${case_dir}/project/.tool-versions"
 if [ ! -r "${case_dir}/project/.tool-versions" ]; then

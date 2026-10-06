@@ -2022,10 +2022,13 @@ _gos_read_tool_versions_file() {
     line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     [ -z "$line" ] && continue
 
-    # shellcheck disable=SC2086 # Intentional field split: .tool-versions is whitespace-delimited.
-    set -- $line
-    tool="${1:-}"
-    version="${2:-}"
+    # Split the whitespace-delimited fields with parameter expansion, not an
+    # unquoted `set -- $line`: field splitting would also glob, so an entry
+    # such as `golang *` must never expand against the current directory.
+    tool="${line%%[[:space:]]*}"
+    version="${line#"$tool"}"
+    version="${version#"${version%%[![:space:]]*}"}"
+    version="${version%%[[:space:]]*}"
     case "$tool" in
       go | golang)
         [ -n "$version" ] || return 2
