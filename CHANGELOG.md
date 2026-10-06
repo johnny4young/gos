@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
-- Test reports distinguish skipped JSON assertions as partial coverage rather than fully passed suites; every CI smoke OS explicitly requires a JSON assertion parser.
+- Test reports distinguish skipped assertions as partial coverage rather than fully passed suites: every environment-dependent skip (JSON parsers, shells, PTY, symlinks, mode bits, tags, root) is recorded, partial suites are named in the run output and the CI job summary, and `scripts/run-tests.bash --fail-on-partial` makes them fail. The protected-parent install cases skip explicitly as root. Every CI smoke OS explicitly requires a JSON assertion parser.
 
 - The portable test runner can write opt-in per-suite durations and machine-readable outcome/source/interpreter metadata; CI retains those observations without changing its wave scheduler or pass criteria.
 

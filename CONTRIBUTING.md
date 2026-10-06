@@ -144,3 +144,11 @@ optional parsers, while every CI OS claiming JSON helper assertions requires
 `jq` or `python3`; full schema validation still requires Python on its existing
 non-Windows lanes. The Windows-excluded schema suite stays excluded. Product
 execution still does not require either parser.
+
+Every environment-dependent skip in a suite (missing fish/zsh/pwsh/`script`,
+no PTY harness, no real symlinks, mode bits not enforced, no reachable tag,
+running as root for the protected-parent install cases) goes through
+`skip_assertion` from `tests/lib.bash`, never a bare `ok -` line. The runner
+names partial suites at the end of every run and in the GitHub job summary.
+Pass `--fail-on-partial` to make partial coverage fail the run; CI does not,
+because hosted runners legitimately lack some shells.

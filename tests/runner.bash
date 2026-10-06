@@ -59,9 +59,11 @@ git -C "$fixture" add scripts tests
 # Keep an untracked suite in the directory to prove git controls discovery.
 git -C "$fixture" rm -q --cached tests/untracked.bash
 
+# Fixture runs must never append to a real CI job summary; a test opts in
+# with GOS_TEST_STEP_SUMMARY.
 run_runner() {
   status=0
-  output="$("$BASH" "${fixture}/scripts/run-tests.bash" --os linux "$@" 2>&1)" || status=$?
+  output="$(GITHUB_STEP_SUMMARY="${GOS_TEST_STEP_SUMMARY:-}" "$BASH" "${fixture}/scripts/run-tests.bash" --os linux "$@" 2>&1)" || status=$?
 }
 
 run_runner --list
@@ -242,6 +244,27 @@ for mode in 1 2; do
   run_runner --jobs "$mode" partial
   assert_status 0 "$status" 'partial reporting without summary' "$output"
   assert_contains "$output" '0 test suite(s) passed, 1 partial' 'ordinary local runs also distinguish skips'
+  assert_contains "$output" 'partial - suites with skipped assertions on linux: tests/partial.bash' 'partial suites are named'
+  # --fail-on-partial turns a partial (but otherwise green) run red, keeps
+  # real failures reported as failures, and leaves fully passing runs green.
+  run_runner --jobs "$mode" --fail-on-partial partial pass
+  assert_status 1 "$status" "fail-on-partial rejects partial jobs=${mode}" "$output"
+  assert_contains "$output" 'not ok - partial suites are not allowed with --fail-on-partial: tests/partial.bash' 'fail-on-partial names the partial suites'
+  run_runner --jobs "$mode" --fail-on-partial pass
+  assert_status 0 "$status" "fail-on-partial accepts full passes jobs=${mode}" "$output"
+  assert_not_contains "$output" 'partial -' 'no partial listing without partial suites'
+  run_runner --jobs "$mode" --fail-on-partial partial-fail partial
+  assert_status 1 "$status" "fail-on-partial with a real failure jobs=${mode}" "$output"
+  assert_contains "$output" 'not ok - test suites failed: tests/partial-fail.bash' 'real failures stay failures under fail-on-partial'
+  step_summary="${test_root}/step-summary-${mode}.md"
+  : >"$step_summary"
+  GOS_TEST_STEP_SUMMARY="$step_summary" run_runner --jobs "$mode" partial pass
+  assert_status 0 "$status" "step summary partial run jobs=${mode}" "$output"
+  # shellcheck disable=SC2016 # Literal Markdown code span.
+  assert_file_contains "$step_summary" '- `tests/partial.bash`'
+  step_summary_before="$(cat "$step_summary")"
+  GITHUB_STEP_SUMMARY="$step_summary" run_runner --jobs "$mode" partial
+  [ "$(cat "$step_summary")" = "$step_summary_before" ] || fail 'fixture runs must not write the outer job summary'
 done
 cat >"${fixture}/tests/invalid-skip-marker.bash" <<'SUITE'
 #!/usr/bin/env bash
@@ -314,5 +337,5 @@ if command -v pwsh >/dev/null 2>&1 || command -v powershell >/dev/null 2>&1; the
   assert_not_contains "$output" 'POWERSHELL_TEST_REACHED' 'PowerShell syntax failure stops before functional tests'
   pass 'validate-local parses every PowerShell file as data and fails closed before functional tests'
 else
-  pass 'PowerShell validator argument regression skipped: pwsh/powershell is not installed'
+  skip_assertion 'PowerShell validator argument regression skipped: pwsh/powershell is not installed'
 fi

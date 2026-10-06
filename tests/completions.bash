@@ -425,7 +425,7 @@ readonly_root="${test_root}/xdg-readonly"
 readonly_completions="${readonly_root}/data/bash-completion/completions"
 mkdir -p "$readonly_completions"
 if ! readonly_bit_enforced "$readonly_completions"; then
-  echo "ok - unwritable completion dir case skipped: this filesystem does not enforce the read-only bit"
+  skip_assertion "unwritable completion dir case skipped: this filesystem does not enforce the read-only bit"
 else
   chmod 555 "$readonly_completions"
   set +e
@@ -487,10 +487,10 @@ pass "Bash completes run/each slots and pin/platforms versions offline"
 if command -v fish >/dev/null 2>&1; then
   fish --no-config "${repo_root}/tests/completions-fish.fish" "${test_root}/gos.fish" "$test_root"
 else
-  pass "Fish behavioral completions skipped: fish unavailable (CI Linux runs it)"
+  skip_assertion "Fish behavioral completions skipped: fish unavailable (CI Linux runs it)"
 fi
 if command -v zsh >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
   python3 "${repo_root}/tests/completions-zsh.py" "${test_root}/gos.zsh"
 else
-  pass "Zsh behavioral completions skipped: zsh/python3 unavailable (CI Unix runs it)"
+  skip_assertion "Zsh behavioral completions skipped: zsh/python3 unavailable (CI Unix runs it)"
 fi

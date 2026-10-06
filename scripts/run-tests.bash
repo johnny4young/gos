@@ -10,15 +10,20 @@ set -euo pipefail
 # (comma-separated lists of linux, macos, windows) and the runner reports the
 # skip instead of failing.
 #
-# Usage: scripts/run-tests.bash [--jobs N|auto] [--os linux|macos|windows] [--list] [--summary PATH] [suite ...]
+# Usage: scripts/run-tests.bash [--jobs N|auto] [--os linux|macos|windows] [--list] [--summary PATH] [--fail-on-partial] [suite ...]
 # A suite may be given as a path (tests/foo.bash) or a bare name (foo).
+#
+# A suite that exits 0 after recording skip_assertion (tests/lib.bash) is
+# reported as partial and listed at the end (and in $GITHUB_STEP_SUMMARY when
+# set). Partial suites pass unless --fail-on-partial is given.
 
 usage() {
-  printf 'Usage: %s [--jobs N|auto] [--os linux|macos|windows] [--list] [--summary PATH] [suite ...]\n' "${0##*/}" >&2
+  printf 'Usage: %s [--jobs N|auto] [--os linux|macos|windows] [--list] [--summary PATH] [--fail-on-partial] [suite ...]\n' "${0##*/}" >&2
 }
 
 jobs="auto"
 list_only=0
+fail_on_partial=0
 summary_path=""
 target_os=""
 requested=()
@@ -50,6 +55,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --list)
       list_only=1
+      shift
+      ;;
+    --fail-on-partial)
+      fail_on_partial=1
       shift
       ;;
     --help | -h)
@@ -398,12 +407,20 @@ done <<<"$selected"
 
 passed=0
 partial=0
+partial_suites=""
+partial_paths=()
 failed=""
 if [ "$jobs" -eq 1 ]; then
   for path in ${to_run[@]:+"${to_run[@]}"}; do
     run_suite "$path"
     if report_suite "$path"; then
-      if [ "$suite_state" = partial ]; then partial=$((partial + 1)); else passed=$((passed + 1)); fi
+      if [ "$suite_state" = partial ]; then
+        partial=$((partial + 1))
+        partial_suites="${partial_suites}${path} "
+        partial_paths=(${partial_paths[@]:+"${partial_paths[@]}"} "$path")
+      else
+        passed=$((passed + 1))
+      fi
     else
       failed="${failed}${path} "
     fi
@@ -421,7 +438,13 @@ else
     wait
     for path in "${wave[@]}"; do
       if report_suite "$path"; then
-        if [ "$suite_state" = partial ]; then partial=$((partial + 1)); else passed=$((passed + 1)); fi
+        if [ "$suite_state" = partial ]; then
+          partial=$((partial + 1))
+          partial_suites="${partial_suites}${path} "
+          partial_paths=(${partial_paths[@]:+"${partial_paths[@]}"} "$path")
+        else
+          passed=$((passed + 1))
+        fi
       else
         failed="${failed}${path} "
       fi
@@ -439,8 +462,27 @@ if ! write_summary; then
   printf 'not ok - could not write test summary: %s\n' "$summary_path" >&2
   exit 1
 fi
+# Partial suites are always named, so a green run cannot hide which suites
+# skipped assertions. CI job summaries get the same list.
+if [ "$partial" -gt 0 ]; then
+  printf 'partial - suites with skipped assertions on %s: %s\n' "$target_os" "$partial_suites"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    {
+      printf '### Partial test suites (%s, Bash %s)\n\n' "$target_os" "$BASH_VERSION"
+      for path in "${partial_paths[@]}"; do
+        # shellcheck disable=SC2016 # Literal Markdown code spans.
+        printf -- '- `%s`\n' "$path"
+      done
+      printf '\n'
+    } >>"$GITHUB_STEP_SUMMARY" || printf 'warning: could not append partial suites to GITHUB_STEP_SUMMARY\n' >&2
+  fi
+fi
 if [ -n "$failed" ]; then
   printf 'not ok - test suites failed: %s\n' "$failed" >&2
+  exit 1
+fi
+if [ "$fail_on_partial" -eq 1 ] && [ "$partial" -gt 0 ]; then
+  printf 'not ok - partial suites are not allowed with --fail-on-partial: %s\n' "$partial_suites" >&2
   exit 1
 fi
 if [ "$partial" -gt 0 ]; then

@@ -222,7 +222,7 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
 
 else
   rm -f "$symlink_probe"
-  pass "side-by-side mode tests skipped (filesystem lacks symlink support)"
+  skip_assertion "side-by-side mode tests skipped (filesystem lacks symlink support)"
 fi
 
 # A flat-mode gos (GOS_VERSIONS_DIR unset, e.g. a cron job or sudo shell that
@@ -245,7 +245,7 @@ if ln -s "$script" "$orphan_probe" 2>/dev/null && [ -L "$orphan_probe" ]; then
   pass "flat-mode installs warn before converting a side-by-side symlink"
 else
   rm -f "$orphan_probe"
-  pass "orphaned versions link test skipped (filesystem lacks symlink support)"
+  skip_assertion "orphaned versions link test skipped (filesystem lacks symlink support)"
 fi
 
 # Coverage the audit found missing: migrating a flat install into side-by-side
@@ -290,5 +290,5 @@ if ln -s "$script" "$coverage_probe" 2>/dev/null && [ -L "$coverage_probe" ]; th
   pass "ambiguous uninstalls remove nothing and run/each keep their own argument errors"
 else
   rm -f "$coverage_probe"
-  pass "side-by-side coverage cases skipped (filesystem lacks symlink support)"
+  skip_assertion "side-by-side coverage cases skipped (filesystem lacks symlink support)"
 fi
