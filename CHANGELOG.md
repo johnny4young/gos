@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- `run` and `each` share one user-command execution helper, retaining their existing process, argument, environment, and exit-status behavior. Regression tests cover process replacement and per-version isolation.
 - Pinned GitHub Actions dependencies bumped by Dependabot: `actions/attest` 4.2.1 to 4.2.2, `softprops/action-gh-release` 3.0.2 to 3.0.3, and `github/codeql-action/upload-sarif`.
 
 ## [1.11.0] - 2026-09-06
