@@ -4014,7 +4014,7 @@ __gos_auto_switch() {
   # directory still invalidates the cached PATH decision.
   local gos_version gos_bin gos_key gos_manifest="" gos_manifest_line
   local gos_dir="$PWD" gos_candidate gos_installed="$GOS_VERSIONS_DIR"
-  local gos_has_pin gos_tool_pattern='^[[:space:]]*(go|golang)([[:space:]]|$)'
+  local gos_has_pin
   while :; do
     for gos_candidate in "${gos_dir%/}/.go-version" "${gos_dir%/}/.tool-versions" "${gos_dir%/}/go.mod"; do
       if [ -f "$gos_candidate" ]; then
@@ -4023,9 +4023,12 @@ __gos_auto_switch() {
         [ "${gos_candidate##*/}" != ".tool-versions" ] || gos_has_pin=false
         if while IFS= read -r gos_manifest_line || [ -n "$gos_manifest_line" ]; do
           gos_manifest="${gos_manifest}${gos_manifest_line}"$'\n'
-          if [[ $gos_manifest_line =~ $gos_tool_pattern ]]; then
-            gos_has_pin=true
-          fi
+          # A case pattern, not [[ =~ ]]: this runs in the user's interactive
+          # shell on every prompt and must not clobber BASH_REMATCH or zsh's
+          # MATCH/match (or depend on zsh's RE_MATCH_PCRE module).
+          case "${gos_manifest_line#"${gos_manifest_line%%[![:space:]]*}"}" in
+            go | golang | go[[:space:]]* | golang[[:space:]]*) gos_has_pin=true ;;
+          esac
         done <"$gos_candidate" 2>/dev/null; then
           # Include unrelated .tool-versions files in the snapshot, but keep
           # following the resolver to the actual Go pin. Either can change.

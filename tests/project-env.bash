@@ -228,9 +228,17 @@ case "$GOS_AUTO_BIN" in */go1.21.6/bin) ;; *) exit 16 ;; esac
 printf 'module example.com/edit\n\ngo 1.20\n' >go.mod
 __gos_auto_switch
 case "$GOS_AUTO_BIN" in */go1.20.0/bin) ;; *) exit 17 ;; esac
+# The hook runs in the user's interactive shell on every prompt, so scanning
+# a Go entry must not clobber the user's last regex match.
+[[ user-match =~ user-match ]]
 printf 'golang 1.21.6\n' >.tool-versions
 __gos_auto_switch
 case "$GOS_AUTO_BIN" in */go1.21.6/bin) ;; *) exit 18 ;; esac
+if [ -n "${ZSH_VERSION:-}" ]; then
+  [ "${MATCH:-}" = user-match ] || exit 21
+else
+  [ "${BASH_REMATCH[0]:-}" = user-match ] || exit 21
+fi
 rm .tool-versions
 printf 'module example.com/edit\n\ngo 1.21\n' >go.mod
 __gos_auto_switch
