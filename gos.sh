@@ -4548,6 +4548,7 @@ _gos_doctor_apply_fixes() {
 }
 
 cmd_doctor() {
+  local go_status go_version_pattern LC_ALL=C
   local os arch raw_os raw_arch install_error mirror_error versions_error feed_ttl_error cache_dir_error go_path go_version go_bin arg doctor_fix="false" cache_dir_valid="true"
   GOS_DOCTOR_PROBLEMS=0
   GOS_DOCTOR_WARNINGS=0
@@ -4600,8 +4601,21 @@ cmd_doctor() {
   fi
 
   if go_path=$(command -v go 2>/dev/null); then
-    go_version=$(GOTOOLCHAIN=local go version 2>/dev/null || true)
-    _gos_doctor_check "ok" "go" "${go_path} reports: ${go_version}"
+    # Probe only the runtime on PATH, without Go's automatic toolchain download.
+    # Finding an executable is not evidence that it can actually run.
+    go_status=0
+    go_version=$(GOTOOLCHAIN=local go version 2>/dev/null) || go_status=$?
+    # runtime.Version permits vendor/development suffixes and experiment metadata.
+    # A final CR is the Windows CRLF terminator; embedded control bytes are invalid.
+    go_version="${go_version%$'\r'}"
+    go_version_pattern='^go version (go[0-9]+\.[0-9]+(\.[0-9]+)?((rc|beta)[0-9]+)?(-[^[:space:]]+)?( [^[:cntrl:]]+)?|devel [^[:cntrl:]]+) [a-z0-9]+/[a-z0-9]+$'
+    if [ "$go_status" -ne 0 ]; then
+      _gos_doctor_check "problem" "go" "${go_path}: go version failed (exit ${go_status})" "Check PATH and repair or reinstall the Go runtime at ${go_path}; then rerun gos doctor."
+    elif [[ "$go_version" =~ [[:cntrl:]] ]] || ! [[ "$go_version" =~ $go_version_pattern ]]; then
+      _gos_doctor_check "problem" "go" "${go_path}: unrecognized go version output" "Check PATH and repair or reinstall the Go runtime at ${go_path}; then rerun gos doctor."
+    else
+      _gos_doctor_check "ok" "go" "${go_path} reports: ${go_version}"
+    fi
   else
     _gos_doctor_check "problem" "go" "go is not on PATH" "Run gos latest or add ${GOS_INSTALL_DIR}/bin to PATH after installing Go."
   fi

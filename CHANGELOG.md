@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- `doctor` marks a Go executable that fails or returns malformed version output as a problem, exits nonzero, and suggests checking PATH or repairing that runtime. Local stable, prerelease, and development toolchains remain supported without automatic toolchain downloads.
 - Windows uninstall validates ownership, removes only known installed files, and preserves unrelated contents instead of recursively deleting the target directory. Existing installations without a receipt remain supported, with their ambiguous `LICENSE` left in place.
 - Windows installs stage replacements on the destination filesystem and restore previous files on publication failure. Failed fresh installs remove partial payloads; failed restoration keeps recovery files and reports their location.
 - Windows PATH edits refresh a stale process even when the registry already contains gos, remove process entries on uninstall, and preserve registry value types and unrelated entries. Tests use registry substitutes and a disposable native Windows key.
