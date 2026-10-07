@@ -719,7 +719,7 @@ the Windows launcher. Use the symptom-specific checks below for those cases.
 |---|---|---|
 | `go version` still shows the old Go after `gos install` | Another Go is earlier on `PATH` (Homebrew, a manual install) | `gos which` shows which binary wins; put `$GOS_INSTALL_DIR/bin` first, or `eval "$(gos env)"` |
 | `Error: another gos operation is running` | A previous gos was interrupted, or one is running | `gos status` shows the lock and its pid; remove `${GOS_INSTALL_DIR:-/usr/local/go}.gos-lock` only after verifying no gos operation is running (strip any trailing slash from the install path first) |
-| `Residue:` or `Orphaned backup found` in `gos status` | An install was interrupted between renames | `gos prune --rollback` removes the residue once the active Go works |
+| `Residue:` or `Orphaned backup found` in `gos status` | An install was interrupted between renames | `gos prune --rollback` removes residue only after the active binary successfully reports its local Go version; repair a broken active install first |
 | `Rollback: broken link` | The side-by-side version the rollback pointed at was uninstalled | `gos prune --rollback`; the next install creates a new rollback |
 | Password prompt on every install | `GOS_INSTALL_DIR` is root-owned (`/usr/local/go`) | Set `GOS_INSTALL_DIR` under your home directory; gos only escalates for the directory it writes |
 | `checksum verification required but ...` (exit 4) | `GOS_REQUIRE_CHECKSUM` is set and `jq`/`python3` or a SHA256 tool is missing | Install `jq` or `python3` plus `sha256sum`/`shasum`, then retry; check feed availability and the diagnostic before changing verification policy |

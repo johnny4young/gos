@@ -4431,17 +4431,28 @@ cmd_prune() {
   # *.gos-current.<pid> siblings. Only remove them when the active install is
   # healthy (they may be the sole surviving copy otherwise), and only with
   # --rollback, which already means "discard my safety copies".
-  local orphan orphans_removed=0 orphans_found=0
+  local orphan orphans_removed=0 orphans_found=0 active_version="" active_checked="false"
   while IFS= read -r -d '' orphan; do
     orphans_found=$((orphans_found + 1))
-    if [ "$prune_rollback" = "true" ] && [ -x "${GOS_INSTALL_DIR}/bin/go" ]; then
+    if [ "$prune_rollback" = "true" ] && [ "$active_checked" = "false" ]; then
+      # Executable mode alone does not prove the runtime works (wrong arch,
+      # missing loader, or a partially installed binary). Probe once, only when
+      # residue exists; the shared helper forces GOTOOLCHAIN=local.
+      active_checked="true"
+      active_version=$(_gos_go_version_of "${GOS_INSTALL_DIR}/bin/go") || active_version=""
+    fi
+    if [ "$prune_rollback" = "true" ] && [ -n "$active_version" ]; then
       if [ "$dry_run" != "true" ]; then
         _gos_sudo rm -rf "$orphan" || return 1
       fi
       orphans_removed=$((orphans_removed + 1))
       _gos_json_enabled || echo "${removal_verb} orphaned backup at ${orphan}."
     else
-      _gos_json_enabled || echo "Orphaned backup found at ${orphan} (remove it with: gos prune --rollback)."
+      if [ "$prune_rollback" = "true" ]; then
+        _gos_json_enabled || echo "Keeping orphaned backup at ${orphan}: the active Go could not report its local version. Repair the active install before retrying gos prune --rollback."
+      else
+        _gos_json_enabled || echo "Orphaned backup found at ${orphan} (remove it with: gos prune --rollback)."
+      fi
     fi
   done < <(_gos_orphaned_backups)
 

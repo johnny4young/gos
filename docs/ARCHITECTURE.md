@@ -205,7 +205,7 @@ gos has no database; its state is the filesystem:
 |---|---|
 | `$GOS_INSTALL_DIR` | Active Go: a real directory (flat) or a symlink into the versions tree (side-by-side). |
 | `$GOS_INSTALL_DIR.gos-rollback` | The previous installation, target of `gos rollback`. A dangling link here means its version was uninstalled (`gos prune --rollback` clears it). |
-| `$GOS_INSTALL_DIR.gos-backup.<pid>`, `.gos-current.<pid>` | Transient slots of an activation in progress; crash residue if left behind (`gos status`/`doctor` report it, `gos prune --rollback` removes it). |
+| `$GOS_INSTALL_DIR.gos-backup.<pid>`, `.gos-current.<pid>` | Transient slots of an activation in progress; crash residue if left behind (`gos status`/`doctor` report it; `gos prune --rollback` removes it only after the active binary successfully reports a recognizable local Go version). |
 | `$GOS_INSTALL_DIR.gos-lock/pid` | The mutation lock. |
 | `<resolved gos script>.gos-lock/pid` | The path-scoped self-update lock. |
 | `$GOS_VERSIONS_DIR/go<version>/` | Installed versions in side-by-side mode. |
