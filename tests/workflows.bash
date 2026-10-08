@@ -432,6 +432,97 @@ assert(ci_on.dig("push", "branches")&.include?("main"), "CI must run on pushes t
 assert(ci.dig("permissions", "contents") == "read", "CI must use read-only contents permission")
 assert(ci.dig("defaults", "run", "shell") == "bash", "CI must default to bash shell")
 
+ci_pr_filters = (ci_on["pull_request"] || {}).to_h
+assert(!ci_pr_filters.key?("branches") && !ci_pr_filters.key?("branches-ignore"), "CI must also qualify non-default stacked PR bases")
+# Evaluate the configured concurrency expressions (not a copy of them) for
+# representative events, so a config change that cancels main runs, merges
+# PRs into one group, or stops superseding PR revisions fails here.
+ci_concurrency = ci.fetch("concurrency") { fail!("CI must define concurrency") }
+ci_group_template = ci_concurrency.fetch("group")
+ci_cancel_template = ci_concurrency.fetch("cancel-in-progress")
+gha_truthy = ->(value) { !(value.nil? || value == false || value == "" || value == 0) }
+# GitHub compares strings case-insensitively.
+gha_equal = ->(left, right) { left.is_a?(String) && right.is_a?(String) ? left.casecmp?(right) : left == right }
+gha_eval = lambda do |source, context|
+  tokens = source.scan(/\s*(\|\||&&|==|!=|\(|\)|'(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_.-]*)/).flatten
+  assert(tokens.join.gsub(/\s+/, "") == source.gsub(/\s+/, ""), "unsupported expression in CI concurrency: #{source}")
+  position = 0
+  peek = -> { tokens[position] }
+  take = -> { token = tokens[position]; position += 1; token }
+  parse_or = nil
+  parse_primary = lambda do
+    token = take.call
+    case token
+    when "(" then value = parse_or.call; assert(take.call == ")", "unbalanced CI concurrency expression"); value
+    when /\A'(.*)'\z/m then Regexp.last_match(1).gsub("''", "'")
+    when "true" then true
+    when "false" then false
+    else
+      assert(context.key?(token), "unknown CI concurrency context #{token}")
+      context.fetch(token)
+    end
+  end
+  parse_compare = lambda do
+    left = parse_primary.call
+    while %w[== !=].include?(peek.call)
+      operator = take.call
+      right = parse_primary.call
+      left = operator == "==" ? gha_equal.call(left, right) : !gha_equal.call(left, right)
+    end
+    left
+  end
+  parse_and = lambda do
+    left = parse_compare.call
+    while peek.call == "&&"
+      take.call
+      right = parse_compare.call
+      left = gha_truthy.call(left) ? right : left
+    end
+    left
+  end
+  parse_or = lambda do
+    left = parse_and.call
+    while peek.call == "||"
+      take.call
+      right = parse_and.call
+      left = gha_truthy.call(left) ? left : right
+    end
+    left
+  end
+  value = parse_or.call
+  assert(position == tokens.length, "trailing tokens in CI concurrency expression: #{source}")
+  value
+end
+# A YAML scalar is used as-is; a lone expression keeps its type; anything
+# else interpolates each expression as a string.
+gha_render = lambda do |template, context|
+  next template unless template.is_a?(String)
+
+  whole = template.strip.match(/\A\$\{\{((?:(?!\}\}).)*)\}\}\z/m)
+  next gha_eval.call(whole[1], context) if whole
+
+  template.gsub(/\$\{\{(.*?)\}\}/m) { gha_eval.call(Regexp.last_match(1), context).to_s }
+end
+# github.workflow is the workflow name, or its file path when unnamed.
+ci_name = ci.fetch("name", ".github/workflows/ci.yml")
+ci_event = lambda do |event_name, ref, sha|
+  { "github.workflow" => ci_name, "github.event_name" => event_name, "github.ref" => ref, "github.sha" => sha }
+end
+pr45_a = ci_event.call("pull_request", "refs/pull/45/merge", "a" * 40)
+pr45_b = ci_event.call("pull_request", "refs/pull/45/merge", "b" * 40)
+pr46 = ci_event.call("pull_request", "refs/pull/46/merge", "a" * 40)
+main_a = ci_event.call("push", "refs/heads/main", "a" * 40)
+main_b = ci_event.call("push", "refs/heads/main", "b" * 40)
+group_of = ->(context) { gha_render.call(ci_group_template, context).to_s }
+cancels = ->(context) { gha_truthy.call(gha_render.call(ci_cancel_template, context)) }
+assert(group_of.call(pr45_a).include?(ci_name), "CI concurrency groups must include the workflow name")
+assert(group_of.call(pr45_a) == group_of.call(pr45_b), "replacement PR commits must share a group")
+assert(cancels.call(pr45_a), "CI must cancel superseded pull request runs")
+assert(group_of.call(pr45_a) != group_of.call(pr46), "different PRs must remain independent")
+assert(group_of.call(main_a) != group_of.call(pr45_a), "main and PR feedback must remain independent")
+assert(group_of.call(main_a) != group_of.call(main_b), "each main commit must keep its own group so no merged commit loses CI")
+assert(!cancels.call(main_a), "CI must never cancel runs for pushes to main")
+
 ci_jobs = ci.fetch("jobs") { fail!("CI must define jobs") }
 %w[shellcheck shfmt smoke workflow-validation actionlint].each do |job|
   assert(ci_jobs.key?(job), "CI must define #{job} job")
@@ -486,7 +577,7 @@ assert(psscriptanalyzer && psscriptanalyzer["if"] == "runner.os == 'Windows'" &&
 bash32 = step_named(smoke_steps, "Bash 3.2 compatibility")
 assert(bash32, "smoke job must exercise the bash 3.2 floor")
 assert(bash32["if"] == "runner.os == 'macOS'", "bash 3.2 compatibility step must run on macOS, the only runner shipping bash 3.2")
-assert(bash32["run"].to_s.include?("grep -F 'version 3.2'") && bash32["run"].to_s.include?("bash scripts/run-tests.bash") && bash32["run"].to_s.lines.any? { |line| line.strip == "bash scripts/run-tests.bash --jobs 2" }, "bash 3.2 compatibility step must verify the interpreter and run the feature suites under it")
+assert(bash32["run"].to_s.include?("grep -F 'version 3.2'") && bash32["run"].to_s.include?("bash scripts/run-tests.bash") && bash32["run"].to_s.lines.any? { |line| line.strip == 'bash scripts/run-tests.bash --jobs 2 --summary "${RUNNER_TEMP}/test-summary-bash32.json"' }, "bash 3.2 compatibility step must verify the interpreter and run the feature suites under it")
 assert(command_surface_sync, "smoke job must check generated command surfaces")
 assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surfaces.bash --check"), "command surface sync must use the orchestrator")
 
@@ -510,6 +601,11 @@ assert(bash_syntax["run"].to_s.include?("git ls-files -z '*.sh' '*.bash' | xargs
 tracked_powershell_files.each do |path|
   assert(smoke_runs.include?(path), "smoke job PowerShell syntax must cover tracked PowerShell file #{path}")
 end
+summary_upload = step_named(smoke_steps, "Upload suite observations")
+assert(summary_upload && summary_upload["if"] == "always()", "suite summaries must survive failed suites")
+assert(summary_upload.dig("with", "name") == "suite-observations-${{ matrix.os }}", "summary artifact names must distinguish OS jobs")
+assert(summary_upload.dig("with", "path") == "${{ runner.temp }}/test-summary-*.json", "both current Bash and Bash 3.2 summaries must be retained")
+assert(smoke_runs.include?('bash scripts/run-tests.bash --jobs 2 --summary "${RUNNER_TEMP}/test-summary-current.json"'), "ordinary suite runs must collect comparable observations")
 assert(!smoke_runs.match?(%r{bash tests/}), "smoke job must run suites through scripts/run-tests.bash, not hand-listed bash tests/ commands")
 assert(smoke_runs.include?("packaging/chocolatey/tools/chocolateyInstall.ps1"), "smoke job must parse the Chocolatey PowerShell installer")
 assert(smoke_runs.include?("packaging/chocolatey/tools/chocolateyUninstall.ps1"), "smoke job must parse the Chocolatey PowerShell uninstaller")

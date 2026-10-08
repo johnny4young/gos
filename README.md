@@ -457,7 +457,10 @@ gos updated: v1.9.0 -> v1.10.0
 
 `gos use` searches from the current directory upward. At each directory level it
 prefers `.go-version`, then `.tool-versions` entries named `golang` or `go`,
-then a `toolchain goX.Y.Z` directive in `go.mod`, then the `go X.Y` directive.
+then a `toolchain goX.Y.Z` directive in `go.mod`, then the `go X.Y` directive. A
+`.tool-versions` file that only lists other languages is skipped, so `go.mod`
+and parent Go pins still apply. An explicit Go entry with a missing version
+fails instead of silently selecting a different toolchain.
 
 ```bash
 gos pin 1.24.1   # writes .go-version

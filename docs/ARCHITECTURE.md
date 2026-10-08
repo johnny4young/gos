@@ -259,8 +259,9 @@ parsers; local runs report unavailable parser cases explicitly.
 `tests/install-transaction.bash` injects rename and removal
 failures, and kills gos between the two renames of a rollback, to prove the
 saga above. `tests/workflows.bash` asserts repository invariants (pinned
-actions, job timeouts, generated surfaces, doc fragments). The nightly canary
-workflow is the only thing that talks to the real go.dev.
+actions, job timeouts, CI concurrency groups, generated surfaces, doc
+fragments). The nightly canary workflow is the only thing that talks to the
+real go.dev.
 
 `tests/windows-lifecycle.ps1`, invoked by the PowerShell installer suite, covers
 shared-directory ownership, legacy installs, invalid receipts, link refusal,
