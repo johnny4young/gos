@@ -38,7 +38,8 @@ for mode in text json; do
   done
   for malformed in '' 'go version' 'go version go1.26.0' 'garbage go version go1.26.0 linux/amd64' \
     'go version go1.26.0 linux/amd64 garbage' 'go version go1.invalid linux/amd64' \
-    $'go version go1.26.0 linux/amd64\nPRIVATE_OUTPUT' $'go version go1.26.0 X:boringcrypto\033 linux/amd64'; do
+    $'go version go1.26.0 linux/amd64\nPRIVATE_OUTPUT' $'go version go1.26.0 X:boringcrypto\033 linux/amd64' \
+    $'go version go1.26.0-\302\233PRIVATE_OUTPUT linux/amd64' $'go version go1.26.0 \377PRIVATE_OUTPUT linux/amd64'; do
     GOS_TEST_DOCTOR_OUTPUT="$malformed" run_gos "$case_dir" bash "$script" doctor ${args[@]+"${args[@]}"}
     assert_status 1 "$status" "${mode} malformed Go output" "$output"
     assert_contains "$output" 'unrecognized go version output' "${mode} malformed diagnostic"
@@ -47,11 +48,16 @@ for mode in text json; do
   done
   for valid in 'go1.20' 'go1.26.0' 'go1.27rc1' 'go1.27beta2' 'devel go1.28-abcdef 2026-10-06' \
     'go1.26.0-custom' 'go1.26.0-X:boringcrypto' 'go1.25.0 X:boringcrypto' \
-    'go1.28-devel_abcdef 2026-10-06' 'go1.26.0-custom X:boringcrypto'; do
+    'go1.28-devel_abcdef 2026-10-06' 'go1.26.0-custom X:boringcrypto' 'go1' 'go1.9.2rc2' \
+    'devel +abcdef Tue Oct 6 12:00:00 2026 -0700' 'go1.21.13 (Red Hat 1.21.13-2.el9_4)'; do
     GOTOOLCHAIN=go99.0.0+auto GOS_TEST_DOCTOR_OUTPUT="go version ${valid} linux/amd64" \
       run_gos "$case_dir" bash "$script" doctor ${args[@]+"${args[@]}"}
     assert_status 0 "$status" "${mode} valid Go output" "$output"
     assert_contains "$output" "reports: go version ${valid} linux/amd64" "${mode} healthy runtime"
+  done
+  for platform in wasip1/wasm windows/arm64 linux/ppc64le linux/loong64 linux/mips64le; do
+    GOS_TEST_DOCTOR_OUTPUT="go version go1.26.0 ${platform}" run_gos "$case_dir" bash "$script" doctor ${args[@]+"${args[@]}"}
+    assert_status 0 "$status" "${mode} valid Go platform ${platform}" "$output"
   done
   GOS_TEST_DOCTOR_OUTPUT=$'go version go1.26.0 windows/amd64\r\n' \
     run_gos "$case_dir" bash "$script" doctor ${args[@]+"${args[@]}"}
