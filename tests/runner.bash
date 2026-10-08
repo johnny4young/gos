@@ -282,6 +282,12 @@ git -C "$fixture" add tests/invalid-skip-marker.bash
 run_runner --summary "${test_root}/invalid-skip-marker.json" invalid-skip-marker pass
 assert_status 1 "$status" 'corrupt assertion skip marker' "$output"
 ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").find { |row| row["path"] == "tests/invalid-skip-marker.bash" }; abort "corrupt skip evidence accepted" unless suite["status"] == "failed" && suite["reason"] == "invalid-assertion-skip-marker"' "${test_root}/invalid-skip-marker.json" || fail 'corrupt skip marker fails closed without losing suite evidence'
+# A failed child keeps its own exit status as the diagnostic, not the marker.
+printf 'exit 3\n' >>"${fixture}/tests/invalid-skip-marker.bash"
+run_runner --summary "${test_root}/invalid-skip-marker-fail.json" invalid-skip-marker
+assert_status 1 "$status" 'corrupt marker with failed child' "$output"
+assert_contains "$output" 'tests/invalid-skip-marker.bash (FAILED, status 3)' 'child status stays the header diagnostic'
+ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").find { |row| row["path"] == "tests/invalid-skip-marker.bash" }; abort "child failure masked" unless suite["status"] == "failed" && suite["reason"] == "child-exit" && suite["exitStatus"] == 3' "${test_root}/invalid-skip-marker-fail.json" || fail 'a corrupt marker never masks the child exit reason'
 pass 'missing optional parsers report partial coverage without weakening failures or OS exclusions'
 
 # Exported sources have no git metadata; they still discover suites on disk.

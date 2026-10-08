@@ -367,9 +367,13 @@ assert_contains "$bash_completion_text" "gos __versions --remote-cached" "bash d
 assert_contains "$bash_completion_text" "gos __versions 2>/dev/null" "bash dynamic installed versions"
 if command -v zsh >/dev/null 2>&1; then
   zsh -n "${test_root}/gos.zsh"
+else
+  skip_assertion "Zsh completion syntax check skipped: zsh unavailable"
 fi
 if command -v fish >/dev/null 2>&1; then
   fish --no-config --no-execute "${test_root}/gos.fish"
+else
+  skip_assertion "Fish completion syntax check skipped: fish unavailable"
 fi
 assert_contains "$zsh_completion_text" "gos __versions --remote-cached" "zsh dynamic remote versions"
 assert_contains "$fish_completion_text" "gos __versions --remote-cached" "fish dynamic remote versions"

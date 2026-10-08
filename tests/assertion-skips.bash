@@ -15,8 +15,10 @@ assert_file_contains "$marker" skipped
 # DLLs/standard library. The selected wrapper restores dependency PATH only
 # inside the real parser process, while the helper sees only that one parser.
 original_path="$PATH"
+parsers_checked=0
 for parser in jq python3; do
   command -v "$parser" >/dev/null 2>&1 || continue
+  parsers_checked=$((parsers_checked + 1))
   parser_path="$(command -v "$parser")"
   tools="${test_root}/${parser}"
   mkdir -p "$tools"
@@ -32,4 +34,9 @@ for parser in jq python3; do
   assert_status 0 "$status" "${parser} accepts valid JSON" "$output"
   [ ! -e "${test_root}/valid-${parser}" ] || fail 'a validated assertion must not be labeled skipped'
 done
-pass 'JSON assertion skips are explicit and installed parsers reject malformed output'
+pass 'JSON assertion skips are explicit'
+if [ "$parsers_checked" -gt 0 ]; then
+  pass 'installed parsers reject malformed output'
+else
+  skip_assertion 'parser validation cases skipped: jq/python3 unavailable'
+fi

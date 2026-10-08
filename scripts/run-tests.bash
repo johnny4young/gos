@@ -234,6 +234,9 @@ fi
 
 log_dir="$(mktemp -d)"
 trap 'rm -rf "$log_dir"' EXIT
+# Suites change directory; the assertion-skip marker path must stay absolute
+# even when TMPDIR is relative.
+log_dir="$(cd "$log_dir" && pwd)"
 
 # Opt-in measurements use Bash's portable elapsed-seconds clock. Whole-second
 # resolution is explicit; this observes the existing waves, not a new scheduler.
@@ -306,8 +309,11 @@ report_suite() {
     fi
   fi
   if [ -z "$reason" ] && [ -f "${log_dir}/${name}.assertion-skips" ]; then
+    # A failed child keeps its exit status as the reason; a corrupt marker
+    # only matters when it could otherwise turn a failure-free run green.
     if ! assertion_skips="$(count_assertion_skips "${log_dir}/${name}.assertion-skips")"; then
-      assertion_skips=0 reason=invalid-assertion-skip-marker
+      assertion_skips=0
+      [ "$status" != 0 ] || reason=invalid-assertion-skip-marker
     fi
   fi
   if [ -n "$reason" ]; then
@@ -410,20 +416,21 @@ partial=0
 partial_suites=""
 partial_paths=()
 failed=""
+tally_suite() {
+  if ! report_suite "$1"; then
+    failed="${failed}${1} "
+  elif [ "$suite_state" = partial ]; then
+    partial=$((partial + 1))
+    partial_suites="${partial_suites}${1} "
+    partial_paths=(${partial_paths[@]:+"${partial_paths[@]}"} "$1")
+  else
+    passed=$((passed + 1))
+  fi
+}
 if [ "$jobs" -eq 1 ]; then
   for path in ${to_run[@]:+"${to_run[@]}"}; do
     run_suite "$path"
-    if report_suite "$path"; then
-      if [ "$suite_state" = partial ]; then
-        partial=$((partial + 1))
-        partial_suites="${partial_suites}${path} "
-        partial_paths=(${partial_paths[@]:+"${partial_paths[@]}"} "$path")
-      else
-        passed=$((passed + 1))
-      fi
-    else
-      failed="${failed}${path} "
-    fi
+    tally_suite "$path"
   done
 else
   # Waves of $jobs suites: bash 3.2 has no `wait -n`, and a wave that is
@@ -437,17 +444,7 @@ else
     done
     wait
     for path in "${wave[@]}"; do
-      if report_suite "$path"; then
-        if [ "$suite_state" = partial ]; then
-          partial=$((partial + 1))
-          partial_suites="${partial_suites}${path} "
-          partial_paths=(${partial_paths[@]:+"${partial_paths[@]}"} "$path")
-        else
-          passed=$((passed + 1))
-        fi
-      else
-        failed="${failed}${path} "
-      fi
+      tally_suite "$path"
     done
     wave=()
   }
