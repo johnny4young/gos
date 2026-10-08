@@ -10,6 +10,15 @@ pass() {
   printf 'ok - %s\n' "$*"
 }
 
+# A skipped assertion is not proof of validation. The runner supplies a private
+# per-suite marker so nested test commands cannot hide that distinction in stdout.
+skip_assertion() {
+  printf 'skip - %s\n' "$*"
+  if [ -n "${GOS_TEST_ASSERTION_SKIP_FILE:-}" ]; then
+    printf 'skipped\n' >>"$GOS_TEST_ASSERTION_SKIP_FILE" || fail 'cannot record skipped assertion'
+  fi
+}
+
 assert_contains() {
   local haystack="$1" needle="$2" name="$3"
   case "$haystack" in
@@ -47,7 +56,7 @@ assert_json() {
     printf '%s\n' "$json" | python3 -c 'import json, sys; json.load(sys.stdin)' >/dev/null \
       || fail "${name}: output is not valid JSON: ${json}"
   else
-    pass "${name}: JSON validation skipped (jq/python3 unavailable)"
+    skip_assertion "${name}: JSON validation skipped (jq/python3 unavailable)"
   fi
 }
 

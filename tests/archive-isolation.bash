@@ -132,6 +132,8 @@ if [ "$(id -u)" != 0 ]; then
   assert_contains "$output" "could not be read; downloading a fresh archive" "unreadable cache warning"
   assert_not_contains "$output" "cp:" "unreadable cache cp noise"
   pass "an unreadable cache entry falls back to a download without cp noise"
+else
+  skip_assertion "unreadable cache entry case skipped: running as root (id -u == 0) can read mode 000 files"
 fi
 
 # A failed staging copy must leave an existing cache entry intact, and remove

@@ -110,6 +110,83 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
   assert_contains "$output" '2/2 version(s) failed.' "each continues after failed installations"
   pass "run uses installed side-by-side versions without switching and propagates exit codes"
 
+  # Capture the launcher's pid before exec so a helper that adds a wrapper
+  # process cannot silently change run's process-replacement contract.
+  launch="${case_dir}/launch.bash"
+  child="${case_dir}/inspect-command.bash"
+  cat >"$launch" <<'LAUNCH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$$" >"$GOS_TEST_COMMAND_PID"
+exec bash "$@"
+LAUNCH
+  cat >"$child" <<'CHILD'
+#!/usr/bin/env bash
+set -euo pipefail
+[ -z "${GOROOT+x}" ] || exit 90
+[ "${GOTOOLCHAIN:-}" = go1.30.0+path ] || exit 91
+[ "$PATH" = "${GOS_TEST_EXPECTED_BIN}:${GOS_TEST_ORIGINAL_COMMAND_PATH}" ] || exit 92
+[ "$#" -eq 4 ] || exit 93
+[ "$1" = 'two words' ] && [ "$2" = '' ] && [ "$3" = '--json' ] && [ "$4" = '*' ] || exit 94
+[ ! -e "${GOS_INSTALL_DIR}.gos-lock" ] || exit 95
+[ "${version_dir-}" = caller-version-dir ] || exit 96
+printf '%s\n' "$$"
+CHILD
+  # Remove the version so run installs it under the mutation lock, which must
+  # be gone before exec; install progress goes to stderr, so stdout is the pid.
+  rm -rf "${versions_dir}/go1.20.0"
+  GOROOT="${case_dir}/caller-root" GOTOOLCHAIN=go1.30.0+path \
+    version_dir=caller-version-dir \
+    GOS_TEST_STDERR_FILE="${case_dir}/run-exec.err" \
+    GOS_TEST_COMMAND_PID="${case_dir}/command.pid" \
+    GOS_TEST_EXPECTED_BIN="${versions_dir}/go1.20.0/bin" \
+    GOS_TEST_ORIGINAL_COMMAND_PATH="${fake_bin}:${original_path}" \
+    GOS_TEST_VERSIONS_DIR="$versions_dir" \
+    run_gos "$case_dir" bash "$launch" "$script" run 1.20.0 -- bash "$child" 'two words' '' --json '*'
+  assert_status 0 "$status" "run command environment and exact arguments" "$output"
+  [ "$output" = "$(cat "${case_dir}/command.pid")" ] || fail "run added a wrapper process: ${output}"
+  pass "run replaces its process with the exact child arguments and isolated Go environment"
+
+  cat >"$child" <<'CHILD'
+#!/usr/bin/env bash
+set -euo pipefail
+[ -z "${GOROOT+x}" ] || exit 90
+[ "${GOTOOLCHAIN:-}" = go1.30.0+path ] || exit 91
+version_bin="${PATH%%:*}"
+[ "${PATH#*:}" = "$GOS_TEST_ORIGINAL_COMMAND_PATH" ] || exit 92
+printf 'child=%s\n' "$version_bin" >>"$GOS_TEST_COMMAND_LOG"
+case "$version_bin" in
+  */go1.20.0/bin) exit 23 ;;
+  */go1.21.6/bin) exit 0 ;;
+  *) exit 93 ;;
+esac
+CHILD
+  GOROOT="${case_dir}/caller-root" GOTOOLCHAIN=go1.30.0+path \
+    GOS_TEST_COMMAND_LOG="${case_dir}/command.log" \
+    GOS_TEST_ORIGINAL_COMMAND_PATH="${fake_bin}:${original_path}" \
+    GOS_TEST_VERSIONS_DIR="$versions_dir" \
+    run_gos "$case_dir" bash "$script" each 1.20.0,1.21.6 -- bash "$child"
+  assert_status 1 "$status" "each command environment isolation" "$output"
+  expected_log="$(printf 'child=%s/bin\n' "${versions_dir}/go1.20.0" "${versions_dir}/go1.21.6")"
+  [ "$(cat "${case_dir}/command.log")" = "$expected_log" ] || fail "each did not run both isolated children"
+  assert_contains "$output" 'go1.20.0 (exit 23)' "each records the first child status"
+  assert_contains "$output" '✓ go1.21.6' "each continues with the second child"
+  assert_contains "$output" '1/2 version(s) failed.' "each retains its aggregate status"
+  pass "each isolates PATH and GOROOT per child and continues after a real failure"
+
+  # A signaled child must remain a child result, rather than acquiring gos's
+  # own error classification or aborting the remaining each iteration.
+  # shellcheck disable=SC2016 # The child shell sends the signal to itself.
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" run 1.20.0 -- bash -c 'kill -TERM "$$"'
+  assert_status 143 "$status" "run signal-derived child status" "$output"
+  # shellcheck disable=SC2016 # Positional parameters belong to the child shell.
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" each 1.20.0,1.21.6 -- bash -c 'printf "%s\n" "$1"; kill -TERM "$$"' _ signal-child
+  assert_status 1 "$status" "each signal-derived child status" "$output"
+  [ "$(printf '%s\n' "$output" | grep -c '^signal-child$')" -eq 2 ] || fail "each aborted after a signaled child"
+  assert_contains "$output" '(exit 143)' "each records signal-derived status"
+  assert_contains "$output" '2/2 version(s) failed.' "each summarizes signaled children"
+  pass "run preserves signal-derived status and each collects it without stopping"
+
   GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" uninstall 1.21.6
   [ "$status" -ne 0 ] || fail "uninstalling the active version should fail"
   assert_contains "$output" "is the active version" "uninstall active guard"
@@ -222,7 +299,7 @@ if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
 
 else
   rm -f "$symlink_probe"
-  pass "side-by-side mode tests skipped (filesystem lacks symlink support)"
+  skip_assertion "side-by-side mode tests skipped (filesystem lacks symlink support)"
 fi
 
 # A flat-mode gos (GOS_VERSIONS_DIR unset, e.g. a cron job or sudo shell that
@@ -245,7 +322,7 @@ if ln -s "$script" "$orphan_probe" 2>/dev/null && [ -L "$orphan_probe" ]; then
   pass "flat-mode installs warn before converting a side-by-side symlink"
 else
   rm -f "$orphan_probe"
-  pass "orphaned versions link test skipped (filesystem lacks symlink support)"
+  skip_assertion "orphaned versions link test skipped (filesystem lacks symlink support)"
 fi
 
 # Coverage the audit found missing: migrating a flat install into side-by-side
@@ -290,5 +367,5 @@ if ln -s "$script" "$coverage_probe" 2>/dev/null && [ -L "$coverage_probe" ]; th
   pass "ambiguous uninstalls remove nothing and run/each keep their own argument errors"
 else
   rm -f "$coverage_probe"
-  pass "side-by-side coverage cases skipped (filesystem lacks symlink support)"
+  skip_assertion "side-by-side coverage cases skipped (filesystem lacks symlink support)"
 fi

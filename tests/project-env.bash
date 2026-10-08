@@ -50,6 +50,8 @@ if command -v fish >/dev/null 2>&1; then
   printf '%s\n' "$output" >"$fish_check"
   fish --no-config --no-execute "$fish_check" \
     || fail "env --fish output is not valid fish syntax"
+else
+  skip_assertion "env --fish syntax check skipped: fish unavailable"
 fi
 pass "env quoting preserves hostile paths for POSIX and Fish"
 
@@ -185,7 +187,7 @@ if [ ! -r "${case_dir}/project/.tool-versions" ]; then
   run_gos "$case_dir" bash "$script" use --print "${case_dir}/project"
   assert_nonzero_status "$status" 'unreadable tool manifest must not fall back' "$output"
 else
-  pass 'unreadable tool manifest check skipped: this host can read mode 000 files'
+  skip_assertion 'unreadable tool manifest check skipped: this host can read mode 000 files'
 fi
 chmod 600 "${case_dir}/project/.tool-versions"
 [ ! -s "${case_dir}/urls.log" ] || fail 'manifest fallback must remain offline'
@@ -357,5 +359,7 @@ if command -v fish >/dev/null 2>&1; then
   printf '%s\n' "$output" >"$fish_check"
   fish --no-config --no-execute "$fish_check" \
     || fail "env --auto --fish output is not valid fish syntax"
+else
+  skip_assertion "env --auto --fish syntax check skipped: fish unavailable"
 fi
 pass "env --auto emits offline per-shell auto-switch hooks"

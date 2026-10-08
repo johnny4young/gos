@@ -2630,6 +2630,16 @@ _gos_ensure_version_dir() {
   _gos_ensured_version="$version"
 }
 
+# Execute a user command with one resolved version. This must stay a normal
+# function: run replaces gos itself, while each owns its per-version subshell.
+# Probe-only GOTOOLCHAIN=local must never leak into the user's command. The
+# helper declares no locals: bash exports a local that shadows a variable the
+# caller exported, so a named local would rewrite that variable for the child.
+_gos_exec_version_command() {
+  unset GOROOT
+  PATH="${1}/bin:${PATH}" exec "${@:2}"
+}
+
 cmd_run() {
   local version="${1:-}" project_resolved project_source
 
@@ -2678,8 +2688,7 @@ cmd_run() {
   _gos_ensure_version_dir "$version" || return 1
 
   _gos_release_lock
-  unset GOROOT
-  PATH="${_gos_ensured_dir}/bin:${PATH}" exec "$@"
+  _gos_exec_version_command "$_gos_ensured_dir" "$@"
 }
 
 cmd_each() {
@@ -2762,8 +2771,7 @@ cmd_each() {
     # non-zero command from tripping set -e and aborting the whole run.
     rc=0
     (
-      unset GOROOT
-      PATH="${_gos_ensured_dir}/bin:${PATH}" exec "${command[@]}"
+      _gos_exec_version_command "$_gos_ensured_dir" "${command[@]}"
     ) || rc=$?
     if [ "$rc" -eq 0 ]; then
       result_label+=("go${_gos_ensured_version}")
