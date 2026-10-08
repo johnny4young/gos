@@ -6,6 +6,13 @@ on:
     branches:
       - main
 
+# Superseded pull request feedback must not occupy the current head's runners.
+# Pushes to main get one group per commit and are never cancelled, so every
+# merged commit keeps a complete CI result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 

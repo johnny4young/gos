@@ -432,6 +432,97 @@ assert(ci_on.dig("push", "branches")&.include?("main"), "CI must run on pushes t
 assert(ci.dig("permissions", "contents") == "read", "CI must use read-only contents permission")
 assert(ci.dig("defaults", "run", "shell") == "bash", "CI must default to bash shell")
 
+ci_pr_filters = (ci_on["pull_request"] || {}).to_h
+assert(!ci_pr_filters.key?("branches") && !ci_pr_filters.key?("branches-ignore"), "CI must also qualify non-default stacked PR bases")
+# Evaluate the configured concurrency expressions (not a copy of them) for
+# representative events, so a config change that cancels main runs, merges
+# PRs into one group, or stops superseding PR revisions fails here.
+ci_concurrency = ci.fetch("concurrency") { fail!("CI must define concurrency") }
+ci_group_template = ci_concurrency.fetch("group")
+ci_cancel_template = ci_concurrency.fetch("cancel-in-progress")
+gha_truthy = ->(value) { !(value.nil? || value == false || value == "" || value == 0) }
+# GitHub compares strings case-insensitively.
+gha_equal = ->(left, right) { left.is_a?(String) && right.is_a?(String) ? left.casecmp?(right) : left == right }
+gha_eval = lambda do |source, context|
+  tokens = source.scan(/\s*(\|\||&&|==|!=|\(|\)|'(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_.-]*)/).flatten
+  assert(tokens.join.gsub(/\s+/, "") == source.gsub(/\s+/, ""), "unsupported expression in CI concurrency: #{source}")
+  position = 0
+  peek = -> { tokens[position] }
+  take = -> { token = tokens[position]; position += 1; token }
+  parse_or = nil
+  parse_primary = lambda do
+    token = take.call
+    case token
+    when "(" then value = parse_or.call; assert(take.call == ")", "unbalanced CI concurrency expression"); value
+    when /\A'(.*)'\z/m then Regexp.last_match(1).gsub("''", "'")
+    when "true" then true
+    when "false" then false
+    else
+      assert(context.key?(token), "unknown CI concurrency context #{token}")
+      context.fetch(token)
+    end
+  end
+  parse_compare = lambda do
+    left = parse_primary.call
+    while %w[== !=].include?(peek.call)
+      operator = take.call
+      right = parse_primary.call
+      left = operator == "==" ? gha_equal.call(left, right) : !gha_equal.call(left, right)
+    end
+    left
+  end
+  parse_and = lambda do
+    left = parse_compare.call
+    while peek.call == "&&"
+      take.call
+      right = parse_compare.call
+      left = gha_truthy.call(left) ? right : left
+    end
+    left
+  end
+  parse_or = lambda do
+    left = parse_and.call
+    while peek.call == "||"
+      take.call
+      right = parse_and.call
+      left = gha_truthy.call(left) ? left : right
+    end
+    left
+  end
+  value = parse_or.call
+  assert(position == tokens.length, "trailing tokens in CI concurrency expression: #{source}")
+  value
+end
+# A YAML scalar is used as-is; a lone expression keeps its type; anything
+# else interpolates each expression as a string.
+gha_render = lambda do |template, context|
+  next template unless template.is_a?(String)
+
+  whole = template.strip.match(/\A\$\{\{((?:(?!\}\}).)*)\}\}\z/m)
+  next gha_eval.call(whole[1], context) if whole
+
+  template.gsub(/\$\{\{(.*?)\}\}/m) { gha_eval.call(Regexp.last_match(1), context).to_s }
+end
+# github.workflow is the workflow name, or its file path when unnamed.
+ci_name = ci.fetch("name", ".github/workflows/ci.yml")
+ci_event = lambda do |event_name, ref, sha|
+  { "github.workflow" => ci_name, "github.event_name" => event_name, "github.ref" => ref, "github.sha" => sha }
+end
+pr45_a = ci_event.call("pull_request", "refs/pull/45/merge", "a" * 40)
+pr45_b = ci_event.call("pull_request", "refs/pull/45/merge", "b" * 40)
+pr46 = ci_event.call("pull_request", "refs/pull/46/merge", "a" * 40)
+main_a = ci_event.call("push", "refs/heads/main", "a" * 40)
+main_b = ci_event.call("push", "refs/heads/main", "b" * 40)
+group_of = ->(context) { gha_render.call(ci_group_template, context).to_s }
+cancels = ->(context) { gha_truthy.call(gha_render.call(ci_cancel_template, context)) }
+assert(group_of.call(pr45_a).include?(ci_name), "CI concurrency groups must include the workflow name")
+assert(group_of.call(pr45_a) == group_of.call(pr45_b), "replacement PR commits must share a group")
+assert(cancels.call(pr45_a), "CI must cancel superseded pull request runs")
+assert(group_of.call(pr45_a) != group_of.call(pr46), "different PRs must remain independent")
+assert(group_of.call(main_a) != group_of.call(pr45_a), "main and PR feedback must remain independent")
+assert(group_of.call(main_a) != group_of.call(main_b), "each main commit must keep its own group so no merged commit loses CI")
+assert(!cancels.call(main_a), "CI must never cancel runs for pushes to main")
+
 ci_jobs = ci.fetch("jobs") { fail!("CI must define jobs") }
 %w[shellcheck shfmt smoke workflow-validation actionlint].each do |job|
   assert(ci_jobs.key?(job), "CI must define #{job} job")
