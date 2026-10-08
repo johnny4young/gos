@@ -4597,6 +4597,9 @@ _gos_doctor_apply_fixes() {
 _gos_go_version_output_is_valid() {
   local LC_ALL=C
   local pattern='^go version (go[0-9]+(\.[0-9]+(\.[0-9]+)?((rc|beta)[0-9]+)?)?(-[[:graph:]]+)?( [[:print:]]+)?|devel [[:print:]]+) [a-z0-9]+/[a-z0-9]+$'
+  # Git Bash's C locale still classifies bytes above 0x7e as printable, so
+  # reject anything outside printable ASCII byte-wise before the pattern.
+  [ -z "$(printf '%s' "$1" | LC_ALL=C tr -d ' -~')" ] || return 1
   [[ "$1" =~ $pattern ]]
 }
 
