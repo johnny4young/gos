@@ -120,6 +120,12 @@ to enforce that floor.
 - Preserve the release-asset install path as the trusted default; raw `main`
   URLs are for development testing only.
 
+CI cancels superseded runs of the same pull request. Separate PRs remain
+independent, including stacked PRs targeting non-default branches. Pushes to
+main use one group per commit and are never cancelled, so every merged commit
+keeps a complete result. This does not change the serialized, non-cancelling
+live canary or release lane.
+
 ## Community Standards
 
 Participation in this project is covered by the
