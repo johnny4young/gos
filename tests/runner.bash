@@ -185,24 +185,32 @@ for suffix in status log duration; do
   assert_status 1 "$status" "summary unreadable ${suffix}" "$output"
   ruby -rjson -e 'report = JSON.parse(File.read(ARGV[0])); abort "missing failures" unless report["suites"].length == 2 && report["suites"].all? { |suite| suite["status"] == "failed" && suite["reason"].start_with?("missing-") }' "${test_root}/missing-${suffix}.json" || fail 'missing measurement/status/log fails closed in summary'
 done
-cat >"${test_root}/tools/cat" <<'TOOL'
+for corrupt in corrupt 007; do
+  cat >"${test_root}/tools/cat" <<TOOL
 #!/usr/bin/env bash
-case "${1:-}" in
-  *."$GOS_TEST_RUNNER_FAIL_READ") printf 'corrupt\n'; exit 0 ;;
+case "\${1:-}" in
+  *."\$GOS_TEST_RUNNER_FAIL_READ") printf '%s\\n' '${corrupt}'; exit 0 ;;
 esac
-exec "$GOS_TEST_RUNNER_REAL_CAT" "$@"
+exec "\$GOS_TEST_RUNNER_REAL_CAT" "\$@"
 TOOL
-for suffix in status duration; do
-  GOS_TEST_RUNNER_REAL_CAT="$real_cat" GOS_TEST_RUNNER_FAIL_READ="$suffix" \
-    PATH="${test_root}/tools:${PATH}" run_runner --jobs 1 --summary "${test_root}/corrupt-${suffix}.json" pass
-  assert_status 1 "$status" "summary corrupt ${suffix}" "$output"
-  ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").fetch(0); abort "corruption accepted" unless suite["status"] == "failed" && suite["reason"].start_with?("invalid-")' "${test_root}/corrupt-${suffix}.json" || fail 'corrupt markers fail closed'
+  for suffix in status duration; do
+    GOS_TEST_RUNNER_REAL_CAT="$real_cat" GOS_TEST_RUNNER_FAIL_READ="$suffix" \
+      PATH="${test_root}/tools:${PATH}" run_runner --jobs 1 --summary "${test_root}/corrupt-${suffix}.json" pass
+    assert_status 1 "$status" "summary corrupt ${suffix} ${corrupt}" "$output"
+    assert_contains "$output" 'PASS stdout' "corrupt ${suffix} keeps the suite log"
+    ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").fetch(0); abort "corruption accepted" unless suite["status"] == "failed" && suite["reason"].start_with?("invalid-")' "${test_root}/corrupt-${suffix}.json" || fail 'corrupt markers fail closed'
+  done
 done
 run_runner --summary
 assert_status 2 "$status" 'missing summary argument' "$output"
-run_runner --summary "${test_root}/summary-${mode}.json/child" pass
+run_runner --summary "${test_root}/summary-1.json/child" pass fail
 assert_status 1 "$status" 'unwritable summary destination' "$output"
 assert_contains "$output" 'could not write test summary' 'summary write fails closed'
+assert_contains "$output" 'not ok - test suites failed: tests/fail.bash' 'summary write failure keeps the failed suite list'
+mkdir -p "${test_root}/summary-dir"
+run_runner --summary "${test_root}/summary-dir" pass
+assert_status 1 "$status" 'directory summary destination' "$output"
+[ -z "$(ls -A "${test_root}/summary-dir")" ] || fail 'a directory summary destination must not receive the report'
 # The runner changes into the repository root; a relative summary path must
 # still land beside the caller instead of dirtying the checkout.
 relative_dir="${test_root}/relative-cwd"

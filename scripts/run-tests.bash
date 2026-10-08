@@ -247,7 +247,7 @@ record_suite() {
 run_suite() {
   # Writes the suite's combined output and status. No stdin: a suite must
   # never consume the runner's input. Measurements never change pass criteria.
-  local path="$1" name status started
+  local path="$1" name status started elapsed
   name="$path"
   mkdir -p "${log_dir}/${name%/*}"
   status=0
@@ -255,46 +255,46 @@ run_suite() {
   bash "$path" </dev/null >"${log_dir}/${name}.log" 2>&1 || status=$?
   printf '%s\n' "$status" >"${log_dir}/${name}.status"
   if [ -n "$summary_path" ]; then
-    printf '%s\n' "$((SECONDS - started))" >"${log_dir}/${name}.duration"
+    # SECONDS follows the wall clock; a backward clock step is not a failure.
+    elapsed=$((SECONDS - started))
+    [ "$elapsed" -ge 0 ] || elapsed=0
+    printf '%s\n' "$elapsed" >"${log_dir}/${name}.duration"
   fi
 }
 
 report_suite() {
-  local path="$1" name status duration="null"
+  # Unreadable or non-canonical markers fail closed, but the suite's header and
+  # log are still printed so the failure keeps its diagnostics.
+  local path="$1" name status duration=null reason=""
   name="$path"
   if ! status="$(cat "${log_dir}/${name}.status")"; then
-    record_suite "$path" failed null null missing-status
-    return 1
-  fi
-  case "$status" in
-    '' | *[!0-9]*)
-      record_suite "$path" failed null null invalid-status
-      return 1
-      ;;
-  esac
-  if [ -n "$summary_path" ]; then
-    if ! duration="$(cat "${log_dir}/${name}.duration")"; then
-      record_suite "$path" failed null "$status" missing-duration
-      return 1
-    fi
-    case "$duration" in
-      '' | *[!0-9]*)
-        record_suite "$path" failed null "$status" invalid-duration
-        return 1
-        ;;
+    status=null reason=missing-status
+  else
+    case "$status" in
+      '' | 0?* | *[!0-9]*) status=null reason=invalid-status ;;
     esac
   fi
-  printf '=== %s (%s) ===\n' "$path" "$([ "$status" -eq 0 ] && echo ok || echo "FAILED, status ${status}")"
-  if ! cat "${log_dir}/${name}.log"; then
-    record_suite "$path" failed "$duration" "$status" missing-log
+  if [ -z "$reason" ] && [ -n "$summary_path" ]; then
+    if ! duration="$(cat "${log_dir}/${name}.duration")"; then
+      duration=null reason=missing-duration
+    else
+      case "$duration" in
+        '' | 0?* | *[!0-9]*) duration=null reason=invalid-duration ;;
+      esac
+    fi
+  fi
+  if [ -n "$reason" ]; then
+    printf '=== %s (FAILED, %s) ===\n' "$path" "$reason"
+  else
+    printf '=== %s (%s) ===\n' "$path" "$([ "$status" = 0 ] && echo ok || echo "FAILED, status ${status}")"
+  fi
+  cat "${log_dir}/${name}.log" || reason="${reason:-missing-log}"
+  [ -n "$reason" ] || [ "$status" = 0 ] || reason=child-exit
+  if [ -n "$reason" ]; then
+    record_suite "$path" failed "$duration" "$status" "$reason"
     return 1
   fi
-  if [ "$status" -eq 0 ]; then
-    record_suite "$path" passed "$duration" "$status" ""
-  else
-    record_suite "$path" failed "$duration" "$status" child-exit
-  fi
-  [ "$status" -eq 0 ]
+  record_suite "$path" passed "$duration" "$status" ""
 }
 
 # JSON quoting uses Bash builtins, including ASCII control characters, so the
@@ -326,6 +326,8 @@ write_summary() {
   head="$(git rev-parse HEAD 2>/dev/null)" || head=""
   if [ -n "$head" ] && ! git diff --quiet HEAD --; then dirty=true; fi
   host="$(uname -s)"
+  # mv would move the report into an existing directory and report success.
+  [ ! -d "$summary_path" ] || return 1
   mkdir -p "$(dirname "$summary_path")" || return 1
   temp="$(mktemp "${summary_path}.XXXXXX")" || return 1
   if ! {
@@ -408,12 +410,14 @@ else
   flush_wave
 fi
 
+summary_written=1
 if ! write_summary; then
   printf 'not ok - could not write test summary: %s\n' "$summary_path" >&2
-  exit 1
+  summary_written=0
 fi
 if [ -n "$failed" ]; then
   printf 'not ok - test suites failed: %s\n' "$failed" >&2
   exit 1
 fi
+[ "$summary_written" -eq 1 ] || exit 1
 printf 'ok - %s test suite(s) passed, %s skipped on %s\n' "$passed" "$skipped" "$target_os"
