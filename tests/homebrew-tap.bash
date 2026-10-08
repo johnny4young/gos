@@ -10,6 +10,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tests/lib.bash
 . "${repo_root}/tests/lib.bash"
+# The script under test appends to the job summary; fixture releases must not
+# reach the real CI summary, which lists partial suites.
+unset GITHUB_STEP_SUMMARY
 script="${repo_root}/scripts/update-homebrew-tap.sh"
 test_root="$(mktemp -d)"
 
