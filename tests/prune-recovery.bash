@@ -68,3 +68,52 @@ run_gos "$case_dir" bash "$script" prune --rollback --json
 assert_status 0 "$status" "prune without residue" "$output"
 [ ! -e "${case_dir}/probe.log" ] || fail "prune without residue must not execute the active runtime"
 pass "prune probes only when crash-recovery cleanup needs a health decision"
+
+# A healthy runtime is judged by the install, not by the caller's environment:
+# a stale exported GOROOT must not make it look broken, and a probe that reads
+# stdin must not swallow the NUL-delimited residue list the prune loop reads.
+case_dir="${test_root}/prune-probe-env"
+create_old_install "${case_dir}/go"
+create_old_install "${case_dir}/go.gos-backup.123"
+create_old_install "${case_dir}/go.gos-current.456"
+cat >"${case_dir}/go/bin/go" <<'ENV_PROBE'
+#!/usr/bin/env bash
+[ -z "${GOROOT:-}" ] || exit 2
+cat >/dev/null
+echo 'go version go1.24.0 linux/amd64'
+ENV_PROBE
+GOROOT="${case_dir}/missing-goroot" run_gos "$case_dir" bash "$script" prune --rollback --json
+assert_status 0 "$status" "prune with stale GOROOT" "$output"
+assert_contains "$output" '"orphaned_backups_found":2,"orphaned_backups_removed":2' "probe ignores stale GOROOT and stdin"
+pass "prune probe ignores a stale GOROOT and cannot consume the residue list"
+
+# Side-by-side: GOS_INSTALL_DIR is an activation symlink and residue slots are
+# links too. Removing residue must drop only the links, never their targets,
+# and a dangling activation link counts as a broken runtime.
+for active in healthy dangling; do
+  case_dir="${test_root}/prune-side-by-side-${active}"
+  versions_dir="${case_dir}/versions"
+  create_old_install "${versions_dir}/go1.24.0" 1.24.0
+  create_old_install "${versions_dir}/go1.23.0" 1.23.0
+  if [ "$active" = healthy ]; then
+    ln -s "${versions_dir}/go1.24.0" "${case_dir}/go"
+  else
+    ln -s "${versions_dir}/go1.22.0" "${case_dir}/go"
+  fi
+  ln -s "${versions_dir}/go1.23.0" "${case_dir}/go.gos-backup.123"
+  ln -s "${versions_dir}/go1.21.0" "${case_dir}/go.gos-current.456"
+  GOS_TEST_VERSIONS_DIR="$versions_dir" run_gos "$case_dir" bash "$script" prune --rollback
+  assert_status 0 "$status" "side-by-side prune ${active}" "$output"
+  if [ "$active" = healthy ]; then
+    [ ! -L "${case_dir}/go.gos-backup.123" ] || fail "side-by-side prune retained backup link"
+    [ ! -L "${case_dir}/go.gos-current.456" ] || fail "side-by-side prune retained dangling residue link"
+    assert_contains "$output" "Removed orphaned backup at ${case_dir}/go.gos-backup.123." "side-by-side removal report"
+  else
+    [ -L "${case_dir}/go.gos-backup.123" ] || fail "dangling activation must keep backup link"
+    [ -L "${case_dir}/go.gos-current.456" ] || fail "dangling activation must keep residue link"
+    assert_contains "$output" "Keeping orphaned backup at ${case_dir}/go.gos-backup.123: the active Go could not report its local version." "side-by-side keep report"
+  fi
+  [ -x "${versions_dir}/go1.23.0/bin/go" ] || fail "side-by-side prune removed a residue link target"
+  [ -x "${versions_dir}/go1.24.0/bin/go" ] || fail "side-by-side prune removed the active version"
+  pass "side-by-side prune with ${active} activation link removes only residue links"
+done

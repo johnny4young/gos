@@ -51,7 +51,7 @@
     "orphaned_backups_removed": {
       "type": "integer",
       "minimum": 0,
-      "description": "Of those, removed (only with --rollback)."
+      "description": "Of those, removed (only with --rollback, and only when the active Go reports its local version)."
     }
   },
   "required": [

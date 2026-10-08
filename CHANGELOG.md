@@ -9,8 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Fixed
 
 - Project resolution skips `.tool-versions` files that only pin other languages, preserving `go.mod` and parent Go pins. Bash/Zsh auto-switching tracks both the unrelated manifest and the selected Go manifest so edits in the same directory invalidate the prompt cache. Incomplete explicit Go entries still fail closed, and the first `go`/`golang` entry decides (a bare entry no longer lets a later line win). `.tool-versions` fields are no longer pathname-expanded, so `golang *` cannot select a version from file names in the working directory.
-- Pruning crash-recovery backups requires the active Go to successfully report its local version, rather than only having executable mode. Broken active installs retain those recovery copies, including in dry-run reports.
-
+- Pruning crash-recovery backups requires the active Go to successfully report its local version, rather than only having executable mode. Broken active installs retain those recovery copies, including in dry-run reports. Go version probes ignore a stale exported `GOROOT` and no longer inherit gos's own input.
 - Windows uninstall validates ownership, removes only known installed files, and preserves unrelated contents instead of recursively deleting the target directory. Existing installations without a receipt remain supported, with their ambiguous `LICENSE` left in place.
 - Windows installs stage replacements on the destination filesystem and restore previous files on publication failure. Failed fresh installs remove partial payloads; failed restoration keeps recovery files and reports their location.
 - Windows PATH edits refresh a stale process even when the registry already contains gos, remove process entries on uninstall, and preserve registry value types and unrelated entries. Tests use registry substitutes and a disposable native Windows key.
