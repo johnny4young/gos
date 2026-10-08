@@ -259,7 +259,7 @@ record_suite() {
 run_suite() {
   # Writes the suite's combined output and status. No stdin: a suite must
   # never consume the runner's input. Measurements never change pass criteria.
-  local path="$1" name status started
+  local path="$1" name status started elapsed
   name="$path"
   mkdir -p "${log_dir}/${name%/*}"
   status=0
@@ -267,7 +267,10 @@ run_suite() {
   GOS_TEST_ASSERTION_SKIP_FILE="${log_dir}/${name}.assertion-skips" bash "$path" </dev/null >"${log_dir}/${name}.log" 2>&1 || status=$?
   printf '%s\n' "$status" >"${log_dir}/${name}.status"
   if [ -n "$summary_path" ]; then
-    printf '%s\n' "$((SECONDS - started))" >"${log_dir}/${name}.duration"
+    # SECONDS follows the wall clock; a backward clock step is not a failure.
+    elapsed=$((SECONDS - started))
+    [ "$elapsed" -ge 0 ] || elapsed=0
+    printf '%s\n' "$elapsed" >"${log_dir}/${name}.duration"
   fi
 }
 
@@ -281,55 +284,50 @@ count_assertion_skips() {
 }
 
 report_suite() {
-  local path="$1" name status duration="null" assertion_skips=0 label
+  # Unreadable or non-canonical markers fail closed, but the suite's header and
+  # log are still printed so the failure keeps its diagnostics.
+  local path="$1" name status duration=null reason="" assertion_skips=0 label
   suite_state="failed"
   name="$path"
   if ! status="$(cat "${log_dir}/${name}.status")"; then
-    record_suite "$path" failed null null missing-status
-    return 1
-  fi
-  case "$status" in
-    '' | *[!0-9]*)
-      record_suite "$path" failed null null invalid-status
-      return 1
-      ;;
-  esac
-  if [ -n "$summary_path" ]; then
-    if ! duration="$(cat "${log_dir}/${name}.duration")"; then
-      record_suite "$path" failed null "$status" missing-duration
-      return 1
-    fi
-    case "$duration" in
-      '' | *[!0-9]*)
-        record_suite "$path" failed null "$status" invalid-duration
-        return 1
-        ;;
+    status=null reason=missing-status
+  else
+    case "$status" in
+      '' | 0?* | *[!0-9]*) status=null reason=invalid-status ;;
     esac
   fi
-  if [ -f "${log_dir}/${name}.assertion-skips" ]; then
-    if ! assertion_skips="$(count_assertion_skips "${log_dir}/${name}.assertion-skips")"; then
-      record_suite "$path" failed "$duration" "$status" invalid-assertion-skip-marker
-      return 1
+  if [ -z "$reason" ] && [ -n "$summary_path" ]; then
+    if ! duration="$(cat "${log_dir}/${name}.duration")"; then
+      duration=null reason=missing-duration
+    else
+      case "$duration" in
+        '' | 0?* | *[!0-9]*) duration=null reason=invalid-duration ;;
+      esac
     fi
   fi
-  label="FAILED, status ${status}"
-  if [ "$status" -eq 0 ]; then
+  if [ -z "$reason" ] && [ -f "${log_dir}/${name}.assertion-skips" ]; then
+    if ! assertion_skips="$(count_assertion_skips "${log_dir}/${name}.assertion-skips")"; then
+      assertion_skips=0 reason=invalid-assertion-skip-marker
+    fi
+  fi
+  if [ -n "$reason" ]; then
+    label="FAILED, ${reason}"
+  elif [ "$status" = 0 ]; then
     label=ok
     if [ "$assertion_skips" -gt 0 ]; then label="partial, ${assertion_skips} skipped assertion(s)"; fi
+  else
+    label="FAILED, status ${status}"
   fi
   printf '=== %s (%s) ===\n' "$path" "$label"
-  if ! cat "${log_dir}/${name}.log"; then
-    record_suite "$path" failed "$duration" "$status" missing-log
+  cat "${log_dir}/${name}.log" || reason="${reason:-missing-log}"
+  [ -n "$reason" ] || [ "$status" = 0 ] || reason=child-exit
+  if [ -n "$reason" ]; then
+    record_suite "$path" failed "$duration" "$status" "$reason" "$assertion_skips"
     return 1
   fi
-  if [ "$status" -eq 0 ]; then
-    suite_state=passed
-    if [ "$assertion_skips" -gt 0 ]; then suite_state=partial; fi
-    record_suite "$path" "$suite_state" "$duration" "$status" "" "$assertion_skips"
-  else
-    record_suite "$path" failed "$duration" "$status" child-exit "$assertion_skips"
-  fi
-  [ "$status" -eq 0 ]
+  suite_state=passed
+  if [ "$assertion_skips" -gt 0 ]; then suite_state=partial; fi
+  record_suite "$path" "$suite_state" "$duration" "$status" "" "$assertion_skips"
 }
 
 # JSON quoting uses Bash builtins, including ASCII control characters, so the
@@ -361,6 +359,8 @@ write_summary() {
   head="$(git rev-parse HEAD 2>/dev/null)" || head=""
   if [ -n "$head" ] && ! git diff --quiet HEAD --; then dirty=true; fi
   host="$(uname -s)"
+  # mv would move the report into an existing directory and report success.
+  [ ! -d "$summary_path" ] || return 1
   mkdir -p "$(dirname "$summary_path")" || return 1
   temp="$(mktemp "${summary_path}.XXXXXX")" || return 1
   if ! {
@@ -458,9 +458,10 @@ else
   flush_wave
 fi
 
+summary_written=1
 if ! write_summary; then
   printf 'not ok - could not write test summary: %s\n' "$summary_path" >&2
-  exit 1
+  summary_written=0
 fi
 # Partial suites are always named, so a green run cannot hide which suites
 # skipped assertions. CI job summaries get the same list.
@@ -481,6 +482,7 @@ if [ -n "$failed" ]; then
   printf 'not ok - test suites failed: %s\n' "$failed" >&2
   exit 1
 fi
+[ "$summary_written" -eq 1 ] || exit 1
 if [ "$fail_on_partial" -eq 1 ] && [ "$partial" -gt 0 ]; then
   printf 'not ok - partial suites are not allowed with --fail-on-partial: %s\n' "$partial_suites" >&2
   exit 1

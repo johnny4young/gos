@@ -110,21 +110,6 @@ constructs such as `mapfile`, `declare -A`, `${var^^}`, and unguarded
 `${array[@]:+"${array[@]}"}`). CI runs the suites under `/bin/bash` on macOS
 to enforce that floor.
 
-## Pull Request Guidelines
-
-- Keep changes focused and explain the user-visible behavior.
-- Add or update tests for installer, rollback, checksum, or release behavior.
-- Update README, SECURITY, RELEASING, packaging docs, or changelog text when the
-  behavior users rely on changes.
-- Avoid live installs in tests unless they are explicitly isolated.
-- Preserve the release-asset install path as the trusted default; raw `main`
-  URLs are for development testing only.
-
-## Community Standards
-
-Participation in this project is covered by the
-[Code of Conduct](CODE_OF_CONDUCT.md).
-
 ## Optional suite observations
 
 Use `scripts/run-tests.bash --jobs 2 --summary /tmp/gos-suite-summary.json` to
@@ -152,3 +137,24 @@ running as root for the protected-parent install cases) goes through
 names partial suites at the end of every run and in the GitHub job summary.
 Pass `--fail-on-partial` to make partial coverage fail the run; CI does not,
 because hosted runners legitimately lack some shells.
+
+## Pull Request Guidelines
+
+- Keep changes focused and explain the user-visible behavior.
+- Add or update tests for installer, rollback, checksum, or release behavior.
+- Update README, SECURITY, RELEASING, packaging docs, or changelog text when the
+  behavior users rely on changes.
+- Avoid live installs in tests unless they are explicitly isolated.
+- Preserve the release-asset install path as the trusted default; raw `main`
+  URLs are for development testing only.
+
+CI cancels superseded runs of the same pull request. Separate PRs remain
+independent, including stacked PRs targeting non-default branches. Pushes to
+main use one group per commit and are never cancelled, so every merged commit
+keeps a complete result. This does not change the serialized, non-cancelling
+live canary or release lane.
+
+## Community Standards
+
+Participation in this project is covered by the
+[Code of Conduct](CODE_OF_CONDUCT.md).

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Project resolution skips `.tool-versions` files that only pin other languages, preserving `go.mod` and parent Go pins. Bash/Zsh auto-switching tracks both the unrelated manifest and the selected Go manifest so edits in the same directory invalidate the prompt cache. Incomplete explicit Go entries still fail closed, and the first `go`/`golang` entry decides (a bare entry no longer lets a later line win). `.tool-versions` fields are no longer pathname-expanded, so `golang *` cannot select a version from file names in the working directory.
 - Windows uninstall validates ownership, removes only known installed files, and preserves unrelated contents instead of recursively deleting the target directory. Existing installations without a receipt remain supported, with their ambiguous `LICENSE` left in place.
 - Windows installs stage replacements on the destination filesystem and restore previous files on publication failure. Failed fresh installs remove partial payloads; failed restoration keeps recovery files and reports their location.
 - Windows PATH edits refresh a stale process even when the registry already contains gos, remove process entries on uninstall, and preserve registry value types and unrelated entries. Tests use registry substitutes and a disposable native Windows key.
@@ -19,10 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- CI cancels superseded runs of the same pull request while retaining separate PRs, all OS/shell jobs, and existing canary/release serialization. Pushes to main are grouped per commit and never cancelled, so every merged commit keeps a complete CI result.
 - Test reports distinguish skipped assertions as partial coverage rather than fully passed suites: every environment-dependent skip (JSON parsers, shells, PTY, symlinks, mode bits, tags, root) is recorded, partial suites are named in the run output and the CI job summary, and `scripts/run-tests.bash --fail-on-partial` makes them fail. The protected-parent install cases skip explicitly as root. Every CI smoke OS explicitly requires a JSON assertion parser.
-
 - The portable test runner can write opt-in per-suite durations and machine-readable outcome/source/interpreter metadata; CI retains those observations without changing its wave scheduler or pass criteria.
-
 - Pinned GitHub Actions dependencies bumped by Dependabot: `actions/attest` 4.2.1 to 4.2.2, `softprops/action-gh-release` 3.0.2 to 3.0.3, and `github/codeql-action/upload-sarif`.
 
 ## [1.11.0] - 2026-09-06
