@@ -38,7 +38,7 @@ done
 pass "every JSON command has a schema and the index lists every schema"
 
 if ! command -v python3 >/dev/null 2>&1; then
-  pass "schema validation skipped (python3 unavailable)"
+  skip_assertion "schema validation skipped (python3 unavailable)"
   exit 0
 fi
 

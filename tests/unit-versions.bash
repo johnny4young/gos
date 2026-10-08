@@ -30,7 +30,7 @@ SCRIPT_PTY_RUNNER
   assert_contains "$(cat "${test_root}/script-pty.out")" "script-pty-ok" "script PTY backend output"
   pass "script PTY fallback runs commands and propagates their status"
 else
-  echo "ok - script PTY fallback skipped: script not installed on this host"
+  skip_assertion "script PTY fallback skipped: script not installed on this host"
 fi
 
 sort_output="$(

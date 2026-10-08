@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Changed
 
 - CI cancels superseded runs of the same pull request while retaining separate PRs, all OS/shell jobs, and existing canary/release serialization. Pushes to main are grouped per commit and never cancelled, so every merged commit keeps a complete CI result.
+- Test reports distinguish skipped assertions as partial coverage rather than fully passed suites: every environment-dependent skip (JSON parsers, shells, PTY, symlinks, mode bits, tags, root) is recorded, partial suites are named in the run output and the CI job summary, and `scripts/run-tests.bash --fail-on-partial` makes them fail. The protected-parent install cases skip explicitly as root. Every CI smoke OS explicitly requires a JSON assertion parser.
 - The portable test runner can write opt-in per-suite durations and machine-readable outcome/source/interpreter metadata; CI retains those observations without changing its wave scheduler or pass criteria.
 - Pinned GitHub Actions dependencies bumped by Dependabot: `actions/attest` 4.2.1 to 4.2.2, `softprops/action-gh-release` 3.0.2 to 3.0.3, and `github/codeql-action/upload-sarif`.
 

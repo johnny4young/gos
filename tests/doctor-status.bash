@@ -172,7 +172,7 @@ chmod +x "$runner"
 if run_with_pty "$runner" "${case_dir}/error-tty.out"; then
   fail "bad install version under TTY should fail"
 elif [ "$pty_ran" -eq 0 ]; then
-  echo "ok - stderr style error TTY branch skipped: no usable pseudo-terminal harness"
+  skip_assertion "stderr style error TTY branch skipped: no usable pseudo-terminal harness"
 else
   error_tty=$(<"${case_dir}/error-tty.out")
   assert_contains "$error_tty" $'\033[31m✗\033[0m' "tty error symbol"
@@ -232,7 +232,7 @@ chmod +x "$runner"
 if run_with_pty "$runner" "${case_dir}/error-no-color.out"; then
   fail "bad install version with NO_COLOR should fail"
 elif [ "$pty_ran" -eq 0 ]; then
-  echo "ok - NO_COLOR error TTY branch skipped: no usable pseudo-terminal harness"
+  skip_assertion "NO_COLOR error TTY branch skipped: no usable pseudo-terminal harness"
 else
   error_plain=$(<"${case_dir}/error-no-color.out")
   case "$error_plain" in
