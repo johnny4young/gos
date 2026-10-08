@@ -2019,7 +2019,9 @@ _gos_read_tool_versions_file() {
   local file="$1" line tool version
   while IFS= read -r line || [ -n "$line" ]; do
     line=${line%%#*}
-    line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    # Trim with parameter expansion, not a sed subprocess per line: the
+    # resolver can now read a .tool-versions at every directory level.
+    line="${line#"${line%%[![:space:]]*}"}"
     [ -z "$line" ] && continue
 
     # Split the whitespace-delimited fields with parameter expansion, not an
@@ -2031,8 +2033,11 @@ _gos_read_tool_versions_file() {
     version="${version%%[[:space:]]*}"
     case "$tool" in
       go | golang)
-        [ -n "$version" ] || return 2
         version="${version#go}"
+        if [ -z "$version" ]; then
+          _gos_error "${file}: the ${tool} entry has no version."
+          return 2
+        fi
         printf '%s\n' "$version"
         return 0
         ;;
@@ -4024,15 +4029,23 @@ __gos_auto_switch() {
         gos_manifest="${gos_manifest}${gos_candidate}"$'\n'
         gos_has_pin=true
         [ "${gos_candidate##*/}" != ".tool-versions" ] || gos_has_pin=false
-        if while IFS= read -r gos_manifest_line || [ -n "$gos_manifest_line" ]; do
-          gos_manifest="${gos_manifest}${gos_manifest_line}"$'\n'
-          # A case pattern, not [[ =~ ]]: this runs in the user's interactive
-          # shell on every prompt and must not clobber BASH_REMATCH or zsh's
-          # MATCH/match (or depend on zsh's RE_MATCH_PCRE module).
-          case "${gos_manifest_line#"${gos_manifest_line%%[![:space:]]*}"}" in
-            go | golang | go[[:space:]]* | golang[[:space:]]*) gos_has_pin=true ;;
-          esac
-        done <"$gos_candidate" 2>/dev/null; then
+        # The group owns the 2>/dev/null: a redirection listed after the
+        # failing <"$gos_candidate" would not silence its error, which would
+        # then print on every prompt for an unreadable manifest.
+        if {
+          while IFS= read -r gos_manifest_line || [ -n "$gos_manifest_line" ]; do
+            gos_manifest="${gos_manifest}${gos_manifest_line}"$'\n'
+            # Only an unrelated-so-far .tool-versions needs the Go-entry scan.
+            # A case pattern, not [[ =~ ]]: this runs in the user's interactive
+            # shell on every prompt and must not clobber BASH_REMATCH or zsh's
+            # MATCH/match (or depend on zsh's RE_MATCH_PCRE module).
+            if [ "$gos_has_pin" = false ]; then
+              case "${gos_manifest_line#"${gos_manifest_line%%[![:space:]]*}"}" in
+                go | golang | go[[:space:]]* | golang[[:space:]]*) gos_has_pin=true ;;
+              esac
+            fi
+          done <"$gos_candidate"
+        } 2>/dev/null; then
           # Include unrelated .tool-versions files in the snapshot, but keep
           # following the resolver to the actual Go pin. Either can change.
           [ "$gos_has_pin" = false ] || break 2

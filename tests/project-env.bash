@@ -155,6 +155,18 @@ run_gos "$case_dir" bash "$script" __project-version "${case_dir}/project"
 printf 'golang\n' >"${case_dir}/project/.tool-versions"
 run_gos "$case_dir" bash "$script" use --print "${case_dir}/project"
 assert_nonzero_status "$status" 'incomplete Go entry must not fall back' "$output"
+assert_contains "$output" 'golang entry has no version' 'incomplete Go entry names the cause'
+[ ! -s "${case_dir}/urls.log" ] || fail 'incomplete Go entry must stay offline'
+# The first Go entry decides: a bare entry must not let a later line win, and
+# a `go` prefix that leaves nothing behind is just as incomplete.
+printf 'golang\ngo 1.20.0\n' >"${case_dir}/project/.tool-versions"
+run_gos "$case_dir" bash "$script" use --print "${case_dir}/project"
+assert_nonzero_status "$status" 'a bare first Go entry must not defer to a later line' "$output"
+assert_not_contains "$output" '1.20.0' 'a later Go entry must not win over a bare first one'
+printf 'go go\n' >"${case_dir}/project/.tool-versions"
+run_gos "$case_dir" bash "$script" use --print "${case_dir}/project"
+assert_nonzero_status "$status" 'a go-prefix-only Go entry is incomplete' "$output"
+assert_contains "$output" 'go entry has no version' 'go-prefix-only entry names the cause'
 # Fields are split without pathname expansion: a stray file named like a
 # version in the caller's directory must not turn `golang *` into a pin.
 mkdir -p "${case_dir}/decoy"
@@ -165,6 +177,8 @@ run_gos "$case_dir" bash "$script" use --print "${case_dir}/project"
 cd "$OLDPWD"
 assert_nonzero_status "$status" 'a glob version must not expand against the working directory' "$output"
 assert_not_contains "$output" '1.21.6' 'tool versions fields are not pathname-expanded'
+# run_gos truncates urls.log on every call, so check after each use --print.
+[ ! -s "${case_dir}/urls.log" ] || fail 'a glob Go entry must stay offline'
 printf 'ruby 3.3.0\n' >"${case_dir}/project/.tool-versions"
 chmod 000 "${case_dir}/project/.tool-versions"
 if [ ! -r "${case_dir}/project/.tool-versions" ]; then
