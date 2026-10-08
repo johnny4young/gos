@@ -197,6 +197,34 @@ includes the GitHub Action output and `verify`'s choice of reference archive.
 The override is scoped to each probe: `gos run` and `gos each` preserve the
 caller's toolchain policy for the user command.
 
+## User-command execution
+
+`_gos_exec_version_command` is the shared execution boundary for `gos run` and
+`gos each`. It takes an already resolved version directory and the command's
+original arguments, unsets `GOROOT`, prepends that directory's `bin` to `PATH`,
+and uses `exec`. It leaves `GOTOOLCHAIN` and other caller settings alone. It
+does not resolve versions, install Go, parse child arguments, print progress,
+or own locks.
+
+Process ownership stays with the callers:
+
+- `cmd_run` resolves or installs the requested version, releases the mutation
+  lock, and calls the helper directly. The command replaces gos without an
+  extra wrapper process, owns stdout, and supplies the final exit status.
+- `cmd_each` calls the same helper inside a separate subshell for each
+  version. Its parent retains the original environment, collects the child's
+  real exit status, continues after failures, and prints the summary. Any
+  failed version makes the aggregate exit status `1`.
+
+Keep the helper a normal function, rather than a subshell function: moving
+the process boundary into it would change `run`'s replacement semantics. Keep
+it free of named locals too: bash exports a local that shadows a
+caller-exported variable of the same name, so the child would see gos's value.
+`tests/side-by-side.bash` covers PID replacement, exact argument forwarding,
+environment isolation, signal-derived child status, and iteration after a
+failed child. The existing platform exclusions and symlink capability probe
+still apply.
+
 ## On-disk state
 
 gos has no database; its state is the filesystem:
