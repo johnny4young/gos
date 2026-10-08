@@ -229,6 +229,11 @@ fi
 echo "moved"
 echo "sudo-warning" >&2
 FAKE_DENIED_THEN_OK
+cat >"${sudo_case}/bin/direct-ok" <<'FAKE_DIRECT_OK'
+#!/usr/bin/env bash
+echo "direct-output"
+echo "direct-warning" >&2
+FAKE_DIRECT_OK
 cat >"${sudo_case}/bin/always-denied" <<'FAKE_ALWAYS_DENIED'
 #!/usr/bin/env bash
 echo "always-denied: Permission denied" >&2
@@ -248,6 +253,9 @@ PATH="${sudo_case}/bin:${fake_bin}:${original_path}" \
   bash -c '
     set -euo pipefail
     . "$1"
+    GOS_SUDO_TARGET="$2" _gos_sudo_for_target direct-ok
+    printf "after-direct\n"
+    printf "after-direct-err\n" >&2
     GOS_SUDO_TARGET="$2" _gos_sudo_for_target denied-then-ok
     printf "after-retry\n"
     printf "after-retry-err\n" >&2
@@ -257,8 +265,8 @@ PATH="${sudo_case}/bin:${fake_bin}:${original_path}" \
     printf "after-fail-err\n" >&2
   ' bash "$sourceable_script" "${sudo_case}/target" \
   >"${sudo_case}/stdout" 2>"${sudo_case}/stderr" || fail "sudo replay harness failed: $(cat "${sudo_case}/stderr")"
-expected_sudo_stdout="$(printf '%s\n' moved after-retry status=4 partial-output status=3)"
-expected_sudo_stderr="$(printf '%s\n' sudo-warning after-retry-err 'always-denied: Permission denied' 'always-denied: Permission denied' after-denied-err 'plain-fail: boom' after-fail-err)"
+expected_sudo_stdout="$(printf '%s\n' direct-output after-direct moved after-retry status=4 partial-output status=3)"
+expected_sudo_stderr="$(printf '%s\n' direct-warning after-direct-err sudo-warning after-retry-err 'always-denied: Permission denied' 'always-denied: Permission denied' after-denied-err 'plain-fail: boom' after-fail-err)"
 [ "$(cat "${sudo_case}/stdout")" = "$expected_sudo_stdout" ] || fail "sudo replay stdout lost line endings: $(cat "${sudo_case}/stdout")"
 [ "$(cat "${sudo_case}/stderr")" = "$expected_sudo_stderr" ] || fail "sudo replay stderr lost line endings: $(cat "${sudo_case}/stderr")"
-pass "sudo retry replays captured output with its line endings"
+pass "sudo wrapper replays captured output with its line endings on every path"
