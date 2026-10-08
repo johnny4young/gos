@@ -577,7 +577,7 @@ assert(psscriptanalyzer && psscriptanalyzer["if"] == "runner.os == 'Windows'" &&
 bash32 = step_named(smoke_steps, "Bash 3.2 compatibility")
 assert(bash32, "smoke job must exercise the bash 3.2 floor")
 assert(bash32["if"] == "runner.os == 'macOS'", "bash 3.2 compatibility step must run on macOS, the only runner shipping bash 3.2")
-assert(bash32["run"].to_s.include?("grep -F 'version 3.2'") && bash32["run"].to_s.include?("bash scripts/run-tests.bash") && bash32["run"].to_s.lines.any? { |line| line.strip == "bash scripts/run-tests.bash --jobs 2" }, "bash 3.2 compatibility step must verify the interpreter and run the feature suites under it")
+assert(bash32["run"].to_s.include?("grep -F 'version 3.2'") && bash32["run"].to_s.include?("bash scripts/run-tests.bash") && bash32["run"].to_s.lines.any? { |line| line.strip == 'bash scripts/run-tests.bash --jobs 2 --summary "${RUNNER_TEMP}/test-summary-bash32.json"' }, "bash 3.2 compatibility step must verify the interpreter and run the feature suites under it")
 assert(command_surface_sync, "smoke job must check generated command surfaces")
 assert(command_surface_sync["run"].to_s.include?("bash scripts/sync-command-surfaces.bash --check"), "command surface sync must use the orchestrator")
 
@@ -601,6 +601,11 @@ assert(bash_syntax["run"].to_s.include?("git ls-files -z '*.sh' '*.bash' | xargs
 tracked_powershell_files.each do |path|
   assert(smoke_runs.include?(path), "smoke job PowerShell syntax must cover tracked PowerShell file #{path}")
 end
+summary_upload = step_named(smoke_steps, "Upload suite observations")
+assert(summary_upload && summary_upload["if"] == "always()", "suite summaries must survive failed suites")
+assert(summary_upload.dig("with", "name") == "suite-observations-${{ matrix.os }}", "summary artifact names must distinguish OS jobs")
+assert(summary_upload.dig("with", "path") == "${{ runner.temp }}/test-summary-*.json", "both current Bash and Bash 3.2 summaries must be retained")
+assert(smoke_runs.include?('bash scripts/run-tests.bash --jobs 2 --summary "${RUNNER_TEMP}/test-summary-current.json"'), "ordinary suite runs must collect comparable observations")
 assert(!smoke_runs.match?(%r{bash tests/}), "smoke job must run suites through scripts/run-tests.bash, not hand-listed bash tests/ commands")
 assert(smoke_runs.include?("packaging/chocolatey/tools/chocolateyInstall.ps1"), "smoke job must parse the Chocolatey PowerShell installer")
 assert(smoke_runs.include?("packaging/chocolatey/tools/chocolateyUninstall.ps1"), "smoke job must parse the Chocolatey PowerShell uninstaller")
