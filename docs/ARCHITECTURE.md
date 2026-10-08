@@ -87,9 +87,12 @@ one:
    `include=all` feed for older versions, then the `.sha256` companion file next
    to the archive. `GOS_REQUIRE_CHECKSUM=1` refuses to continue without one;
    `=feed` additionally refuses the same-origin companion file.
-3. Reuse a cached archive if its hash matches; otherwise download to a
-   resumable `.partial` in the cache (curl `-C -`), verify, and promote it to
-   the cache entry.
+3. Snapshot a cached archive into private staging and reuse it if its hash
+   matches; otherwise download to a resumable `.partial` in the cache
+   (curl `-C -`), snapshot the completed transfer, and verify the snapshot.
+   Hashing and extraction always use the same private file. Publish verified
+   bytes through a temporary sibling and atomic rename; a cache write failure
+   only warns and never prevents installing the verified snapshot.
 4. Extract into a temp staging directory (`mktemp -d`, removed by the EXIT
    trap) and check that `go/bin/go` exists.
 5. Activate. Flat layout: rename the staged tree into `GOS_INSTALL_DIR`.
@@ -120,6 +123,25 @@ rollbacks fail fast instead of racing. `gos self-update` instead locks the
 resolved gos script path (`gos.sh.gos-lock/`): shells with different
 `GOS_INSTALL_DIR` values can still replace the same script. Read-only commands
 and dry runs never take a lock.
+
+The PowerShell bootstrap installs gos itself, separately from the Go activation
+transaction above. It stages incoming files and a `.gos-owned-files` receipt in
+a unique sibling directory on the target filesystem. Each replaced file is
+renamed into `backup/` before publishing its replacement; the receipt is
+published last. A caught failure restores every available backup and removes
+newly created files. An empty failed fresh-install directory is removed. If
+restoration fails, the transaction directory is retained and named in the error
+instead of deleting the remaining recovery copies. This is exception recovery,
+not an atomic multi-file swap or a guarantee against process termination.
+
+The receipt permits only `gos.sh`, `gos.cmd`, `uninstall.ps1`, and optional
+`LICENSE`. Both bootstrap and uninstaller validate it before touching existing
+files. Receipts also allow a partially removed installation to be uninstalled
+again, and an empty directory left by a failed final delete is removed on
+retry. PATH cleanup runs even when the directory is already gone.
+Pre-receipt installs are recognized by the three gos scripts, and their
+LICENSE is conservatively left unowned. Neither install nor uninstall recurses
+through unrelated target contents; link and non-file collisions are refused.
 
 ## Privilege
 
@@ -156,12 +178,24 @@ into a `sudo sh -c`.
 - `gos verify` re-runs `_gos_obtain_archive` for the installed version and
   compares every file the archive ships with the installed tree (`cmp`); it
   refuses to report success without an actually verified official checksum.
-  It snapshots cached archives and downloads privately without writing shared
-  cache entries or resumable partials (verification takes no mutation lock). `gos self-verify`
+  Like installs, it snapshots cached archives before hashing; it downloads
+  privately without writing shared cache entries or resumable partials
+  (verification takes no mutation lock). `gos self-verify`
   fetches the `checksums.txt` of the running version's own release tag and,
   when `gh` can, its build attestation.
 - All downloads are HTTPS-only across redirects with a TLS 1.2 floor and are
   bounded (`--max-time` for metadata, stall detection for archives).
+- The PowerShell bootstrap's `-PackagePath` follows the same snapshot rule for
+  local gos ZIP packages: copy into its temporary directory, hash that copy,
+  and extract that copy. Copy or checksum failures happen before `Install-Payload`,
+  preserving any existing installation. Its `finally` block removes the
+  snapshot and staging on success or failure.
+
+Version probes and activation checks use `GOTOOLCHAIN=local` to identify the
+bundled binary without Go selecting or downloading a different toolchain. This
+includes the GitHub Action output and `verify`'s choice of reference archive.
+The override is scoped to each probe: `gos run` and `gos each` preserve the
+caller's toolchain policy for the user command.
 
 ## On-disk state
 
@@ -175,7 +209,7 @@ gos has no database; its state is the filesystem:
 | `$GOS_INSTALL_DIR.gos-lock/pid` | The mutation lock. |
 | `<resolved gos script>.gos-lock/pid` | The path-scoped self-update lock. |
 | `$GOS_VERSIONS_DIR/go<version>/` | Installed versions in side-by-side mode. |
-| `$GOS_CACHE_DIR/go*.tar.gz`, `go*.zip`, `*.partial` | Verified archive cache and resumable partial downloads. |
+| `$GOS_CACHE_DIR/go*.tar.gz`, `go*.zip`, `*.partial`, `*.partial.*` | Verified archive cache, resumable partial downloads, and temporary cache publication files (also reclaimed by prune). |
 | `$GOS_CACHE_DIR/feed-default.json`, `feed-all.json` | Discovery feed cache. |
 | `./.go-version` | Written by `gos pin`, read (with `.tool-versions` and `go.mod`) by `gos use`, `gos run --`, `gos status`, and the auto-switch hook. |
 
@@ -227,6 +261,12 @@ failures, and kills gos between the two renames of a rollback, to prove the
 saga above. `tests/workflows.bash` asserts repository invariants (pinned
 actions, job timeouts, generated surfaces, doc fragments). The nightly canary
 workflow is the only thing that talks to the real go.dev.
+
+`tests/windows-lifecycle.ps1`, invoked by the PowerShell installer suite, covers
+shared-directory ownership, legacy installs, invalid receipts, link refusal,
+staging/backup/publication/receipt failures, recovery preservation, and PATH
+idempotency. PATH tests use a registry substitute on every host and a disposable
+HKCU key on Windows, never the user's `Environment` key.
 
 `scripts/validate-local.bash` runs everything CI runs; `--strict` fails when an
 optional tool CI requires is missing locally.

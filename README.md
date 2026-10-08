@@ -62,6 +62,10 @@ compatibility, but it is a different job than gos does, and the two compose:
 Run `gos doctor` and it will tell you when `GOTOOLCHAIN` is active so the
 interaction is never a surprise.
 
+Gos identifies installed versions and validates installs with `GOTOOLCHAIN=local`,
+so those checks report the bundled binary and never auto-download another Go.
+User commands launched by `gos run` and `gos each` keep your `GOTOOLCHAIN` setting.
+
 ---
 
 ## Table of Contents
@@ -217,6 +221,13 @@ To update `gos`, run the same PowerShell installer again:
 ```powershell
 irm https://github.com/johnny4young/gos/releases/latest/download/install.ps1 | iex
 ```
+
+The installer stages replacement files before updating an existing installation
+and restores the previous files if replacement fails. If restoration also
+fails, the error names the retained recovery directory. Existing unrelated
+files, including a pre-existing `LICENSE`, are preserved. Re-running the
+installer also refreshes the current process's `PATH` when the user registry
+already contains the installation directory.
 
 For development testing before that release asset exists:
 
@@ -591,7 +602,7 @@ gos delegates downloads to `curl`, or `wget` when curl is absent. Set `https_pro
 2. Detects your OS via `uname -s` and architecture via `uname -m`
 3. Downloads the matching archive from `https://go.dev/dl/`, resuming an interrupted transfer instead of restarting it
 4. Verifies the SHA256 checksum against the Go downloads feed (uses `jq` or `python3`) — checking the small default feed first and only fetching the full history for older versions — with the archive's published `.sha256` companion file as a fallback when the feed cannot be parsed
-5. Reuses a verified cached archive in place when one is present, without re-downloading
+5. Snapshots a cached archive into private staging and verifies it before reuse, without re-downloading
 6. Extracts the new version into a temporary staging directory
 7. Validates the staged `go/bin/go` before touching `$GOS_INSTALL_DIR`
 8. Backs up the previous Go installation, activates the staged version, and rolls back automatically if activation fails
@@ -681,6 +692,12 @@ if ([string]::IsNullOrWhiteSpace($gosHome)) {
 # If you installed with -InstallDir, set $gosHome to that original directory.
 & (Join-Path $gosHome 'uninstall.ps1') -InstallDir $gosHome
 ```
+
+The uninstaller removes only files owned by the Windows installer and removes
+the directory only when it is empty. It refuses unrecognized or linked targets
+and leaves unrelated files and subdirectories in place. Older installations
+without an ownership receipt are recognized by their gos scripts; their
+pre-existing `LICENSE` is retained because its ownership is ambiguous.
 
 **If installed via git clone:** inspect your original clone location and any
 uncommitted work before removing it (the quick-start example uses `$HOME/.gos`).
