@@ -1178,6 +1178,19 @@ _gos_sudo_for() {
   GOS_SUDO_TARGET="$target" _gos_sudo_for_target "$@"
 }
 
+# Replay captured stdout/stderr of a command run by _gos_sudo_for_target.
+# Command substitution strips trailing newlines, so restore one per non-empty
+# stream: otherwise the next progress or error line is glued onto the
+# command's last line (e.g. "...: Permission deniedError: ...").
+_gos_sudo_replay() {
+  if [ -n "$1" ]; then
+    printf '%s\n' "$1"
+  fi
+  if [ -n "$2" ]; then
+    printf '%s\n' "$2" >&2
+  fi
+}
+
 _gos_sudo_for_target() {
   local output status err err_file sudo_output sudo_status sudo_err
 
@@ -1202,12 +1215,7 @@ _gos_sudo_for_target() {
 
   if [ "$status" -eq 0 ]; then
     rm -f "$err_file"
-    if [ -n "$output" ]; then
-      printf '%s' "$output"
-    fi
-    if [ -n "$err" ]; then
-      printf '%s' "$err" >&2
-    fi
+    _gos_sudo_replay "$output" "$err"
     return 0
   fi
 
@@ -1224,28 +1232,18 @@ _gos_sudo_for_target() {
         sudo_err=$(<"$err_file")
         rm -f "$err_file"
         if [ "$sudo_status" -eq 0 ]; then
-          if [ -n "$sudo_output" ]; then
-            printf '%s' "$sudo_output"
-          fi
-          if [ -n "$sudo_err" ]; then
-            printf '%s' "$sudo_err" >&2
-          fi
+          _gos_sudo_replay "$sudo_output" "$sudo_err"
           return 0
         fi
-        printf '%s' "$err" >&2
-        if [ -n "$sudo_err" ]; then
-          printf '%s' "$sudo_err" >&2
-        fi
+        _gos_sudo_replay "" "$err"
+        _gos_sudo_replay "" "$sudo_err"
         return "$sudo_status"
         ;;
     esac
   fi
 
   rm -f "$err_file"
-  if [ -n "$output" ]; then
-    printf '%s' "$output"
-  fi
-  printf '%s' "$err" >&2
+  _gos_sudo_replay "$output" "$err"
   return "$status"
 }
 
