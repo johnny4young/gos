@@ -217,7 +217,9 @@ Process ownership stays with the callers:
   failed version makes the aggregate exit status `1`.
 
 Keep the helper a normal function, rather than a subshell function: moving
-the process boundary into it would change `run`'s replacement semantics.
+the process boundary into it would change `run`'s replacement semantics. Keep
+it free of named locals too: bash exports a local that shadows a
+caller-exported variable of the same name, so the child would see gos's value.
 `tests/side-by-side.bash` covers PID replacement, exact argument forwarding,
 environment isolation, signal-derived child status, and iteration after a
 failed child. The existing platform exclusions and symlink capability probe

@@ -2634,12 +2634,12 @@ _gos_ensure_version_dir() {
 
 # Execute a user command with one resolved version. This must stay a normal
 # function: run replaces gos itself, while each owns its per-version subshell.
-# Probe-only GOTOOLCHAIN=local must never leak into the user's command.
+# Probe-only GOTOOLCHAIN=local must never leak into the user's command. The
+# helper declares no locals: bash exports a local that shadows a variable the
+# caller exported, so a named local would rewrite that variable for the child.
 _gos_exec_version_command() {
-  local version_dir="$1"
-  shift
   unset GOROOT
-  PATH="${version_dir}/bin:${PATH}" exec "$@"
+  PATH="${1}/bin:${PATH}" exec "${@:2}"
 }
 
 cmd_run() {

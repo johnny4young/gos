@@ -129,9 +129,15 @@ set -euo pipefail
 [ "$#" -eq 4 ] || exit 93
 [ "$1" = 'two words' ] && [ "$2" = '' ] && [ "$3" = '--json' ] && [ "$4" = '*' ] || exit 94
 [ ! -e "${GOS_INSTALL_DIR}.gos-lock" ] || exit 95
+[ "${version_dir-}" = caller-version-dir ] || exit 96
 printf '%s\n' "$$"
 CHILD
+  # Remove the version so run installs it under the mutation lock, which must
+  # be gone before exec; install progress goes to stderr, so stdout is the pid.
+  rm -rf "${versions_dir}/go1.20.0"
   GOROOT="${case_dir}/caller-root" GOTOOLCHAIN=go1.30.0+path \
+    version_dir=caller-version-dir \
+    GOS_TEST_STDERR_FILE="${case_dir}/run-exec.err" \
     GOS_TEST_COMMAND_PID="${case_dir}/command.pid" \
     GOS_TEST_EXPECTED_BIN="${versions_dir}/go1.20.0/bin" \
     GOS_TEST_ORIGINAL_COMMAND_PATH="${fake_bin}:${original_path}" \
