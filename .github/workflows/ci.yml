@@ -6,6 +6,13 @@ on:
     branches:
       - main
 
+# Superseded pull request feedback must not occupy the current head's runners.
+# Pushes to main get one group per commit and are never cancelled, so every
+# merged commit keeps a complete CI result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -97,6 +104,17 @@ jobs:
           command -v python3
           python3 --version
 
+      - name: Require JSON assertion parser
+        run: |
+          if command -v jq >/dev/null 2>&1; then
+            jq --version
+          elif command -v python3 >/dev/null 2>&1; then
+            python3 --version
+          else
+            echo 'JSON assertion validation requires jq or python3 on every CI OS.' >&2
+            exit 1
+          fi
+
       # `shell: bash` resolves to Homebrew's bash 5 on the macOS image, so the
       # bash 3.2 floor gos promises (stock macOS) would otherwise only ever be
       # exercised on contributors' Macs. Put the system bash first on PATH so
@@ -108,7 +126,7 @@ jobs:
           ln -s /bin/bash "${RUNNER_TEMP}/bash32/bash"
           export PATH="${RUNNER_TEMP}/bash32:${PATH}"
           bash --version | head -n 1 | grep -F 'version 3.2'
-          bash scripts/run-tests.bash --jobs 2
+          bash scripts/run-tests.bash --jobs 2 --summary "${RUNNER_TEMP}/test-summary-bash32.json"
 
       - name: PowerShell syntax
         if: runner.os == 'Windows'
@@ -133,7 +151,7 @@ jobs:
       # says where it can run, so a new suite needs no workflow change.
       - name: Run test suites
         run: |
-          bash scripts/run-tests.bash --jobs 2
+          bash scripts/run-tests.bash --jobs 2 --summary "${RUNNER_TEMP}/test-summary-current.json"
 
       - name: Smoke gos commands
         run: |
@@ -149,6 +167,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           fish --no-config --no-execute completions/gos.fish
+
+      - name: Upload suite observations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: suite-observations-${{ matrix.os }}
+          path: ${{ runner.temp }}/test-summary-*.json
+          if-no-files-found: warn
 
   action:
     name: Action (${{ matrix.os }})

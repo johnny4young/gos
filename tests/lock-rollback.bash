@@ -84,7 +84,7 @@ pass "mutating commands use a clear mkdir-based gos lock"
 case_dir="${test_root}/lock-pid-root-owned"
 mkdir -p "${case_dir}/probe"
 if ! readonly_bit_enforced "${case_dir}/probe"; then
-  echo "ok - root-owned lock pid case skipped: this filesystem does not enforce the read-only bit"
+  skip_assertion "root-owned lock pid case skipped: this filesystem does not enforce the read-only bit"
 else
   mkdir -p "${case_dir}/bin" "${case_dir}/go.gos-rollback"
   cat >"${case_dir}/bin/mkdir" <<'FAKE_MKDIR'

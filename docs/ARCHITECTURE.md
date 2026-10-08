@@ -256,11 +256,16 @@ parallel; adding a suite is adding a file. The CLI feature suites (`cli-*`,
 `tests/lib-features.bash`, whose `run_gos` also runs cases with a restricted
 `PATH` exposing only `jq`, only `python3`, or neither. CI requires both
 parsers; local runs report unavailable parser cases explicitly.
+Environment-dependent skips inside a suite go through `skip_assertion`
+(`tests/lib.bash`), which records a per-suite marker the runner supplies; a
+suite that exits 0 with recorded skips is reported as partial, not passed,
+and fails the run only under `--fail-on-partial`.
 `tests/install-transaction.bash` injects rename and removal
 failures, and kills gos between the two renames of a rollback, to prove the
 saga above. `tests/workflows.bash` asserts repository invariants (pinned
-actions, job timeouts, generated surfaces, doc fragments). The nightly canary
-workflow is the only thing that talks to the real go.dev.
+actions, job timeouts, CI concurrency groups, generated surfaces, doc
+fragments). The nightly canary workflow is the only thing that talks to the
+real go.dev.
 
 `tests/windows-lifecycle.ps1`, invoked by the PowerShell installer suite, covers
 shared-directory ownership, legacy installs, invalid receipts, link refusal,

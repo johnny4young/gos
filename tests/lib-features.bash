@@ -557,7 +557,7 @@ run_tty_ok() {
     return 0
   fi
   if [ "$pty_ran" -eq 0 ]; then
-    echo "ok - ${name} TTY branch skipped: no usable pseudo-terminal harness"
+    skip_assertion "${name} TTY branch skipped: no usable pseudo-terminal harness"
     return 1
   fi
   fail "${name}: TTY runner failed (status ${rc}): $(cat "$out_file")"

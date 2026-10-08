@@ -59,9 +59,11 @@ git -C "$fixture" add scripts tests
 # Keep an untracked suite in the directory to prove git controls discovery.
 git -C "$fixture" rm -q --cached tests/untracked.bash
 
+# Fixture runs must never append to a real CI job summary; a test opts in
+# with GOS_TEST_STEP_SUMMARY.
 run_runner() {
   status=0
-  output="$("$BASH" "${fixture}/scripts/run-tests.bash" --os linux "$@" 2>&1)" || status=$?
+  output="$(GITHUB_STEP_SUMMARY="${GOS_TEST_STEP_SUMMARY:-}" "$BASH" "${fixture}/scripts/run-tests.bash" --os linux "$@" 2>&1)" || status=$?
 }
 
 run_runner --list
@@ -144,6 +146,150 @@ run_runner --list invalid
 assert_status 2 "$status" 'tracked suite missing on disk' "$output"
 pass 'runner rejects malformed metadata and missing suites instead of reporting green'
 
+# Opt-in summaries preserve every selected result in deterministic order and
+# identify the exact interpreter/source rather than claiming scheduler savings.
+for mode in 1 2; do
+  summary="${test_root}/summary-${mode}.json"
+  run_runner --jobs "$mode" --summary "$summary" pass fail signal 'literal [x]' skipped
+  assert_status 1 "$status" "summary failure jobs=${mode}" "$output"
+  ruby -rjson -e '
+    report = JSON.parse(File.read(ARGV[0]))
+    abort "missing metadata" unless report.values_at("schemaVersion", "os", "hostOs", "durationUnit") == [1, "linux", ARGV[1], "seconds"]
+    abort "missing shell/head metadata" unless report["shell"].is_a?(String) && report.key?("head") && report.key?("dirty")
+    suites = report.fetch("suites")
+    states = suites.to_h { |suite| [suite.fetch("path"), suite.fetch("status")] }
+    abort "incorrect states" unless states == {"tests/pass.bash"=>"passed", "tests/fail.bash"=>"failed", "tests/signal.bash"=>"failed", "tests/literal [x].bash"=>"passed", "tests/skipped.bash"=>"skipped"}
+    abort "incorrect exit status" unless suites.find { |suite| suite["path"] == "tests/fail.bash" }["exitStatus"] == 7
+    abort "signal was lost" unless suites.find { |suite| suite["path"] == "tests/signal.bash" }["exitStatus"] > 128
+    suites.each do |suite|
+      duration = suite.fetch("durationSeconds")
+      abort "invalid duration" unless suite["status"] == "skipped" ? duration.nil? : duration.is_a?(Integer) && duration >= 0
+    end
+  ' "$summary" "$(uname -s)" || fail 'summary preserves metadata, statuses, signals and timing'
+done
+# JSON string quoting must be tested without creating filenames Windows forbids.
+# Exercise the exact runner helper with an argument string, then use a portable
+# filename for the duration observation.
+helper="${test_root}/json-string.bash"
+sed -n '/^json_string() {/,/^}/p' "${fixture}/scripts/run-tests.bash" >"$helper"
+quoted='quote" and \name'
+# shellcheck disable=SC2016 # The child shell expands its own arguments.
+quoted_json="$("$BASH" -c '. "$1"; json_string "$2"' _ "$helper" "$quoted")"
+ruby -rjson -e 'abort "JSON quoting lost" unless JSON.parse(ARGV[0]) == ARGV[1]' "$quoted_json" "$quoted" || fail 'JSON quotes and backslashes'
+printf '#!/usr/bin/env bash\nsleep 1\n' >"${fixture}/tests/duration.bash"
+git -C "$fixture" add tests/duration.bash
+run_runner --jobs 1 --summary "${test_root}/duration.json" duration
+assert_status 0 "$status" 'duration summary' "$output"
+ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").fetch(0); abort "timing lost" unless suite["path"] == "tests/duration.bash" && suite["durationSeconds"] >= 1' "${test_root}/duration.json" || fail 'portable duration observation'
+for suffix in status log duration; do
+  GOS_TEST_RUNNER_REAL_CAT="$real_cat" GOS_TEST_RUNNER_FAIL_READ="$suffix" \
+    PATH="${test_root}/tools:${PATH}" run_runner --jobs 2 --summary "${test_root}/missing-${suffix}.json" pass 'literal [x]'
+  assert_status 1 "$status" "summary unreadable ${suffix}" "$output"
+  ruby -rjson -e 'report = JSON.parse(File.read(ARGV[0])); abort "missing failures" unless report["suites"].length == 2 && report["suites"].all? { |suite| suite["status"] == "failed" && suite["reason"].start_with?("missing-") }' "${test_root}/missing-${suffix}.json" || fail 'missing measurement/status/log fails closed in summary'
+done
+for corrupt in corrupt 007; do
+  cat >"${test_root}/tools/cat" <<TOOL
+#!/usr/bin/env bash
+case "\${1:-}" in
+  *."\$GOS_TEST_RUNNER_FAIL_READ") printf '%s\\n' '${corrupt}'; exit 0 ;;
+esac
+exec "\$GOS_TEST_RUNNER_REAL_CAT" "\$@"
+TOOL
+  for suffix in status duration; do
+    GOS_TEST_RUNNER_REAL_CAT="$real_cat" GOS_TEST_RUNNER_FAIL_READ="$suffix" \
+      PATH="${test_root}/tools:${PATH}" run_runner --jobs 1 --summary "${test_root}/corrupt-${suffix}.json" pass
+    assert_status 1 "$status" "summary corrupt ${suffix} ${corrupt}" "$output"
+    assert_contains "$output" 'PASS stdout' "corrupt ${suffix} keeps the suite log"
+    ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").fetch(0); abort "corruption accepted" unless suite["status"] == "failed" && suite["reason"].start_with?("invalid-")' "${test_root}/corrupt-${suffix}.json" || fail 'corrupt markers fail closed'
+  done
+done
+run_runner --summary
+assert_status 2 "$status" 'missing summary argument' "$output"
+run_runner --summary "${test_root}/summary-1.json/child" pass fail
+assert_status 1 "$status" 'unwritable summary destination' "$output"
+assert_contains "$output" 'could not write test summary' 'summary write fails closed'
+assert_contains "$output" 'not ok - test suites failed: tests/fail.bash' 'summary write failure keeps the failed suite list'
+mkdir -p "${test_root}/summary-dir"
+run_runner --summary "${test_root}/summary-dir" pass
+assert_status 1 "$status" 'directory summary destination' "$output"
+[ -z "$(ls -A "${test_root}/summary-dir")" ] || fail 'a directory summary destination must not receive the report'
+# The runner changes into the repository root; a relative summary path must
+# still land beside the caller instead of dirtying the checkout.
+relative_dir="${test_root}/relative-cwd"
+mkdir -p "$relative_dir"
+status=0
+output="$(cd "$relative_dir" && "$BASH" "${fixture}/scripts/run-tests.bash" --os linux --jobs 1 --summary relative.json pass 2>&1)" || status=$?
+assert_status 0 "$status" 'relative summary path' "$output"
+[ -f "${relative_dir}/relative.json" ] || fail 'relative summary path resolves against the caller directory'
+[ ! -e "${fixture}/relative.json" ] || fail 'relative summary path must not write into the repository'
+pass 'optional summaries preserve serial/parallel outcomes, timings, metadata and failure evidence'
+
+# A successful child with missing assertion prerequisites is partial coverage,
+# while a failing child stays failed even if it also records a skipped assertion.
+cp "${repo_root}/tests/lib.bash" "${fixture}/tests/lib.bash"
+cat >"${fixture}/tests/partial.bash" <<'SUITE'
+#!/usr/bin/env bash
+. "${0%/*}/lib.bash"
+PATH=/no-parsers assert_json '{malformed' 'optional local parser'
+SUITE
+cat >"${fixture}/tests/partial-fail.bash" <<'SUITE'
+#!/usr/bin/env bash
+. "${0%/*}/lib.bash"
+PATH=/no-parsers assert_json '{malformed' 'optional local parser'
+exit 7
+SUITE
+git -C "$fixture" add tests
+for mode in 1 2; do
+  summary="${test_root}/partial-${mode}.json"
+  run_runner --jobs "$mode" --summary "$summary" partial pass skipped
+  assert_status 0 "$status" "partial local run jobs=${mode}" "$output"
+  assert_contains "$output" 'tests/partial.bash (partial, 1 skipped assertion(s))' 'partial is visible'
+  assert_contains "$output" '1 test suite(s) passed, 1 partial (skipped assertions), 1 skipped' 'partial is not counted as passed'
+  ruby -rjson -e 'report = JSON.parse(File.read(ARGV[0])); suite = report.fetch("suites").find { |row| row["path"] == "tests/partial.bash" }; abort "skip lost" unless suite["status"] == "partial" && suite["skippedAssertions"] == 1 && suite["exitStatus"] == 0' "$summary" || fail 'summary distinguishes assertion skips from OS skips'
+  run_runner --jobs "$mode" --summary "$summary" partial-fail pass
+  assert_status 1 "$status" "failed partial run jobs=${mode}" "$output"
+  ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").find { |row| row["path"] == "tests/partial-fail.bash" }; abort "failure weakened" unless suite["status"] == "failed" && suite["exitStatus"] == 7 && suite["skippedAssertions"] == 1' "$summary" || fail 'assertion skips never hide child failure'
+  run_runner --jobs "$mode" partial
+  assert_status 0 "$status" 'partial reporting without summary' "$output"
+  assert_contains "$output" '0 test suite(s) passed, 1 partial' 'ordinary local runs also distinguish skips'
+  assert_contains "$output" 'partial - suites with skipped assertions on linux: tests/partial.bash' 'partial suites are named'
+  # --fail-on-partial turns a partial (but otherwise green) run red, keeps
+  # real failures reported as failures, and leaves fully passing runs green.
+  run_runner --jobs "$mode" --fail-on-partial partial pass
+  assert_status 1 "$status" "fail-on-partial rejects partial jobs=${mode}" "$output"
+  assert_contains "$output" 'not ok - partial suites are not allowed with --fail-on-partial: tests/partial.bash' 'fail-on-partial names the partial suites'
+  run_runner --jobs "$mode" --fail-on-partial pass
+  assert_status 0 "$status" "fail-on-partial accepts full passes jobs=${mode}" "$output"
+  assert_not_contains "$output" 'partial -' 'no partial listing without partial suites'
+  run_runner --jobs "$mode" --fail-on-partial partial-fail partial
+  assert_status 1 "$status" "fail-on-partial with a real failure jobs=${mode}" "$output"
+  assert_contains "$output" 'not ok - test suites failed: tests/partial-fail.bash' 'real failures stay failures under fail-on-partial'
+  step_summary="${test_root}/step-summary-${mode}.md"
+  : >"$step_summary"
+  GOS_TEST_STEP_SUMMARY="$step_summary" run_runner --jobs "$mode" partial pass
+  assert_status 0 "$status" "step summary partial run jobs=${mode}" "$output"
+  # shellcheck disable=SC2016 # Literal Markdown code span.
+  assert_file_contains "$step_summary" '- `tests/partial.bash`'
+  step_summary_before="$(cat "$step_summary")"
+  GITHUB_STEP_SUMMARY="$step_summary" run_runner --jobs "$mode" partial
+  [ "$(cat "$step_summary")" = "$step_summary_before" ] || fail 'fixture runs must not write the outer job summary'
+done
+cat >"${fixture}/tests/invalid-skip-marker.bash" <<'SUITE'
+#!/usr/bin/env bash
+printf 'corrupt\n' >"$GOS_TEST_ASSERTION_SKIP_FILE"
+SUITE
+git -C "$fixture" add tests/invalid-skip-marker.bash
+run_runner --summary "${test_root}/invalid-skip-marker.json" invalid-skip-marker pass
+assert_status 1 "$status" 'corrupt assertion skip marker' "$output"
+ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").find { |row| row["path"] == "tests/invalid-skip-marker.bash" }; abort "corrupt skip evidence accepted" unless suite["status"] == "failed" && suite["reason"] == "invalid-assertion-skip-marker"' "${test_root}/invalid-skip-marker.json" || fail 'corrupt skip marker fails closed without losing suite evidence'
+# A failed child keeps its own exit status as the diagnostic, not the marker.
+printf 'exit 3\n' >>"${fixture}/tests/invalid-skip-marker.bash"
+run_runner --summary "${test_root}/invalid-skip-marker-fail.json" invalid-skip-marker
+assert_status 1 "$status" 'corrupt marker with failed child' "$output"
+assert_contains "$output" 'tests/invalid-skip-marker.bash (FAILED, status 3)' 'child status stays the header diagnostic'
+ruby -rjson -e 'suite = JSON.parse(File.read(ARGV[0])).fetch("suites").find { |row| row["path"] == "tests/invalid-skip-marker.bash" }; abort "child failure masked" unless suite["status"] == "failed" && suite["reason"] == "child-exit" && suite["exitStatus"] == 3' "${test_root}/invalid-skip-marker-fail.json" || fail 'a corrupt marker never masks the child exit reason'
+pass 'missing optional parsers report partial coverage without weakening failures or OS exclusions'
+
 # Exported sources have no git metadata; they still discover suites on disk.
 exported="${test_root}/exported"
 mkdir -p "${exported}/scripts" "${exported}/tests"
@@ -205,5 +351,5 @@ if command -v pwsh >/dev/null 2>&1 || command -v powershell >/dev/null 2>&1; the
   assert_not_contains "$output" 'POWERSHELL_TEST_REACHED' 'PowerShell syntax failure stops before functional tests'
   pass 'validate-local parses every PowerShell file as data and fails closed before functional tests'
 else
-  pass 'PowerShell validator argument regression skipped: pwsh/powershell is not installed'
+  skip_assertion 'PowerShell validator argument regression skipped: pwsh/powershell is not installed'
 fi
