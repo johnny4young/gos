@@ -146,7 +146,7 @@ for parsers in jq python3 none; do
         if [ "${CI:-}" = "true" ]; then
           fail "feed parser ${parsers} is required in CI so every parser branch runs"
         fi
-        echo "ok - feed parser ${parsers} cases skipped: ${parsers} not installed on this host"
+        skip_assertion "feed parser ${parsers} cases skipped: ${parsers} not installed on this host"
         parser_cases_skipped=$((parser_cases_skipped + 1))
         continue
       fi
