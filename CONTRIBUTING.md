@@ -110,6 +110,18 @@ constructs such as `mapfile`, `declare -A`, `${var^^}`, and unguarded
 `${array[@]:+"${array[@]}"}`). CI runs the suites under `/bin/bash` on macOS
 to enforce that floor.
 
+## Optional suite observations
+
+Use `scripts/run-tests.bash --jobs 2 --summary /tmp/gos-suite-summary.json` to
+record per-suite whole-second durations, pass/fail/OS-skip status, exit status,
+host/target OS, Bash version and source HEAD/dirty state. It adds no runtime
+dependency and does not change test criteria or the portable wave scheduler.
+The summary is written atomically even when a child fails; missing/corrupt
+status, duration or log evidence fails closed. Exported sources have a null HEAD.
+CI retains separate current-Bash and native macOS Bash 3.2 observations.
+Compare unchanged source/fixtures and matching runner/interpreter classes before
+proposing scheduling changes; these coarse measurements are not a claimed saving.
+
 ## Pull Request Guidelines
 
 - Keep changes focused and explain the user-visible behavior.
@@ -119,6 +131,12 @@ to enforce that floor.
 - Avoid live installs in tests unless they are explicitly isolated.
 - Preserve the release-asset install path as the trusted default; raw `main`
   URLs are for development testing only.
+
+CI cancels superseded runs of the same pull request. Separate PRs remain
+independent, including stacked PRs targeting non-default branches. Pushes to
+main use one group per commit and are never cancelled, so every merged commit
+keeps a complete result. This does not change the serialized, non-cancelling
+live canary or release lane.
 
 ## Community Standards
 
