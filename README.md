@@ -657,7 +657,7 @@ use `sudo` only for a confirmed root-owned Go path if permission is denied.
 
 ```bash
 # gos-uninstall:data
-gos prune --rollback   # remove known cached archives, feed metadata and rollback/residue
+gos prune --rollback   # remove known cached archives, feed metadata, rollback, and residue (kept if the active Go is broken)
 rm -ri -- "$gos_install_dir"
 if [ -n "$gos_versions_dir" ]; then
   rm -ri -- "$gos_versions_dir"
@@ -674,6 +674,9 @@ rm -i -- "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/gos" 
 
 Missing completion files need no cleanup. A non-empty cache directory is left
 for manual inspection rather than recursively deleting unrelated files.
+If the active Go cannot report its version, prune keeps crash-recovery copies
+(`$gos_install_dir.gos-backup.*`, `.gos-current.*`) and names each one; inspect
+them and remove any you no longer need with `rm -ri`.
 
 ### Remove the gos command
 
@@ -730,7 +733,7 @@ the Windows launcher. Use the symptom-specific checks below for those cases.
 |---|---|---|
 | `go version` still shows the old Go after `gos install` | Another Go is earlier on `PATH` (Homebrew, a manual install) | `gos which` shows which binary wins; put `$GOS_INSTALL_DIR/bin` first, or `eval "$(gos env)"` |
 | `Error: another gos operation is running` | A previous gos was interrupted, or one is running | `gos status` shows the lock and its pid; remove `${GOS_INSTALL_DIR:-/usr/local/go}.gos-lock` only after verifying no gos operation is running (strip any trailing slash from the install path first) |
-| `Residue:` or `Orphaned backup found` in `gos status` | An install was interrupted between renames | `gos prune --rollback` removes the residue once the active Go works |
+| `Residue:` or `Orphaned backup found` in `gos status` | An install was interrupted between renames | `gos prune --rollback` removes residue only after the active binary successfully reports its local Go version; repair a broken active install first (`gos prune --rollback` also discards the rollback copy, so use `gos rollback` before pruning if that copy is your working Go) |
 | `Rollback: broken link` | The side-by-side version the rollback pointed at was uninstalled | `gos prune --rollback`; the next install creates a new rollback |
 | Password prompt on every install | `GOS_INSTALL_DIR` is root-owned (`/usr/local/go`) | Set `GOS_INSTALL_DIR` under your home directory; gos only escalates for the directory it writes |
 | `checksum verification required but ...` (exit 4) | `GOS_REQUIRE_CHECKSUM` is set and `jq`/`python3` or a SHA256 tool is missing | Install `jq` or `python3` plus `sha256sum`/`shasum`, then retry; check feed availability and the diagnostic before changing verification policy |

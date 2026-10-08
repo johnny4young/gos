@@ -1090,9 +1090,14 @@ _gos_fetch_checksum_file() {
 # Identify the bundled binary, independent of project directives or the caller's
 # GOTOOLCHAIN. Probing installed versions must not download or run another Go.
 # The parse lives here once so the rc/beta regex cannot drift between callers.
+# An empty GOROOT lets the binary locate its own tree (a stale exported GOROOT
+# would make a healthy go exit 2), and stdin is closed so a probe inside a
+# `while read` loop can never consume the loop's input. Callers rely on
+# pipefail: a nonzero go exit fails the substitution even when it printed a
+# version.
 _gos_go_version_of() {
   local go_bin="$1"
-  GOTOOLCHAIN=local "$go_bin" version 2>/dev/null \
+  GOROOT='' GOTOOLCHAIN=local "$go_bin" version </dev/null 2>/dev/null \
     | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' \
     | head -1 | sed 's/^go//'
 }
@@ -4474,17 +4479,29 @@ cmd_prune() {
   # *.gos-current.<pid> siblings. Only remove them when the active install is
   # healthy (they may be the sole surviving copy otherwise), and only with
   # --rollback, which already means "discard my safety copies".
-  local orphan orphans_removed=0 orphans_found=0
+  local orphan orphans_removed=0 orphans_found=0 active_version="" active_checked="false"
   while IFS= read -r -d '' orphan; do
     orphans_found=$((orphans_found + 1))
-    if [ "$prune_rollback" = "true" ] && [ -x "${GOS_INSTALL_DIR}/bin/go" ]; then
+    if [ "$prune_rollback" != "true" ]; then
+      _gos_json_enabled || echo "Orphaned backup found at ${orphan} (remove it with: gos prune --rollback)."
+      continue
+    fi
+    if [ "$active_checked" = "false" ]; then
+      # Executable mode alone does not prove the runtime works (wrong arch,
+      # missing loader, or a partially installed binary). Probe once, only when
+      # residue exists; the shared helper forces GOTOOLCHAIN=local, and under
+      # pipefail a nonzero go exit discards any version it printed.
+      active_checked="true"
+      active_version=$(_gos_go_version_of "${GOS_INSTALL_DIR}/bin/go") || active_version=""
+    fi
+    if [ -n "$active_version" ]; then
       if [ "$dry_run" != "true" ]; then
         _gos_sudo rm -rf "$orphan" || return 1
       fi
       orphans_removed=$((orphans_removed + 1))
       _gos_json_enabled || echo "${removal_verb} orphaned backup at ${orphan}."
     else
-      _gos_json_enabled || echo "Orphaned backup found at ${orphan} (remove it with: gos prune --rollback)."
+      _gos_json_enabled || echo "Keeping orphaned backup at ${orphan}: the active Go could not report its local version. Repair the active install before retrying gos prune --rollback."
     fi
   done < <(_gos_orphaned_backups)
 
