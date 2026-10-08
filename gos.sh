@@ -1183,6 +1183,19 @@ _gos_sudo_for() {
   GOS_SUDO_TARGET="$target" _gos_sudo_for_target "$@"
 }
 
+# Replay captured stdout/stderr of a command run by _gos_sudo_for_target.
+# Command substitution strips trailing newlines, so restore one per non-empty
+# stream: otherwise the next progress or error line is glued onto the
+# command's last line (e.g. "...: Permission deniedError: ...").
+_gos_sudo_replay() {
+  if [ -n "$1" ]; then
+    printf '%s\n' "$1"
+  fi
+  if [ -n "$2" ]; then
+    printf '%s\n' "$2" >&2
+  fi
+}
+
 _gos_sudo_for_target() {
   local output status err err_file sudo_output sudo_status sudo_err
 
@@ -1207,12 +1220,7 @@ _gos_sudo_for_target() {
 
   if [ "$status" -eq 0 ]; then
     rm -f "$err_file"
-    if [ -n "$output" ]; then
-      printf '%s' "$output"
-    fi
-    if [ -n "$err" ]; then
-      printf '%s' "$err" >&2
-    fi
+    _gos_sudo_replay "$output" "$err"
     return 0
   fi
 
@@ -1229,28 +1237,18 @@ _gos_sudo_for_target() {
         sudo_err=$(<"$err_file")
         rm -f "$err_file"
         if [ "$sudo_status" -eq 0 ]; then
-          if [ -n "$sudo_output" ]; then
-            printf '%s' "$sudo_output"
-          fi
-          if [ -n "$sudo_err" ]; then
-            printf '%s' "$sudo_err" >&2
-          fi
+          _gos_sudo_replay "$sudo_output" "$sudo_err"
           return 0
         fi
-        printf '%s' "$err" >&2
-        if [ -n "$sudo_err" ]; then
-          printf '%s' "$sudo_err" >&2
-        fi
+        _gos_sudo_replay "" "$err"
+        _gos_sudo_replay "" "$sudo_err"
         return "$sudo_status"
         ;;
     esac
   fi
 
   rm -f "$err_file"
-  if [ -n "$output" ]; then
-    printf '%s' "$output"
-  fi
-  printf '%s' "$err" >&2
+  _gos_sudo_replay "$output" "$err"
   return "$status"
 }
 
@@ -2637,6 +2635,16 @@ _gos_ensure_version_dir() {
   _gos_ensured_version="$version"
 }
 
+# Execute a user command with one resolved version. This must stay a normal
+# function: run replaces gos itself, while each owns its per-version subshell.
+# Probe-only GOTOOLCHAIN=local must never leak into the user's command. The
+# helper declares no locals: bash exports a local that shadows a variable the
+# caller exported, so a named local would rewrite that variable for the child.
+_gos_exec_version_command() {
+  unset GOROOT
+  PATH="${1}/bin:${PATH}" exec "${@:2}"
+}
+
 cmd_run() {
   local version="${1:-}" project_resolved project_source
 
@@ -2685,8 +2693,7 @@ cmd_run() {
   _gos_ensure_version_dir "$version" || return 1
 
   _gos_release_lock
-  unset GOROOT
-  PATH="${_gos_ensured_dir}/bin:${PATH}" exec "$@"
+  _gos_exec_version_command "$_gos_ensured_dir" "$@"
 }
 
 cmd_each() {
@@ -2769,8 +2776,7 @@ cmd_each() {
     # non-zero command from tripping set -e and aborting the whole run.
     rc=0
     (
-      unset GOROOT
-      PATH="${_gos_ensured_dir}/bin:${PATH}" exec "${command[@]}"
+      _gos_exec_version_command "$_gos_ensured_dir" "${command[@]}"
     ) || rc=$?
     if [ "$rc" -eq 0 ]; then
       result_label+=("go${_gos_ensured_version}")
@@ -4601,7 +4607,21 @@ _gos_doctor_apply_fixes() {
   GOS_DOCTOR_PATH_SETUP="$path_setup"
 }
 
+# True when $1 is one line of `go version` output from a runnable toolchain.
+# runtime.Version permits vendor/development suffixes and experiment metadata.
+# Every class is ASCII under the C locale, so control, C1 and other non-ASCII
+# bytes are rejected instead of being echoed into the text or JSON report.
+_gos_go_version_output_is_valid() {
+  local LC_ALL=C
+  local pattern='^go version (go[0-9]+(\.[0-9]+(\.[0-9]+)?((rc|beta)[0-9]+)?)?(-[[:graph:]]+)?( [[:print:]]+)?|devel [[:print:]]+) [a-z0-9]+/[a-z0-9]+$'
+  # Git Bash's C locale still classifies bytes above 0x7e as printable, so
+  # reject anything outside printable ASCII byte-wise before the pattern.
+  [ -z "$(printf '%s' "$1" | LC_ALL=C tr -d ' -~')" ] || return 1
+  [[ "$1" =~ $pattern ]]
+}
+
 cmd_doctor() {
+  local go_status
   local os arch raw_os raw_arch install_error mirror_error versions_error feed_ttl_error cache_dir_error go_path go_version go_bin arg doctor_fix="false" cache_dir_valid="true"
   GOS_DOCTOR_PROBLEMS=0
   GOS_DOCTOR_WARNINGS=0
@@ -4654,8 +4674,19 @@ cmd_doctor() {
   fi
 
   if go_path=$(command -v go 2>/dev/null); then
-    go_version=$(GOTOOLCHAIN=local go version 2>/dev/null || true)
-    _gos_doctor_check "ok" "go" "${go_path} reports: ${go_version}"
+    # Probe only the runtime on PATH, without Go's automatic toolchain download.
+    # Finding an executable is not evidence that it can actually run.
+    go_status=0
+    go_version=$(GOTOOLCHAIN=local go version 2>/dev/null) || go_status=$?
+    # A final CR is the Windows CRLF terminator; embedded control bytes are invalid.
+    go_version="${go_version%$'\r'}"
+    if [ "$go_status" -ne 0 ]; then
+      _gos_doctor_check "problem" "go" "${go_path}: go version failed (exit ${go_status})" "Check PATH and repair or reinstall the Go runtime at ${go_path}; then rerun gos doctor."
+    elif ! _gos_go_version_output_is_valid "$go_version"; then
+      _gos_doctor_check "problem" "go" "${go_path}: unrecognized go version output" "Check PATH and repair or reinstall the Go runtime at ${go_path}; then rerun gos doctor."
+    else
+      _gos_doctor_check "ok" "go" "${go_path} reports: ${go_version}"
+    fi
   else
     _gos_doctor_check "problem" "go" "go is not on PATH" "Run gos latest or add ${GOS_INSTALL_DIR}/bin to PATH after installing Go."
   fi

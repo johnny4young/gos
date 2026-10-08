@@ -59,6 +59,14 @@ compatibility, but it is a different job than gos does, and the two compose:
   `go` command verifies toolchains through the checksum database — so you lose
   no integrity by using gos to manage the global toolchain.
 
+`gos doctor` checks that `go version` succeeds and identifies a valid local
+toolchain. A failed executable or malformed version response is a problem in
+both text and JSON reports and exits `1`; check PATH and repair or reinstall
+the reported runtime before trying again. Stable, prerelease, development and
+vendor-suffixed versions, experiment metadata, and Windows CRLF output are
+accepted. This is a runtime diagnostic, not an integrity check; use `gos verify`
+for archive-backed integrity verification. It does not download a toolchain.
+
 Run `gos doctor` and it will tell you when `GOTOOLCHAIN` is active so the
 interaction is never a surprise.
 
