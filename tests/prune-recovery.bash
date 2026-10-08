@@ -89,8 +89,17 @@ pass "prune probe ignores a stale GOROOT and cannot consume the residue list"
 
 # Side-by-side: GOS_INSTALL_DIR is an activation symlink and residue slots are
 # links too. Removing residue must drop only the links, never their targets,
-# and a dangling activation link counts as a broken runtime.
-for active in healthy dangling; do
+# and a dangling activation link counts as a broken runtime. Git Bash's ln -s
+# copies (and cannot link a missing target), so probe for real symlinks first.
+symlink_probe="${test_root}/symlink-probe"
+if ln -s "$script" "$symlink_probe" 2>/dev/null && [ -L "$symlink_probe" ]; then
+  side_by_side_cases="healthy dangling"
+else
+  side_by_side_cases=""
+  skip_assertion "side-by-side prune cases skipped: this filesystem has no real symlinks"
+fi
+rm -f "$symlink_probe"
+for active in $side_by_side_cases; do
   case_dir="${test_root}/prune-side-by-side-${active}"
   versions_dir="${case_dir}/versions"
   create_old_install "${versions_dir}/go1.24.0" 1.24.0
