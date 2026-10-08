@@ -4590,7 +4590,21 @@ _gos_doctor_apply_fixes() {
   GOS_DOCTOR_PATH_SETUP="$path_setup"
 }
 
+# True when $1 is one line of `go version` output from a runnable toolchain.
+# runtime.Version permits vendor/development suffixes and experiment metadata.
+# Every class is ASCII under the C locale, so control, C1 and other non-ASCII
+# bytes are rejected instead of being echoed into the text or JSON report.
+_gos_go_version_output_is_valid() {
+  local LC_ALL=C
+  local pattern='^go version (go[0-9]+(\.[0-9]+(\.[0-9]+)?((rc|beta)[0-9]+)?)?(-[[:graph:]]+)?( [[:print:]]+)?|devel [[:print:]]+) [a-z0-9]+/[a-z0-9]+$'
+  # Git Bash's C locale still classifies bytes above 0x7e as printable, so
+  # reject anything outside printable ASCII byte-wise before the pattern.
+  [ -z "$(printf '%s' "$1" | LC_ALL=C tr -d ' -~')" ] || return 1
+  [[ "$1" =~ $pattern ]]
+}
+
 cmd_doctor() {
+  local go_status
   local os arch raw_os raw_arch install_error mirror_error versions_error feed_ttl_error cache_dir_error go_path go_version go_bin arg doctor_fix="false" cache_dir_valid="true"
   GOS_DOCTOR_PROBLEMS=0
   GOS_DOCTOR_WARNINGS=0
@@ -4643,8 +4657,19 @@ cmd_doctor() {
   fi
 
   if go_path=$(command -v go 2>/dev/null); then
-    go_version=$(GOTOOLCHAIN=local go version 2>/dev/null || true)
-    _gos_doctor_check "ok" "go" "${go_path} reports: ${go_version}"
+    # Probe only the runtime on PATH, without Go's automatic toolchain download.
+    # Finding an executable is not evidence that it can actually run.
+    go_status=0
+    go_version=$(GOTOOLCHAIN=local go version 2>/dev/null) || go_status=$?
+    # A final CR is the Windows CRLF terminator; embedded control bytes are invalid.
+    go_version="${go_version%$'\r'}"
+    if [ "$go_status" -ne 0 ]; then
+      _gos_doctor_check "problem" "go" "${go_path}: go version failed (exit ${go_status})" "Check PATH and repair or reinstall the Go runtime at ${go_path}; then rerun gos doctor."
+    elif ! _gos_go_version_output_is_valid "$go_version"; then
+      _gos_doctor_check "problem" "go" "${go_path}: unrecognized go version output" "Check PATH and repair or reinstall the Go runtime at ${go_path}; then rerun gos doctor."
+    else
+      _gos_doctor_check "ok" "go" "${go_path} reports: ${go_version}"
+    fi
   else
     _gos_doctor_check "problem" "go" "go is not on PATH" "Run gos latest or add ${GOS_INSTALL_DIR}/bin to PATH after installing Go."
   fi
