@@ -16,6 +16,24 @@
 #   Entrypoint         _gos_preflight and main's dispatcher
 set -euo pipefail
 
+# Bash exports a local when it shadows an inherited exported name. Capture the
+# caller's values before main/run/each declare locals, then restore them only at
+# the child execution boundary. Arrays preserve empty values and embedded or
+# trailing newlines without eval, parsing shell code, or adding an exec wrapper.
+# Never restore GOS-owned state/configuration: cleanup traps still use it until
+# exec, and re-importing caller-supplied paths could delete unrelated data.
+_GOS_CHILD_ENV_NAMES=()
+_GOS_CHILD_ENV_VALUES=()
+case "${1:-}" in
+  run | each)
+    while IFS= read -r _GOS_CHILD_ENV_NAME; do
+      case "$_GOS_CHILD_ENV_NAME" in PATH | GOROOT | GOS_* | _GOS_* | _gos_*) continue ;; esac
+      _GOS_CHILD_ENV_NAMES+=("$_GOS_CHILD_ENV_NAME")
+      _GOS_CHILD_ENV_VALUES+=("${!_GOS_CHILD_ENV_NAME}")
+    done < <(compgen -e)
+    ;;
+esac
+
 GOS_VERSION="1.11.0"
 GOS_INSTALL_DIR="${GOS_INSTALL_DIR:-/usr/local/go}"
 # Strip trailing slashes so sibling paths (backup, rollback) are computed as
@@ -347,7 +365,7 @@ _gos_validate_version() {
 
 # Reject path values that are unsafe to interpolate or to feed to privileged
 # rm -rf/mv. Shared by every user-controlled directory knob so a hardening added
-# here (e.g. the shell-metacharacter denylist) can never drift between them.
+# here can never drift between them. Shell metacharacters remain literal data.
 # Usage: _gos_reject_unsafe_path <var-name> <value>
 _gos_reject_unsafe_path() {
   local label="$1" value="$2"
@@ -469,7 +487,7 @@ _gos_validate_versions_dir() {
 
 # The cache dir is user-controlled like the install and versions dirs and
 # feeds mkdir -p, globbed rm -f, and JSON output, so it gets the same
-# absolute-path and metacharacter checks.
+# absolute-path and unsafe-component checks.
 _gos_validate_cache_dir() {
   local depth
   case "$GOS_CACHE_DIR" in
@@ -1594,7 +1612,7 @@ _gos_activate_install() {
     return 1
   fi
 
-  if ! version_output=$(GOTOOLCHAIN=local "$go_bin" version 2>&1); then
+  if ! version_output=$(GOROOT='' GOTOOLCHAIN=local "$go_bin" version </dev/null 2>&1); then
     _gos_error "activated Go failed validation: ${version_output}"
     # Disarm the trap only if the restore succeeded: a failed restore leaves
     # the slot empty with the backup intact, exactly the state the EXIT trap
@@ -1641,6 +1659,10 @@ _gos_activate_rollback() {
   current_backup="${GOS_INSTALL_DIR}.gos-current.$$"
 
   _gos_require_rollback_slot || return 1
+  if [ -e "$current_backup" ] || [ -L "$current_backup" ]; then
+    _gos_error "backup path already exists: ${current_backup}"
+    return 1
+  fi
 
   # -L also moves a (possibly dangling) side-by-side symlink out of the way;
   # otherwise the restore mv below fails because the slot is still occupied.
@@ -1670,7 +1692,7 @@ _gos_activate_rollback() {
     return 1
   fi
 
-  if ! version_output=$(GOTOOLCHAIN=local "$go_bin" version 2>&1); then
+  if ! version_output=$(GOROOT='' GOTOOLCHAIN=local "$go_bin" version </dev/null 2>&1); then
     _gos_error "rollback Go failed validation: ${version_output}"
     _gos_restore_backup "$current_backup" && GOS_ACTIVATION_BACKUP=""
     return 1
@@ -1946,7 +1968,7 @@ _gos_install_version() {
     local reported expected_platform
     expected_platform="$(_gos_os)/$(_gos_arch)"
     [ "$expected_platform" != "linux/armv6l" ] || expected_platform="linux/arm"
-    reported=$(GOTOOLCHAIN=local "${staged_go_dir}/bin/go" version 2>/dev/null) || reported=""
+    reported=$(GOROOT='' GOTOOLCHAIN=local "${staged_go_dir}/bin/go" version </dev/null 2>/dev/null) || reported=""
     reported="${reported%$'\r'}"
     if [ "$reported" != "go version go${version} ${expected_platform}" ]; then
       _gos_fail verification "local archive does not provide go${version} for ${expected_platform}."
@@ -2641,6 +2663,23 @@ _gos_ensure_version_dir() {
 # helper declares no locals: bash exports a local that shadows a variable the
 # caller exported, so a named local would rewrite that variable for the child.
 _gos_exec_version_command() {
+  for _GOS_CHILD_ENV_INDEX in ${_GOS_CHILD_ENV_NAMES[@]:+"${!_GOS_CHILD_ENV_NAMES[@]}"}; do
+    _GOS_CHILD_ENV_NAME="${_GOS_CHILD_ENV_NAMES[$_GOS_CHILD_ENV_INDEX]}"
+    _GOS_CHILD_ENV_FLAGS=$(declare -p "$_GOS_CHILD_ENV_NAME" 2>/dev/null) || _GOS_CHILD_ENV_FLAGS=""
+    _GOS_CHILD_ENV_FLAGS="${_GOS_CHILD_ENV_FLAGS#declare -}"
+    _GOS_CHILD_ENV_FLAGS="${_GOS_CHILD_ENV_FLAGS%% *}"
+    # Never assign readonly shell metadata. A local array must be recreated as
+    # a scalar: assigning/exporting its first element does not export an array.
+    case "$_GOS_CHILD_ENV_FLAGS" in
+      *r*) continue ;;
+      *a* | *A*) unset "$_GOS_CHILD_ENV_NAME" ;;
+    esac
+    if [ "${!_GOS_CHILD_ENV_NAME-}" != "${_GOS_CHILD_ENV_VALUES[$_GOS_CHILD_ENV_INDEX]}" ] \
+      || [ "${!_GOS_CHILD_ENV_NAME+x}" != x ]; then
+      unset "$_GOS_CHILD_ENV_NAME"
+      export "${_GOS_CHILD_ENV_NAME}=${_GOS_CHILD_ENV_VALUES[$_GOS_CHILD_ENV_INDEX]}"
+    fi
+  done
   unset GOROOT
   PATH="${1}/bin:${PATH}" exec "${@:2}"
 }
@@ -2743,21 +2782,26 @@ cmd_each() {
   _gos_require_versions_mode "gos each" "$GOS_VERSIONS_MODE_EXAMPLE" || return 1
   _gos_validate_versions_dir || return 1
 
-  # Split the comma list, preserving order. IFS split is fine: versions never
-  # contain commas or whitespace once validated.
+  # Split literally, with no pathname expansion. Validate the whole list before
+  # any install or child command, including empty entries and line breaks.
   local raw_version version rc failures=0 total=0
   # Parallel result arrays kept as raw data (never pre-colored, since coloring
   # inside a command substitution always disables itself); the summary is
   # styled at top level below.
   local -a result_label=() result_ok=()
-  local old_ifs="$IFS"
-  IFS=','
-  # shellcheck disable=SC2206
-  local -a requested=($versions_arg)
-  IFS="$old_ifs"
+  local -a requested=()
+  case ",${versions_arg}," in
+    *,,* | *$'\n'* | *$'\r'*)
+      _gos_fail usage "gos each requires a nonempty comma-separated list of versions."
+      return 1
+      ;;
+  esac
+  IFS=',' read -r -a requested <<<"$versions_arg"
+  for raw_version in "${requested[@]}"; do
+    _gos_validate_version "${raw_version#go}" || return 1
+  done
 
   for raw_version in "${requested[@]}"; do
-    [ -n "$raw_version" ] || continue
     version="${raw_version#go}"
     total=$((total + 1))
     _gos_print_styled_value 36 '' "=== go${version} ==="
@@ -3862,15 +3906,14 @@ cmd_rollback() {
   fi
 }
 
-# Remove every installed side-by-side version except the active one. The
-# rollback target is kept too: deleting it would silently disarm gos rollback,
-# so it is skipped with a hint pointing at the explicit single-version path.
 # Past-tense verb for a real run, "Would ..." for a dry run, so previews and
 # real runs describe the same actions. Usage: _gos_action_verb <dry_run> <done> <would>
 _gos_action_verb() {
   if [ "$1" = "true" ]; then printf '%s\n' "$3"; else printf '%s\n' "$2"; fi
 }
 
+# Remove every installed side-by-side version except the active and rollback
+# targets. Explicit single-version removal warns before disarming rollback.
 _gos_uninstall_inactive() {
   local dry_run="$1" installed version_dir rollback_dir removed=0 size removed_kib=0
   local removal_verb
