@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- Install, rollback, and local-archive activation probes clear inherited `GOROOT` and close stdin, preventing a stale environment from rejecting a healthy tree or consuming caller input. Rollback refuses an occupied recovery slot before changing either installation.
+- `gos each` parses version lists without filename expansion and rejects empty/malformed entries before any install or child command; an empty matrix can no longer report success.
+- `run` and `each` restore exported caller values shadowed by internal Bash locals before executing the child, retaining the existing PATH/GOROOT policy and process/argument semantics. GOS-owned configuration/state namespaces are excluded so interruptions cannot re-import caller-supplied cleanup paths.
 - Project resolution skips `.tool-versions` files that only pin other languages, preserving `go.mod` and parent Go pins. Bash/Zsh auto-switching tracks both the unrelated manifest and the selected Go manifest so edits in the same directory invalidate the prompt cache. Incomplete explicit Go entries still fail closed, and the first `go`/`golang` entry decides (a bare entry no longer lets a later line win). `.tool-versions` fields are no longer pathname-expanded, so `golang *` cannot select a version from file names in the working directory.
 - Output and error messages that gos captures from file operations (with or without a privilege-escalation retry) keep their trailing newline when replayed, so the next progress or error line is no longer glued onto the command's last line (for example `...: Permission deniedError: ...`).
 - `doctor` marks a Go executable that fails or returns malformed version output as a problem, exits nonzero, and suggests checking PATH or repairing that runtime. Local stable, prerelease, and development toolchains remain supported without automatic toolchain downloads.

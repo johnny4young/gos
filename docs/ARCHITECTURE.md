@@ -194,9 +194,10 @@ into a `sudo sh -c`.
 Version probes and activation checks use `GOTOOLCHAIN=local` to identify the
 bundled binary without Go selecting or downloading a different toolchain. This
 includes the GitHub Action output and `verify`'s choice of reference archive.
-The shared `_gos_go_version_of` probe also clears `GOROOT` (so a stale export
+The shared `_gos_go_version_of` probe clears `GOROOT` (so a stale export
 cannot make a healthy binary fail), closes stdin, and relies on `pipefail`: a
-nonzero exit rejects the probe even when the binary printed a version.
+nonzero exit rejects the probe even when the binary printed a version. Activation,
+rollback, and local-archive identity checks also clear `GOROOT` and close stdin.
 The override is scoped to each probe: `gos run` and `gos each` preserve the
 caller's toolchain policy for the user command.
 
@@ -220,9 +221,19 @@ Process ownership stays with the callers:
   failed version makes the aggregate exit status `1`.
 
 Keep the helper a normal function, rather than a subshell function: moving
-the process boundary into it would change `run`'s replacement semantics. Keep
-it free of named locals too: bash exports a local that shadows a
-caller-exported variable of the same name, so the child would see gos's value.
+the process boundary into it would change `run`'s replacement semantics. Bash
+exports locals that shadow inherited exported names, including locals in callers.
+For `run`/`each` only, entrypoint arrays snapshot the Bash-imported exported values
+before any command locals exist. Before exec the helper unsets and re-exports each
+snapshotted name as a scalar (dropping shadowing locals, arrays included) without
+forking per variable, except readonly shell metadata and the intentional
+PATH/GOROOT policy. GOS-owned configuration/state namespaces (`GOS_*`,
+`_GOS_*`, `_gos_*`) are excluded: restoring internal cleanup paths while EXIT/TERM
+traps remain armed could make an interruption delete caller-owned data. Their
+manager-controlled values and cleanup lifecycle remain intact. The snapshot stays
+in memory; no environment values are written or logged. The deterministic
+`child-environment-cleanup.bash` regression injects TERM/INT during restoration and
+requires caller data to survive with the original signal-derived status.
 `tests/side-by-side.bash` covers PID replacement, exact argument forwarding,
 environment isolation, signal-derived child status, and iteration after a
 failed child. The existing platform exclusions and symlink capability probe
@@ -325,3 +336,8 @@ macOS ships bash 3.2 and CI runs the suites under `/bin/bash` there, so:
 
 Portability beyond bash: no `sort -V`, `grep -P`, `sed -i`, `readlink -f`, or
 `find -printf`; `stat` is probed GNU-first then BSD.
+
+## Active maintenance
+
+[BACKLOG.md](BACKLOG.md) owns remaining work. This document describes contracts,
+not a second task list.

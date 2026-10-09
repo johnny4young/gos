@@ -73,6 +73,12 @@ interaction is never a surprise.
 Gos identifies installed versions and validates installs with `GOTOOLCHAIN=local`,
 so those checks report the bundled binary and never auto-download another Go.
 User commands launched by `gos run` and `gos each` keep your `GOTOOLCHAIN` setting.
+They also retain Bash-imported exported caller values, including names such as `version`
+and `cmd`; gos removes `GOROOT` and prepends the selected Go `bin` directory to `PATH`.
+GOS-owned configuration/state (`GOS_*`, `_GOS_*`, `_gos_*`) keeps the manager's values;
+caller-supplied internal cleanup paths are never restored.
+`gos each` requires a nonempty, literal comma-separated version list: wildcard patterns,
+empty entries and malformed versions are usage errors before any child runs.
 
 ---
 
@@ -785,6 +791,11 @@ be reviewed before implementation.
 Maintainer release steps are documented in [RELEASING.md](RELEASING.md). Use it
 to keep GitHub release assets, Homebrew, PowerShell, package metadata, README
 install commands, and changelog links in sync.
+
+## Maintenance backlog
+
+[docs/BACKLOG.md](docs/BACKLOG.md) is the single active repository backlog. Historical
+release changes remain in CHANGELOG.md; contracts and runbooks stay in their existing docs.
 
 ---
 
