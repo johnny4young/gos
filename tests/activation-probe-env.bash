@@ -62,6 +62,7 @@ pass "local archive validation and activation ignore stale GOROOT without networ
 case_dir="${test_root}/rollback-collision"
 create_old_install "${case_dir}/go" 1.21.6 old-1.21.6
 create_old_install "${case_dir}/go.gos-rollback" 1.20.0 old-1.20.0
+# shellcheck disable=SC2016 # The child shell must expand its own PID before exec.
 run_gos "$case_dir" bash -c '
   residue="$GOS_INSTALL_DIR.gos-current.$$"
   mkdir "$residue"
