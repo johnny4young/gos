@@ -792,6 +792,11 @@ Maintainer release steps are documented in [RELEASING.md](RELEASING.md). Use it
 to keep GitHub release assets, Homebrew, PowerShell, package metadata, README
 install commands, and changelog links in sync.
 
+## Maintenance backlog
+
+[docs/BACKLOG.md](docs/BACKLOG.md) is the single active repository backlog. Historical
+release changes remain in CHANGELOG.md; contracts and runbooks stay in their existing docs.
+
 ---
 
 ## License
@@ -803,8 +808,3 @@ This project is licensed under the [MIT License](LICENSE).
 <p align="center">
   Built for Go developers who'd rather write code than manage installations.
 </p>
-
-## Maintenance backlog
-
-[docs/BACKLOG.md](docs/BACKLOG.md) is the single active repository backlog. Historical
-release changes remain in CHANGELOG.md; contracts and runbooks stay in their existing docs.

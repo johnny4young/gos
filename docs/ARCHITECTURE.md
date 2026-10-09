@@ -224,9 +224,10 @@ Keep the helper a normal function, rather than a subshell function: moving
 the process boundary into it would change `run`'s replacement semantics. Bash
 exports locals that shadow inherited exported names, including locals in callers.
 For `run`/`each` only, entrypoint arrays snapshot the Bash-imported exported values
-before any command locals exist. The helper restores changed values and recreates
-shadowing arrays as scalars before exec, except readonly shell metadata and the
-intentional PATH/GOROOT policy. GOS-owned configuration/state namespaces (`GOS_*`,
+before any command locals exist. Before exec the helper unsets and re-exports each
+snapshotted name as a scalar (dropping shadowing locals, arrays included) without
+forking per variable, except readonly shell metadata and the intentional
+PATH/GOROOT policy. GOS-owned configuration/state namespaces (`GOS_*`,
 `_GOS_*`, `_gos_*`) are excluded: restoring internal cleanup paths while EXIT/TERM
 traps remain armed could make an interruption delete caller-owned data. Their
 manager-controlled values and cleanup lifecycle remain intact. The snapshot stays

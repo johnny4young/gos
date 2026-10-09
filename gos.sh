@@ -1104,6 +1104,14 @@ _gos_fetch_checksum_file() {
   printf '%s\n' "$sha" | tr '[:upper:]' '[:lower:]'
 }
 
+# Run `go version` isolated from the caller: no stale GOROOT, no toolchain
+# switch, and no access to stdin. Shared by the parsed probe below and by the
+# activation, rollback, and local-archive identity checks so the isolation
+# cannot drift between them. Usage: _gos_run_go_version <go-binary>
+_gos_run_go_version() {
+  GOROOT='' GOTOOLCHAIN=local "$1" version </dev/null
+}
+
 # Extract the bare version (e.g. 1.22.0, 1.23rc1) that a `go` binary reports.
 # Identify the bundled binary, independent of project directives or the caller's
 # GOTOOLCHAIN. Probing installed versions must not download or run another Go.
@@ -1114,8 +1122,7 @@ _gos_fetch_checksum_file() {
 # pipefail: a nonzero go exit fails the substitution even when it printed a
 # version.
 _gos_go_version_of() {
-  local go_bin="$1"
-  GOROOT='' GOTOOLCHAIN=local "$go_bin" version </dev/null 2>/dev/null \
+  _gos_run_go_version "$1" 2>/dev/null \
     | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' \
     | head -1 | sed 's/^go//'
 }
@@ -1542,6 +1549,16 @@ _gos_save_rollback_backup() {
   _gos_progress "Rollback available: gos rollback"
 }
 
+# Refuse a recovery path that is already occupied (crash residue whose PID was
+# reused): renaming onto it would nest an installation inside unrelated data.
+# -L also catches a dangling symlink. Usage: _gos_require_free_backup_path <path>
+_gos_require_free_backup_path() {
+  if [ -e "$1" ] || [ -L "$1" ]; then
+    _gos_error "backup path already exists: ${1}"
+    return 1
+  fi
+}
+
 # Activate a new Go installation transactionally: back up whatever occupies
 # GOS_INSTALL_DIR, put the new tree in place, validate it runs, and either save
 # the displaced install for rollback or restore it on any failure. The single
@@ -1558,10 +1575,7 @@ _gos_activate_install() {
   # path a plain [ -e ] test assumes.
   if [ -e "$GOS_INSTALL_DIR" ] || [ -L "$GOS_INSTALL_DIR" ]; then
     backup_dir="${GOS_INSTALL_DIR}.gos-backup.$$"
-    if [ -e "$backup_dir" ] || [ -L "$backup_dir" ]; then
-      _gos_error "backup path already exists: ${backup_dir}"
-      return 1
-    fi
+    _gos_require_free_backup_path "$backup_dir" || return 1
     # Replacing one symlink with another is silent; a real install is not.
     if [ ! -L "$GOS_INSTALL_DIR" ]; then
       _gos_progress "Backing up existing Go installation..."
@@ -1612,7 +1626,7 @@ _gos_activate_install() {
     return 1
   fi
 
-  if ! version_output=$(GOROOT='' GOTOOLCHAIN=local "$go_bin" version </dev/null 2>&1); then
+  if ! version_output=$(_gos_run_go_version "$go_bin" 2>&1); then
     _gos_error "activated Go failed validation: ${version_output}"
     # Disarm the trap only if the restore succeeded: a failed restore leaves
     # the slot empty with the backup intact, exactly the state the EXIT trap
@@ -1659,10 +1673,7 @@ _gos_activate_rollback() {
   current_backup="${GOS_INSTALL_DIR}.gos-current.$$"
 
   _gos_require_rollback_slot || return 1
-  if [ -e "$current_backup" ] || [ -L "$current_backup" ]; then
-    _gos_error "backup path already exists: ${current_backup}"
-    return 1
-  fi
+  _gos_require_free_backup_path "$current_backup" || return 1
 
   # -L also moves a (possibly dangling) side-by-side symlink out of the way;
   # otherwise the restore mv below fails because the slot is still occupied.
@@ -1692,7 +1703,7 @@ _gos_activate_rollback() {
     return 1
   fi
 
-  if ! version_output=$(GOROOT='' GOTOOLCHAIN=local "$go_bin" version </dev/null 2>&1); then
+  if ! version_output=$(_gos_run_go_version "$go_bin" 2>&1); then
     _gos_error "rollback Go failed validation: ${version_output}"
     _gos_restore_backup "$current_backup" && GOS_ACTIVATION_BACKUP=""
     return 1
@@ -1968,7 +1979,7 @@ _gos_install_version() {
     local reported expected_platform
     expected_platform="$(_gos_os)/$(_gos_arch)"
     [ "$expected_platform" != "linux/armv6l" ] || expected_platform="linux/arm"
-    reported=$(GOROOT='' GOTOOLCHAIN=local "${staged_go_dir}/bin/go" version </dev/null 2>/dev/null) || reported=""
+    reported=$(_gos_run_go_version "${staged_go_dir}/bin/go" 2>/dev/null) || reported=""
     reported="${reported%$'\r'}"
     if [ "$reported" != "go version go${version} ${expected_platform}" ]; then
       _gos_fail verification "local archive does not provide go${version} for ${expected_platform}."
@@ -1989,10 +2000,7 @@ _gos_install_version() {
     # Preserve a previous copy until replacement and activation both succeed.
     if [ -e "$version_dir" ] || [ -L "$version_dir" ]; then
       local replacement_backup="${version_dir}.gos-backup.$$"
-      if [ -e "$replacement_backup" ] || [ -L "$replacement_backup" ]; then
-        _gos_error "backup path already exists: ${replacement_backup}"
-        return 1
-      fi
+      _gos_require_free_backup_path "$replacement_backup" || return 1
       GOS_REPLACEMENT_TARGET="$version_dir"
       GOS_REPLACEMENT_BACKUP="$replacement_backup"
       if ! _gos_sudo_for "$version_dir" mv "$version_dir" "$replacement_backup"; then
@@ -2663,22 +2671,14 @@ _gos_ensure_version_dir() {
 # helper declares no locals: bash exports a local that shadows a variable the
 # caller exported, so a named local would rewrite that variable for the child.
 _gos_exec_version_command() {
+  # Recreate every snapshotted name as an exported scalar without forking per
+  # variable (this runs before each child). unset drops the innermost shadowing
+  # local, array or not; it fails only for readonly shell metadata, which is
+  # never assigned. Unchanged names are rewritten with their own value.
   for _GOS_CHILD_ENV_INDEX in ${_GOS_CHILD_ENV_NAMES[@]:+"${!_GOS_CHILD_ENV_NAMES[@]}"}; do
     _GOS_CHILD_ENV_NAME="${_GOS_CHILD_ENV_NAMES[$_GOS_CHILD_ENV_INDEX]}"
-    _GOS_CHILD_ENV_FLAGS=$(declare -p "$_GOS_CHILD_ENV_NAME" 2>/dev/null) || _GOS_CHILD_ENV_FLAGS=""
-    _GOS_CHILD_ENV_FLAGS="${_GOS_CHILD_ENV_FLAGS#declare -}"
-    _GOS_CHILD_ENV_FLAGS="${_GOS_CHILD_ENV_FLAGS%% *}"
-    # Never assign readonly shell metadata. A local array must be recreated as
-    # a scalar: assigning/exporting its first element does not export an array.
-    case "$_GOS_CHILD_ENV_FLAGS" in
-      *r*) continue ;;
-      *a* | *A*) unset "$_GOS_CHILD_ENV_NAME" ;;
-    esac
-    if [ "${!_GOS_CHILD_ENV_NAME-}" != "${_GOS_CHILD_ENV_VALUES[$_GOS_CHILD_ENV_INDEX]}" ] \
-      || [ "${!_GOS_CHILD_ENV_NAME+x}" != x ]; then
-      unset "$_GOS_CHILD_ENV_NAME"
-      export "${_GOS_CHILD_ENV_NAME}=${_GOS_CHILD_ENV_VALUES[$_GOS_CHILD_ENV_INDEX]}"
-    fi
+    unset -v "$_GOS_CHILD_ENV_NAME" 2>/dev/null || continue
+    export "${_GOS_CHILD_ENV_NAME}=${_GOS_CHILD_ENV_VALUES[$_GOS_CHILD_ENV_INDEX]}"
   done
   unset GOROOT
   PATH="${1}/bin:${PATH}" exec "${@:2}"
