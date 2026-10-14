@@ -62,6 +62,24 @@ run_gos "$case_dir" bash "$script" use "${case_dir}/empty"
 assert_contains "$output" "no .go-version or go.mod found" "use without manifests"
 pass "use fails with a clear error when no project manifest exists"
 
+# A manifest that exists but declares no version is named, never "not found".
+case_dir="${test_root}/use-invalid-manifest"
+mkdir -p "${case_dir}/empty-pin" "${case_dir}/bare-mod"
+: >"${case_dir}/empty-pin/.go-version"
+printf 'module example.com/bare\n' >"${case_dir}/bare-mod/go.mod"
+for project in empty-pin/.go-version bare-mod/go.mod; do
+  run_gos "$case_dir" bash "$script" use --print "${case_dir}/${project%/*}"
+  assert_nonzero_status "$status" "use with an invalid ${project##*/}" "$output"
+  assert_contains "$output" "could not read a Go version from ${case_dir}/${project}" "invalid ${project##*/} names the file"
+  assert_not_contains "$output" 'found from' "invalid ${project##*/} is not reported as missing"
+done
+pushd "${case_dir}/empty-pin" >/dev/null
+run_gos "$case_dir" bash "$script" run -- true
+popd >/dev/null
+assert_nonzero_status "$status" 'run -- with an invalid manifest' "$output"
+assert_contains "$output" "could not read a Go version from ${case_dir}/empty-pin/.go-version" 'run -- names the invalid manifest'
+pass "use and run -- name a manifest that declares no Go version"
+
 case_dir="${test_root}/pin-no-arg"
 mkdir -p "$case_dir/project"
 pushd "$case_dir/project" >/dev/null
@@ -158,6 +176,7 @@ printf 'golang\n' >"${case_dir}/project/.tool-versions"
 run_gos "$case_dir" bash "$script" use --print "${case_dir}/project"
 assert_nonzero_status "$status" 'incomplete Go entry must not fall back' "$output"
 assert_contains "$output" 'golang entry has no version' 'incomplete Go entry names the cause'
+assert_not_contains "$output" 'found from' 'an existing manifest is not reported as missing'
 [ ! -s "${case_dir}/urls.log" ] || fail 'incomplete Go entry must stay offline'
 # The first Go entry decides: a bare entry must not let a later line win, and
 # a `go` prefix that leaves nothing behind is just as incomplete.

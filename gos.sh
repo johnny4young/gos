@@ -2105,6 +2105,8 @@ _gos_read_go_mod_version() {
   ' "$file"
 }
 
+# Prints "<version>|<manifest>". Returns 1 when no manifest exists, or 2 with
+# the manifest path on stdout when the nearest one declares no usable version.
 _gos_resolve_project_version() {
   local start_dir="$1" dir candidate version
 
@@ -2113,7 +2115,10 @@ _gos_resolve_project_version() {
   while :; do
     candidate="${dir%/}/.go-version"
     if [ -f "$candidate" ]; then
-      version=$(_gos_read_go_version_file "$candidate") || return 1
+      version=$(_gos_read_go_version_file "$candidate") || {
+        printf '%s\n' "$candidate"
+        return 2
+      }
       printf '%s|%s\n' "$version" "$candidate"
       return 0
     fi
@@ -2126,13 +2131,19 @@ _gos_resolve_project_version() {
       else
         # Status 1 means no Go entry: keep looking in go.mod and parents.
         # An unreadable file or explicit incomplete Go entry must still fail.
-        [ "$?" -eq 1 ] || return 1
+        if [ "$?" -ne 1 ]; then
+          printf '%s\n' "$candidate"
+          return 2
+        fi
       fi
     fi
 
     candidate="${dir%/}/go.mod"
     if [ -f "$candidate" ]; then
-      version=$(_gos_read_go_mod_version "$candidate") || return 1
+      version=$(_gos_read_go_mod_version "$candidate") || {
+        printf '%s\n' "$candidate"
+        return 2
+      }
       printf '%s|%s\n' "$version" "$candidate"
       return 0
     fi
@@ -2706,7 +2717,12 @@ cmd_run() {
       _gos_usage run
       return 1
     fi
-    if ! project_resolved=$(_gos_resolve_project_version "$PWD"); then
+    if project_resolved=$(_gos_resolve_project_version "$PWD"); then
+      :
+    elif [ "$?" -eq 2 ]; then
+      _gos_error "could not read a Go version from ${project_resolved}."
+      return 1
+    else
       _gos_error "no version given and no .go-version or go.mod found from ${PWD} upward."
       _gos_usage run
       return 1
@@ -3807,7 +3823,12 @@ cmd_use() {
     _gos_acquire_lock || return 1
   fi
 
-  if ! resolved=$(_gos_resolve_project_version "$start_dir"); then
+  if resolved=$(_gos_resolve_project_version "$start_dir"); then
+    :
+  elif [ "$?" -eq 2 ]; then
+    _gos_error "could not read a Go version from ${resolved}."
+    return 1
+  else
     _gos_error "no .go-version or go.mod found from ${start_dir} upward."
     return 1
   fi
