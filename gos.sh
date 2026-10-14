@@ -34,7 +34,7 @@ case "${1:-}" in
     ;;
 esac
 
-GOS_VERSION="1.11.0"
+GOS_VERSION="1.11.1"
 GOS_INSTALL_DIR="${GOS_INSTALL_DIR:-/usr/local/go}"
 # Strip trailing slashes so sibling paths (backup, rollback) are computed as
 # true siblings: /usr/local/go/ would otherwise yield /usr/local/go/.gos-backup.

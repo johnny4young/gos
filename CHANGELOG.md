@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-10-14
+
 ### Fixed
 
 - Install, rollback, and local-archive activation probes clear inherited `GOROOT` and close stdin, preventing a stale environment from rejecting a healthy tree or consuming caller input. Rollback refuses an occupied recovery slot before changing either installation.
@@ -418,7 +420,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Homebrew formula
 
 
-[Unreleased]: https://github.com/johnny4young/gos/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/johnny4young/gos/compare/v1.11.1...HEAD
+[1.11.1]: https://github.com/johnny4young/gos/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/johnny4young/gos/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/johnny4young/gos/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/johnny4young/gos/compare/v1.8.0...v1.9.0
