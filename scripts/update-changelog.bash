@@ -177,7 +177,8 @@ fi
 
 changelog_file="${GOS_CHANGELOG_FILE:-CHANGELOG.md}"
 release_date="${GOS_RELEASE_DATE:-$(date +%Y-%m-%d)}"
-previous_tag="${GOS_PREVIOUS_TAG:-$(git describe --tags --abbrev=0 2>/dev/null || true)}"
+# Release tags only: the Action's moving major tag (v1) shares the release commit.
+previous_tag="${GOS_PREVIOUS_TAG:-$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || true)}"
 
 if ! valid_release_date "$release_date"; then
   printf 'error: invalid release date %q; use a real YYYY-MM-DD date\n' "$release_date" >&2

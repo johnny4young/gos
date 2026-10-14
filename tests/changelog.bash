@@ -65,7 +65,7 @@ current_changelog_requires_unreleased_notes_when_ahead_of_latest_tag() {
   local changelog latest_tag notes commit_count
   changelog="$repo_root/CHANGELOG.md"
 
-  latest_tag=$(git -C "$repo_root" describe --tags --abbrev=0 2>/dev/null || true)
+  latest_tag=$(git -C "$repo_root" describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || true)
   if [ -z "$latest_tag" ]; then
     # Shallow or exported checkouts cannot see tags: the guard did not run.
     skip_assertion 'current changelog Unreleased guard skipped: no reachable tag'
@@ -274,6 +274,38 @@ CHANGELOG
   printf 'ok - empty Unreleased generates notes from git commits\n'
 }
 
+test_previous_tag_skips_major_alias() {
+  local tmp_dir repo changelog
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' RETURN
+  repo="$tmp_dir/repo"
+  mkdir "$repo"
+
+  git -C "$repo" init -q
+  git -C "$repo" config user.name "Test User"
+  git -C "$repo" config user.email "test@example.com"
+  printf 'initial\n' >"$repo/file.txt"
+  git -C "$repo" add file.txt
+  git -C "$repo" commit -q -m "release: v1.0.0"
+  # The release job moves the Action's major tag onto every stable release.
+  git -C "$repo" tag v1.0.0
+  git -C "$repo" tag v1
+  printf 'fix\n' >>"$repo/file.txt"
+  git -C "$repo" commit -q -am "fix: repair something"
+
+  changelog="$repo/CHANGELOG.md"
+  write_fixture "$changelog"
+  (
+    cd "$repo"
+    unset GOS_PREVIOUS_TAG
+    GOS_CHANGELOG_FILE="$changelog" GOS_RELEASE_DATE="2026-05-07" bash "$script" "1.1.0"
+  )
+
+  assert_file_contains "$changelog" "compare/v1.0.0...v1.1.0"
+
+  printf 'ok - previous tag discovery skips the major alias tag\n'
+}
+
 test_check_mode_validates_without_mutation() {
   local tmp_dir changelog before
   tmp_dir="$(mktemp -d)"
@@ -446,6 +478,7 @@ test_invalid_release_date_fails_without_mutation
 test_unsafe_previous_tag_fails_without_mutation
 test_empty_unreleased_without_commits_fails_without_mutation
 test_empty_unreleased_generates_notes_from_git
+test_previous_tag_skips_major_alias
 test_check_mode_validates_without_mutation
 test_check_mode_empty_unreleased_fails_without_mutation
 test_unknown_option_fails_with_usage_without_mutation
