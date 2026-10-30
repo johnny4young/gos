@@ -9,7 +9,9 @@ script="${repo_root}/gos.sh"
 # shellcheck source=tests/lib-features.bash
 . "${repo_root}/tests/lib-features.bash"
 
-for mode in failed empty healthy; do
+for mode in failed empty malformed healthy crlf; do
+  healthy=false
+  case "$mode" in healthy | crlf) healthy=true ;; esac
   case_dir="${test_root}/prune-${mode}"
   create_old_install "${case_dir}/go"
   create_old_install "${case_dir}/go.gos-backup.123"
@@ -21,7 +23,9 @@ printf 'probe\n' >>"${GOS_TEST_PROBE_LOG}"
 case "${GOS_TEST_PROBE_MODE}" in
   failed) echo 'go version go1.24.0 linux/amd64'; exit 7 ;;
   empty) exit 0 ;;
+  malformed) echo 'garbage go version go1.24.0 linux/amd64' ;;
   healthy) echo 'go version go1.24.0 linux/amd64' ;;
+  crlf) printf 'go version go1.24.0 windows/amd64\r\n' ;;
 esac
 GO_PROBE
   export GOS_TEST_PROBE_LOG="${case_dir}/probe.log" GOS_TEST_PROBE_MODE="$mode"
@@ -38,12 +42,12 @@ GO_PROBE
     fi
     assert_status 0 "$status" "prune ${mode} dry-run=${dry_run}" "$output"
     assert_json "$output" "prune recovery report"
-    if [ "$mode" = healthy ]; then
+    if [ "$healthy" = true ]; then
       assert_contains "$output" '"orphaned_backups_found":2,"orphaned_backups_removed":2' "healthy removal count"
     else
       assert_contains "$output" '"orphaned_backups_found":2,"orphaned_backups_removed":0' "broken runtime preserves recovery copies"
     fi
-    if [ "$mode" != healthy ] || [ "$dry_run" = true ]; then
+    if [ "$healthy" != true ] || [ "$dry_run" = true ]; then
       [ -d "${case_dir}/go.gos-backup.123" ] || fail "prune removed backup while ${mode} dry-run=${dry_run}"
       [ -d "${case_dir}/go.gos-current.456" ] || fail "prune removed displaced install while ${mode} dry-run=${dry_run}"
     else
