@@ -1626,7 +1626,8 @@ _gos_activate_install() {
     return 1
   fi
 
-  if ! version_output=$(_gos_run_go_version "$go_bin" 2>&1); then
+  if ! version_output=$(_gos_run_go_version "$go_bin") \
+    || ! _gos_go_version_output_is_valid "${version_output%$'\r'}"; then
     _gos_error "activated Go failed validation: ${version_output}"
     # Disarm the trap only if the restore succeeded: a failed restore leaves
     # the slot empty with the backup intact, exactly the state the EXIT trap
@@ -1703,7 +1704,8 @@ _gos_activate_rollback() {
     return 1
   fi
 
-  if ! version_output=$(_gos_run_go_version "$go_bin" 2>&1); then
+  if ! version_output=$(_gos_run_go_version "$go_bin") \
+    || ! _gos_go_version_output_is_valid "${version_output%$'\r'}"; then
     _gos_error "rollback Go failed validation: ${version_output}"
     _gos_restore_backup "$current_backup" && GOS_ACTIVATION_BACKUP=""
     return 1

@@ -10,8 +10,8 @@ The GitHub open-issue and open-PR lists were empty at this inspection.
 - Add failure-injection coverage for shared versions/cache roots used by different
   activation roots. Current mutation locks are scoped to the activation path;
   record supported sharing/concurrency semantics before changing lock ownership.
-- Broaden activation failure tests to malformed successful version output and
-  repeated/interrupted repair, without weakening checksum or rollback protection.
+- Broaden activation failure tests to repeated/interrupted repair, without
+  weakening checksum or rollback protection.
 - Extend fault injection around cleanup failures and termination after validation;
   distinguish preserved recovery residue from success and verify retry behavior.
 
