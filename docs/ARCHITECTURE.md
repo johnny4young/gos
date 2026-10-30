@@ -201,8 +201,8 @@ Version probes and activation checks use `GOTOOLCHAIN=local` to identify the
 bundled binary without Go selecting or downloading a different toolchain. This
 includes the GitHub Action output and `verify`'s choice of reference archive.
 The shared `_gos_go_version_of` probe clears `GOROOT` (so a stale export
-cannot make a healthy binary fail), closes stdin, and relies on `pipefail`: a
-nonzero exit rejects the probe even when the binary printed a version. Activation,
+cannot make a healthy binary fail), closes stdin, and applies activation's
+`_gos_check_go_version`: a nonzero exit or malformed output yields no version. Activation,
 rollback, and local-archive identity checks also clear `GOROOT` and close stdin.
 The override is scoped to each probe: `gos run` and `gos each` preserve the
 caller's toolchain policy for the user command.

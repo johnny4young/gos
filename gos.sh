@@ -1112,9 +1112,9 @@ _gos_run_go_version() {
   GOROOT='' GOTOOLCHAIN=local "$1" version </dev/null
 }
 
-# Identify a toolchain before committing an activation: it must exit 0 and print
-# output doctor accepts; stderr stays on the terminal. Sets _gos_checked_version
-# on success, _gos_check_problem otherwise. Usage: _gos_check_go_version <go-binary>
+# Identify a toolchain: it must exit 0 and print output doctor accepts. Stderr
+# is left to the caller. Sets _gos_checked_version on success, _gos_check_problem
+# otherwise. Usage: _gos_check_go_version <go-binary>
 _gos_check_go_version() {
   local status=0
   _gos_checked_version=$(_gos_run_go_version "$1") || status=$?
