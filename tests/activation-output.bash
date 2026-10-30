@@ -47,7 +47,8 @@ index=0
 for malformed in '' 'not Go' 'go version go1.21.6' \
   'garbage go version go1.21.6 darwin/arm64' \
   'go version go1.21.6 darwin/arm64 garbage' \
-  $'go version go1.21.6 darwin/arm64\nsecond line'; do
+  $'go version go1.21.6 darwin/arm64\nsecond line' \
+  $'\e]0;spoofed\a go version go1.21.6 darwin/arm64'; do
   index=$((index + 1))
   for mode in install switch rollback; do
     case_dir="${test_root}/rejected-${mode}-${index}"
@@ -71,7 +72,8 @@ for malformed in '' 'not Go' 'go version go1.21.6' \
     GOS_TEST_ACTIVATION_OUTPUT="$malformed" GOS_TEST_VERSIONS_DIR="$versions_dir" \
       run_gos "$case_dir" bash "$script" "$command" ${args[@]+"${args[@]}"}
     assert_nonzero_status "$status" "${mode} rejects malformed output ${index}" "$output"
-    assert_contains "$output" 'failed validation' "${mode} validation diagnostic"
+    assert_contains "$output" 'failed validation: unrecognized go version output.' "${mode} validation diagnostic"
+    assert_not_contains "$output" 'spoofed' "${mode} must not echo malformed output"
     assert_not_contains "$output" 'Done!' "${mode} must not claim install success"
     assert_not_contains "$output" 'Rolled back!' "${mode} must not claim rollback success"
     assert_recovered "$case_dir"
@@ -122,3 +124,23 @@ for valid in 'go version go1.27rc1 darwin/arm64' \
   [ "$(<"${case_dir}/go.gos-rollback/VERSION_MARKER")" = original ] || fail 'valid rollback lost displaced tree'
 done
 pass 'rollback retains valid prerelease, vendor, development and CRLF output support'
+
+# A failing probe is rejected on its exit status even with valid stdout.
+case_dir="${test_root}/nonzero-exit"
+create_old_install "${case_dir}/go" 1.20.0 original
+GOS_TEST_ACTIVATION_OUTPUT='go version go1.21.6 darwin/arm64' GOS_TEST_ACTIVATION_STATUS=3 \
+  run_gos "$case_dir" bash "$script" install 1.21.6
+assert_nonzero_status "$status" 'nonzero probe exit rejects install' "$output"
+assert_contains "$output" 'failed validation: go version exited 3.' 'exit status diagnostic'
+assert_recovered "$case_dir"
+pass 'nonzero probe exit rejects valid-looking stdout'
+
+# The downloaded install path shares the CRLF contract and reports the stripped line.
+case_dir="${test_root}/crlf-install"
+create_old_install "${case_dir}/go" 1.20.0 original
+GOS_TEST_ACTIVATION_OUTPUT=$'go version go1.21.6 windows/amd64\r\n' \
+  run_gos "$case_dir" bash "$script" install 1.21.6
+assert_status 0 "$status" 'CRLF install output' "$output"
+assert_contains "$output" 'Done! go version go1.21.6 windows/amd64' 'CRLF install completed'
+assert_not_contains "$output" $'\r' 'success line carries no CR'
+pass 'install accepts CRLF output and prints it without the CR'
