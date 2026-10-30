@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Fixed
+
+- Install, switching to an installed version, and rollback reject empty or malformed `go version` output even when the binary exits successfully, restoring the previous installation instead of reporting success. Valid prerelease, vendor, development, and Windows CRLF output remain supported.
+
 ## [1.11.1] - 2026-10-14
 
 ### Fixed

@@ -1112,6 +1112,23 @@ _gos_run_go_version() {
   GOROOT='' GOTOOLCHAIN=local "$1" version </dev/null
 }
 
+# Identify a toolchain before committing an activation: it must exit 0 and print
+# output doctor accepts; stderr stays on the terminal. Sets _gos_checked_version
+# on success, _gos_check_problem otherwise. Usage: _gos_check_go_version <go-binary>
+_gos_check_go_version() {
+  local status=0
+  _gos_checked_version=$(_gos_run_go_version "$1") || status=$?
+  _gos_checked_version="${_gos_checked_version%$'\r'}"
+  if [ "$status" -ne 0 ]; then
+    _gos_check_problem="go version exited ${status}"
+  elif ! _gos_go_version_output_is_valid "$_gos_checked_version"; then
+    _gos_check_problem="unrecognized go version output"
+  else
+    return 0
+  fi
+  return 1
+}
+
 # Extract the bare version (e.g. 1.22.0, 1.23rc1) that a `go` binary reports.
 # Identify the bundled binary, independent of project directives or the caller's
 # GOTOOLCHAIN. Probing installed versions must not download or run another Go.
@@ -1568,7 +1585,7 @@ _gos_require_free_backup_path() {
 # Both share the exact same crash-safety flow so it can never drift between them.
 _gos_activate_install() {
   local activate_kind="$1" source="$2"
-  local backup_dir="" version_output go_bin
+  local backup_dir="" go_bin
 
   # -L also catches a (possibly dangling) side-by-side symlink; without it the
   # activation below fails with ENOTDIR when the slot is a symlink, not the empty
@@ -1626,8 +1643,8 @@ _gos_activate_install() {
     return 1
   fi
 
-  if ! version_output=$(_gos_run_go_version "$go_bin" 2>&1); then
-    _gos_error "activated Go failed validation: ${version_output}"
+  if ! _gos_check_go_version "$go_bin"; then
+    _gos_error "activated Go failed validation: ${_gos_check_problem}."
     # Disarm the trap only if the restore succeeded: a failed restore leaves
     # the slot empty with the backup intact, exactly the state the EXIT trap
     # exists to repair.
@@ -1642,7 +1659,7 @@ _gos_activate_install() {
   # (saved as rollback or restored); the trap no longer needs to act.
   GOS_ACTIVATION_BACKUP=""
 
-  _gos_progress "Done! ${version_output}"
+  _gos_progress "Done! ${_gos_checked_version}"
 }
 
 # Fail with the right message when the rollback slot is empty or a dangling
@@ -1667,7 +1684,7 @@ _gos_require_rollback_slot() {
 }
 
 _gos_activate_rollback() {
-  local rollback_dir current_backup version_output go_bin
+  local rollback_dir current_backup go_bin
 
   rollback_dir=$(_gos_rollback_dir)
   current_backup="${GOS_INSTALL_DIR}.gos-current.$$"
@@ -1703,8 +1720,8 @@ _gos_activate_rollback() {
     return 1
   fi
 
-  if ! version_output=$(_gos_run_go_version "$go_bin" 2>&1); then
-    _gos_error "rollback Go failed validation: ${version_output}"
+  if ! _gos_check_go_version "$go_bin"; then
+    _gos_error "rollback Go failed validation: ${_gos_check_problem}."
     _gos_restore_backup "$current_backup" && GOS_ACTIVATION_BACKUP=""
     return 1
   fi
@@ -1717,7 +1734,7 @@ _gos_activate_rollback() {
   # the new rollback or gone, so the trap has nothing left to repair.
   GOS_ACTIVATION_BACKUP=""
 
-  echo "Rolled back! ${version_output}"
+  echo "Rolled back! ${_gos_checked_version}"
 }
 
 # Obtain the verified archive for a version: resolve the platform package

@@ -115,7 +115,13 @@ if the slot is empty. It is armed before the backup rename (Bash can defer a
 trapped signal until the foreground `mv` returns), kept armed
 through validation and any restore attempt, and cleared only once the swap is
 complete or the restore succeeded. `gos rollback` (`_gos_activate_rollback`)
-runs the same saga with the rollback slot as the source.
+runs the same saga with the rollback slot as the source. Both activation paths
+require a successful probe and recognizable `go version` stdout, using the same
+validator as `doctor` (including vendor/development versions and a final Windows
+CR). Empty or malformed output restores the displaced installation even when
+the probe exits successfully. Runtime stderr stays visible in its own channel;
+a diagnostic alone cannot identify the toolchain, and a warning does not reject
+otherwise valid stdout.
 
 Commands that mutate a Go installation hold `GOS_INSTALL_DIR.gos-lock/` (a
 `mkdir` lock with the pid inside) so concurrent installs, switches, and
