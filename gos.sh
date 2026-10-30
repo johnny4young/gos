@@ -1112,9 +1112,9 @@ _gos_run_go_version() {
   GOROOT='' GOTOOLCHAIN=local "$1" version </dev/null
 }
 
-# Identify a toolchain before committing an activation: it must exit 0 and print
-# output doctor accepts; stderr stays on the terminal. Sets _gos_checked_version
-# on success, _gos_check_problem otherwise. Usage: _gos_check_go_version <go-binary>
+# Identify a toolchain: it must exit 0 and print output doctor accepts. Stderr
+# is left to the caller. Sets _gos_checked_version on success, _gos_check_problem
+# otherwise. Usage: _gos_check_go_version <go-binary>
 _gos_check_go_version() {
   local status=0
   _gos_checked_version=$(_gos_run_go_version "$1") || status=$?
@@ -1135,11 +1135,11 @@ _gos_check_go_version() {
 # The parse lives here once so the rc/beta regex cannot drift between callers.
 # An empty GOROOT lets the binary locate its own tree (a stale exported GOROOT
 # would make a healthy go exit 2), and stdin is closed so a probe inside a
-# `while read` loop can never consume the loop's input. Callers rely on
-# pipefail: a nonzero go exit fails the substitution even when it printed a
-# version.
+# `while read` loop can never consume the loop's input. A nonzero exit or
+# output activation would reject yields no version.
 _gos_go_version_of() {
-  _gos_run_go_version "$1" 2>/dev/null \
+  _gos_check_go_version "$1" 2>/dev/null || return 1
+  printf '%s\n' "$_gos_checked_version" \
     | grep -Eo 'go[0-9]+\.[0-9]+(\.[0-9]+)?(rc[0-9]+|beta[0-9]+)?' \
     | head -1 | sed 's/^go//'
 }
@@ -4570,8 +4570,8 @@ cmd_prune() {
     if [ "$active_checked" = "false" ]; then
       # Executable mode alone does not prove the runtime works (wrong arch,
       # missing loader, or a partially installed binary). Probe once, only when
-      # residue exists; the shared helper forces GOTOOLCHAIN=local, and under
-      # pipefail a nonzero go exit discards any version it printed.
+      # residue exists; the shared helper forces GOTOOLCHAIN=local and rejects
+      # a nonzero exit or malformed output.
       active_checked="true"
       active_version=$(_gos_go_version_of "${GOS_INSTALL_DIR}/bin/go") || active_version=""
     fi

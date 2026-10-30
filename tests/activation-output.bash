@@ -144,3 +144,22 @@ assert_status 0 "$status" 'CRLF install output' "$output"
 assert_contains "$output" 'Done! go version go1.21.6 windows/amd64' 'CRLF install completed'
 assert_not_contains "$output" $'\r' 'success line carries no CR'
 pass 'install accepts CRLF output and prints it without the CR'
+
+# Reinstalling must repair a managed Go whose output names the requested
+# version but is malformed, instead of reporting it as already active.
+case_dir="${test_root}/malformed-active"
+create_old_install "${case_dir}/go" 1.21.6 original
+printf '#!/usr/bin/env bash\necho "garbage go version go1.21.6 darwin/arm64"\n' >"${case_dir}/go/bin/go"
+GOS_TEST_ACTIVATION_OUTPUT='go version go1.21.6 darwin/arm64' GOS_TEST_GO_VERSION=1.21.6 \
+  run_gos "$case_dir" bash "$script" install 1.21.6
+assert_status 0 "$status" 'malformed active install is repaired' "$output"
+assert_not_contains "$output" 'nothing to do' 'malformed active install is not treated as current'
+assert_contains "$output" 'Done! go version go1.21.6 darwin/arm64' 'repair activated the downloaded Go'
+pass 'install repairs a managed Go with malformed version output'
+
+# gos current reads PATH's go through the same check: malformed output is no version.
+case_dir="${test_root}/malformed-current"
+GOS_TEST_GO_VERSION=$'1.21.6 darwin/arm64\nextra' run_gos "$case_dir" bash "$script" current
+assert_status 0 "$status" 'current with malformed PATH go' "$output"
+assert_not_contains "$output" '1.21.6' 'malformed PATH go reports no version'
+pass 'gos current rejects malformed PATH go output'
