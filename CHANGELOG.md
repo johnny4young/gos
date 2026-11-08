@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 
+- `gos doctor` clears inherited `GOROOT` and closes stdin for its Go version probe, matching other identity checks. A stale Go root no longer misdiagnoses a healthy runtime, and diagnostic probes leave caller input untouched.
 - Install, switching to an installed version, and rollback reject empty or malformed `go version` output even when the binary exits successfully, restoring the previous installation instead of reporting success. Valid prerelease, vendor, development, and Windows CRLF output remain supported.
 - `gos current`, the already-installed check, `gos prune --rollback` and other version probes apply the same check, so a managed Go with malformed output is reinstalled instead of skipped, and its crash-recovery copies are kept.
 
