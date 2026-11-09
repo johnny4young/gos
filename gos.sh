@@ -4758,7 +4758,7 @@ cmd_doctor() {
     # Probe only the runtime on PATH, without Go's automatic toolchain download.
     # Finding an executable is not evidence that it can actually run.
     go_status=0
-    go_version=$(GOTOOLCHAIN=local go version 2>/dev/null) || go_status=$?
+    go_version=$(_gos_run_go_version go 2>/dev/null) || go_status=$?
     # A final CR is the Windows CRLF terminator; embedded control bytes are invalid.
     go_version="${go_version%$'\r'}"
     if [ "$go_status" -ne 0 ]; then
