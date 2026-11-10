@@ -108,14 +108,20 @@ for sync_target in "${sync_targets[@]}"; do
 done
 
 assert_sync_snapshot() {
-  local sync_target snapshot_mode restored_mode
-  for sync_target in "${sync_targets[@]}"; do
-    cmp -s "${rollback_snapshot}/${sync_target}" "${write_fixture}/${sync_target}" \
-      || fail "sync failure changed ${sync_target}"
-    snapshot_mode="$(ruby -e 'printf "%o", File.stat(ARGV.fetch(0)).mode & 07777' "${rollback_snapshot}/${sync_target}")"
-    restored_mode="$(ruby -e 'printf "%o", File.stat(ARGV.fetch(0)).mode & 07777' "${write_fixture}/${sync_target}")"
-    [ "$snapshot_mode" = "$restored_mode" ] || fail "sync failure changed mode of ${sync_target}"
-  done
+  # Compare all targets in one Ruby process; Ruby is already required by sync.
+  ruby - "$rollback_snapshot" "$write_fixture" "${sync_targets[@]}" <<'SNAPSHOT_RUBY' || fail 'sync snapshot comparison failed'
+snapshot, restored, *targets = ARGV
+targets.each do |target|
+  before = File.join(snapshot, target)
+  after = File.join(restored, target)
+  unless File.binread(before) == File.binread(after)
+    abort "not ok - sync failure changed #{target}"
+  end
+  unless (File.stat(before).mode & 07777) == (File.stat(after).mode & 07777)
+    abort "not ok - sync failure changed mode of #{target}"
+  end
+end
+SNAPSHOT_RUBY
 }
 set +e
 output="$(bash "${write_fixture}/scripts/sync-command-surfaces.bash" --check 2>&1)"
