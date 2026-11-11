@@ -81,6 +81,25 @@ for sync_target in "${sync_targets[@]}"; do
   cp -p "${write_fixture}/${sync_target}" "${rollback_snapshot}/${sync_target}"
 done
 
+# One Ruby process compares every target's bytes and permission bits.
+assert_sync_snapshot() {
+  local context="${1:-sync failure changed}" mismatch="${test_root}/sync-mismatch"
+  ruby - "$rollback_snapshot" "$write_fixture" "${sync_targets[@]}" 2>"$mismatch" <<'SNAPSHOT_RUBY' || fail "${context} $(cat "$mismatch")"
+require "fileutils"
+snapshot, restored, *targets = ARGV
+targets.each do |target|
+  before = File.join(snapshot, target)
+  after = File.join(restored, target)
+  begin
+    abort target unless FileUtils.compare_file(before, after)
+    abort "mode of #{target}" unless ((File.stat(before).mode ^ File.stat(after).mode) & 07777).zero?
+  rescue SystemCallError => e
+    abort "#{target} (#{e.class})"
+  end
+end
+SNAPSHOT_RUBY
+}
+
 set +e
 output="$(bash "${write_fixture}/scripts/sync-command-surfaces.bash" --write 2>&1)"
 status=$?
@@ -88,14 +107,7 @@ set -e
 [ "$status" -ne 0 ] || fail "sync-command-surfaces --write should fail when a late embedded marker is missing"
 assert_contains "$output" "embedded fish completion block was not found" "late command surface failure"
 assert_contains "$output" "rolled back command surface changes after sync failure" "command surface rollback notice"
-for sync_target in "${sync_targets[@]}"; do
-  cmp -s "${rollback_snapshot}/${sync_target}" "${write_fixture}/${sync_target}" \
-    || fail "sync-command-surfaces left a partial write in ${sync_target} after a late failure"
-  snapshot_mode="$(ruby -e 'printf "%o", File.stat(ARGV.fetch(0)).mode & 07777' "${rollback_snapshot}/${sync_target}")"
-  restored_mode="$(ruby -e 'printf "%o", File.stat(ARGV.fetch(0)).mode & 07777' "${write_fixture}/${sync_target}")"
-  [ "$snapshot_mode" = "$restored_mode" ] \
-    || fail "sync-command-surfaces changed the mode of ${sync_target} while rolling back"
-done
+assert_sync_snapshot "sync-command-surfaces rollback after a late failure changed"
 
 # Repair the preflight fixture so every target renders and the actual write
 # loop is reached. The added manifest command makes all six files stale.
@@ -107,16 +119,6 @@ for sync_target in "${sync_targets[@]}"; do
   cp -p "${write_fixture}/${sync_target}" "${rollback_snapshot}/${sync_target}"
 done
 
-assert_sync_snapshot() {
-  local sync_target snapshot_mode restored_mode
-  for sync_target in "${sync_targets[@]}"; do
-    cmp -s "${rollback_snapshot}/${sync_target}" "${write_fixture}/${sync_target}" \
-      || fail "sync failure changed ${sync_target}"
-    snapshot_mode="$(ruby -e 'printf "%o", File.stat(ARGV.fetch(0)).mode & 07777' "${rollback_snapshot}/${sync_target}")"
-    restored_mode="$(ruby -e 'printf "%o", File.stat(ARGV.fetch(0)).mode & 07777' "${write_fixture}/${sync_target}")"
-    [ "$snapshot_mode" = "$restored_mode" ] || fail "sync failure changed mode of ${sync_target}"
-  done
-}
 set +e
 output="$(bash "${write_fixture}/scripts/sync-command-surfaces.bash" --check 2>&1)"
 status=$?
