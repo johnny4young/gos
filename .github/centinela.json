@@ -1,0 +1,14 @@
+{
+  "extends": "johnny4young/centinela-memory/base.json@main",
+  "issues": {
+    "productName": "gos"
+  },
+  "ai": {
+    "rules": [
+      "CONTRIBUTING.md"
+    ]
+  },
+  "links": {
+    "security": "SECURITY.md"
+  }
+}
