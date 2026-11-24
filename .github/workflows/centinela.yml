@@ -1,0 +1,101 @@
+name: Centinela
+
+# Copy to .github/workflows/centinela.yml. pull_request_target runs this file
+# from the base branch with a write token: never add a checkout of PR code here.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review, labeled, unlabeled]
+  issues:
+    types: [opened, reopened, edited, labeled, unlabeled]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  # Daily reminders, backfill and optional weekly self-learning pass.
+  schedule:
+    - cron: '23 9 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: What to run (lifecycle, review, triage, learn)
+        required: false
+        default: lifecycle
+      number:
+        description: Pull request or issue number (for review/triage)
+        required: false
+        default: ''
+      dry_run:
+        description: Preview in the workflow summary without posting comments
+        required: false
+        default: 'true'
+
+permissions: {}
+
+jobs:
+  review:
+    name: Centinela
+    # Keep in sync with optInLabel, overrideLabel, issues.bugLabel and request labels.
+    if: >-
+      (github.event_name == 'issue_comment' &&
+      github.event.comment.user.type != 'Bot' &&
+      (startsWith(github.event.comment.body, '/centinela') ||
+      contains(github.event.comment.body, '@centinela'))) ||
+      (github.event_name == 'pull_request_review_comment' &&
+      github.event.comment.user.type != 'Bot') ||
+      ((github.event_name == 'pull_request_target' || github.event_name == 'issues') &&
+      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      contains(fromJSON('["triage", "triage: approved", "bug"]'), github.event.label.name) ||
+      (github.event.action == 'labeled' &&
+      (github.event.label.name == 'centinela: ai-review' ||
+      github.event.label.name == 'centinela: triage' ||
+      github.event.label.name == 'centinela: learn'))))
+    concurrency:
+      group: centinela-${{ github.event.pull_request.number || github.event.issue.number }}
+      # A command, thread reply or request label waits for a running review instead of cancelling it.
+      cancel-in-progress: "${{ github.event_name != 'issue_comment' && github.event_name != 'pull_request_review_comment' && github.event.label.name != 'centinela: ai-review' && github.event.label.name != 'centinela: triage' && github.event.label.name != 'centinela: learn' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      checks: read
+      issues: write
+      pull-requests: write
+      statuses: write
+      # Lets the job prove its identity to the Claude API (WIF).
+      id-token: write
+    steps:
+      - uses: johnny4young/centinela@v1
+        with:
+          shared-memory-repo: ${{ vars.CENTINELA_MEMORY_REPO }}
+          app-client-id: ${{ vars.CENTINELA_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.CENTINELA_APP_PRIVATE_KEY }}
+          anthropic-federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          anthropic-organization-id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          anthropic-service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          anthropic-workspace-id: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+
+  lifecycle:
+    name: Centinela lifecycle
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: centinela-lifecycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      checks: read
+      issues: write
+      pull-requests: write
+      statuses: write
+      id-token: write
+    steps:
+      - uses: johnny4young/centinela@v1
+        with:
+          shared-memory-repo: ${{ vars.CENTINELA_MEMORY_REPO }}
+          allow-learning-prs: 'true'
+          app-client-id: ${{ vars.CENTINELA_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.CENTINELA_APP_PRIVATE_KEY }}
+          anthropic-federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          anthropic-organization-id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          anthropic-service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          anthropic-workspace-id: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
