@@ -1,0 +1,18 @@
+name: Centinela Execute (Opt-in Tier 2)
+
+# Calls the centralized Tier 2 reusable workflow for `/centinela draft-pr` (`centinela: draft-pr`
+# label) on issues and `/centinela fix-nits` on pull requests. Strictly separate from Tier 1.
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  execute:
+    uses: johnny4young/centinela/.github/workflows/reusable-centinela-execute.yml@127426387d0be4d6d5ec45ee6034bb3ed9f541fa # v1.11.0
+    with:
+      runs-on: ubuntu-latest
+    secrets: inherit
